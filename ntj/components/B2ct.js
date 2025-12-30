@@ -11,20 +11,38 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Feather } from "@expo/vector-icons";
+import { base_url } from "./config";
 
 export default function B2CTransactionList({ navigation }) {
   const [b2cList, setB2cList] = useState([]);
+  const [b2cCustomers, setB2cCustomers] = useState([]);
 
-  // ✅ SAMPLE DATA AUTO LOAD
+  // ---------------- ADD useEffect TO FETCH CUSTOMERS ----------------
   useEffect(() => {
-    const sampleData = [
-      { id: "1", customerName: "Ravi Kumar", phone: "9876543210", amount: 4500 },
-      { id: "2", customerName: "Priya Sharma", phone: "9876543211", amount: 11200 },
-      { id: "3", customerName: "Mohammed Ali", phone: "9876543212", amount: 7850 },
-      { id: "4", customerName: "Anitha Rao", phone: "9876543213", amount: 16300 },
-    ];
-    setB2cList(sampleData);
+    fetchB2CCustomers();
   }, []);
+
+  const fetchB2CCustomers = async () => {
+    try {
+      const response = await fetch(`${base_url}/customersB2C`);
+      const data = await response.json();
+
+      // Map the data to match your existing structure
+      const formattedCustomers = data.map((customer) => ({
+        id: customer._id || customer.id,
+        customerName: customer.customerName,
+        phone: customer.phoneNumber,
+        amount: parseFloat(customer.advanceBalance || 0), // Map advanceBalance
+        advanceBalance: parseFloat(customer.advanceBalance || 0),
+      }));
+
+      setB2cCustomers(formattedCustomers);
+      console.log("✅ Fetched B2C Customers:", formattedCustomers);
+    } catch (error) {
+      console.error("❌ Error fetching B2C customers:", error);
+      Alert.alert("Error", "Failed to load customers");
+    }
+  };
 
   // --- animation for list items ---
   const animValues = useRef([]);
@@ -80,15 +98,31 @@ export default function B2CTransactionList({ navigation }) {
   const openMenu = () => {
     setMenuOpen(true);
     Animated.parallel([
-      Animated.timing(opt1, { toValue: 1, duration: 220, useNativeDriver: true }),
-      Animated.timing(opt2, { toValue: 1, duration: 260, useNativeDriver: true }),
+      Animated.timing(opt1, {
+        toValue: 1,
+        duration: 220,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opt2, {
+        toValue: 1,
+        duration: 260,
+        useNativeDriver: true,
+      }),
     ]).start();
   };
 
   const closeMenu = (cb) => {
     Animated.parallel([
-      Animated.timing(opt1, { toValue: 0, duration: 180, useNativeDriver: true }),
-      Animated.timing(opt2, { toValue: 0, duration: 200, useNativeDriver: true }),
+      Animated.timing(opt1, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(opt2, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
     ]).start(() => {
       setMenuOpen(false);
       if (typeof cb === "function") cb();
@@ -130,21 +164,26 @@ export default function B2CTransactionList({ navigation }) {
       {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={28} color="#fff" style={{ top: 5 }} />
+          <Ionicons
+            name="arrow-back"
+            size={28}
+            color="#fff"
+            style={{ top: 5 }}
+          />
         </TouchableOpacity>
         <Text style={styles.headerText}>B2C Transactions</Text>
-        
       </View>
 
       {/* LIST */}
       <FlatList
-        data={b2cList}
+        data={b2cCustomers}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 20 }}
         ListEmptyComponent={
           <Text style={{ textAlign: "center", marginTop: 40, color: "#777" }}>
             No B2C transactions yet.
           </Text>
+          
         }
         renderItem={renderItem}
       />
@@ -157,10 +196,12 @@ export default function B2CTransactionList({ navigation }) {
         />
       )}
 
-
       {/* MAIN ADD BUTTON */}
       <View style={styles.fabContainer}>
-        <TouchableOpacity style={styles.addBtn} onPress={()=>navigation.navigate('B2CCalculationPage')}>
+        <TouchableOpacity
+          style={styles.addBtn}
+          onPress={() => navigation.navigate("B2CCalculationPage")}
+        >
           <Text style={styles.addText}>+ Add B2C Transaction</Text>
         </TouchableOpacity>
       </View>

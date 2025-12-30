@@ -10,6 +10,7 @@ const issueEntryRoutes = require('./routes/issueEntry');
 const receiptEntryRoutes = require('./routes/receiptEntry');
 const cashReceivedRoutes = require('./routes/cashReceived');
 const transactionRoutes = require('./routes/Transaction');
+const b2ccalRoutes = require('./routes/B2Ccal');
 
 const app = express();
 const PORT = 3000;
@@ -31,6 +32,7 @@ app.use('/api/issueEntries', issueEntryRoutes);
 app.use('/api/receiptEntries', receiptEntryRoutes);
 app.use('/api/cashReceived', cashReceivedRoutes);
 app.use('/api/transactions', transactionRoutes);
+app.use('/api/B2Ccal', b2ccalRoutes);
 
 // Test route
 app.get('/', (req, res) => {

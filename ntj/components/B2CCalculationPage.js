@@ -15,24 +15,17 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { Feather } from "@expo/vector-icons";
+import { base_url } from "./config";
 
 export default function CreateTransaction({ navigation }) {
-
-
-  // ---------------- CUSTOMER DATA FROM B2C TRANSACTIONS ----------------
-  const b2cCustomers = [
-    { id: "1", customerName: "Ravi Kumar", phone: "9876543210", amount: 4500 },
-    { id: "2", customerName: "Priya Sharma", phone: "9876543211", amount: 11200 },
-    { id: "3", customerName: "Mohammed Ali", phone: "9876543212", amount: 7850 },
-    { id: "4", customerName: "Anitha Rao", phone: "9876543213", amount: 16300 },
-  ];
+  const [b2cCustomers, setB2cCustomers] = useState([]);
 
   // ---------------- CUSTOMER STATES ----------------
   const [customerName, setCustomerName] = useState("");
   const [address, setAddress] = useState("");
   const [phone, setPhone] = useState("");
   const [invoiceNo, setInvoiceNo] = useState("");
-  const [date, setDate] = useState(new Date().toLocaleDateString('en-GB'));
+  const [date, setDate] = useState(new Date().toLocaleDateString("en-GB"));
   const [filteredCustomers, setFilteredCustomers] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [filteredCustomersByPhone, setFilteredCustomersByPhone] = useState([]);
@@ -41,18 +34,11 @@ export default function CreateTransaction({ navigation }) {
   const [showItems, setShowItems] = useState(false);
 
   // ---------------- ITEM INPUT STATES ----------------
-  // const [itemName, setItemName] = useState("");
-  // const [weight, setWeight] = useState("");
-  // const [wastage, setWastage] = useState("");
-  // const [touch, setTouch] = useState("");
-  // const [rate, setRate] = useState("");
-
   const [itemName, setItemName] = useState("");
   const [weight, setWeight] = useState("");
   const [touch, setTouch] = useState("");
   const [wastage, setWastage] = useState("");
   const [rate, setRate] = useState("");
-
 
   const [items, setItems] = useState([]);
 
@@ -60,12 +46,49 @@ export default function CreateTransaction({ navigation }) {
     console.log("🟢 ITEMS STATE:", items);
   }, [items]);
 
-
   // ---------------- ITEM LIST STATES ----------------
   const [itemList, setItemList] = useState([]);
   const [filteredItems, setFilteredItems] = useState([]);
   const [showItemDropdown, setShowItemDropdown] = useState(false);
   const [selectedItemNetWeight, setSelectedItemNetWeight] = useState("");
+
+  // ✅ FIXED: Fetch B2C customers from API (using working pattern)
+  useEffect(() => {
+    fetchB2CCustomers();
+  }, []);
+
+  const fetchB2CCustomers = async () => {
+    try {
+      console.log('🔍 Fetching from:', `${base_url}/customersB2C`);
+      
+      const response = await fetch(`${base_url}/customersB2C`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+
+      // Map the data to match your existing structure
+      const formattedCustomers = data.map((customer) => ({
+        id: customer._id || customer.id,
+        customerName: customer.customerName,
+        phone: customer.phoneNumber || customer.phone, // Handle both field names
+        address: customer.address || "",
+        amount: parseFloat(customer.advanceBalance || 0),
+        advanceBalance: parseFloat(customer.advanceBalance || 0),
+      }));
+
+      setB2cCustomers(formattedCustomers);
+      console.log("✅ Fetched B2C Customers:", formattedCustomers);
+    } catch (error) {
+      console.error("❌ Error fetching B2C customers:", error);
+      Alert.alert(
+        "Error", 
+        `Failed to load customers: ${error.message}\n\nMake sure:\n1. Backend server is running\n2. Check base_url in config.js`
+      );
+    }
+  };
 
   // ---------------- LOAD STOCK MASTER ----------------
   useEffect(() => {
@@ -77,15 +100,18 @@ export default function CreateTransaction({ navigation }) {
         } else {
           // Default stock if not set
           const defaultStock = [
-            { id: "1", itemName: "Ring", netWeight: 50.000 },
-            { id: "2", itemName: "Chain", netWeight: 100.000 },
-            { id: "3", itemName: "Bangle", netWeight: 80.000 },
-            { id: "4", itemName: "Ear Stud", netWeight: 40.000 },
-            { id: "5", itemName: "Bracelet", netWeight: 30.000 },
-            { id: "6", itemName: "Pendant", netWeight: 20.000 },
+            { id: "1", itemName: "Ring", netWeight: 50.0 },
+            { id: "2", itemName: "Chain", netWeight: 100.0 },
+            { id: "3", itemName: "Bangle", netWeight: 80.0 },
+            { id: "4", itemName: "Ear Stud", netWeight: 40.0 },
+            { id: "5", itemName: "Bracelet", netWeight: 30.0 },
+            { id: "6", itemName: "Pendant", netWeight: 20.0 },
           ];
           setItemList(defaultStock);
-          await AsyncStorage.setItem("STOCK_MASTER", JSON.stringify(defaultStock));
+          await AsyncStorage.setItem(
+            "STOCK_MASTER",
+            JSON.stringify(defaultStock)
+          );
         }
       };
       loadStock();
@@ -104,14 +130,13 @@ export default function CreateTransaction({ navigation }) {
   const calcFinal = () => calcTotal() + calcGST();
 
   // ---------------- ADD ITEM ----------------
-
   const addRow = async () => {
     if (!itemName || !weight || !rate) {
       Alert.alert("Required", "Enter Item, Weight & Rate");
       return;
     }
 
-    const wt = Number(weight);       // ✅ DIRECT WEIGHT
+    const wt = Number(weight);
     const t = Number(touch || 0);
     const r = Number(rate);
 
@@ -120,15 +145,18 @@ export default function CreateTransaction({ navigation }) {
     const final = total + gst;
 
     // Check stock availability
-    const selectedItem = itemList.find(item => item.itemName === itemName);
+    const selectedItem = itemList.find((item) => item.itemName === itemName);
     if (!selectedItem || selectedItem.netWeight < wt) {
-      Alert.alert("Insufficient Stock", `Available: ${selectedItem ? selectedItem.netWeight.toFixed(3) : 0} g`);
+      Alert.alert(
+        "Insufficient Stock",
+        `Available: ${selectedItem ? selectedItem.netWeight.toFixed(3) : 0} g`
+      );
       return;
     }
 
     const newItem = {
       itemName,
-      weight: wt,        // ✅ THIS WAS THE BUG
+      weight: wt,
       touch: t,
       rate: r,
       total,
@@ -136,12 +164,12 @@ export default function CreateTransaction({ navigation }) {
       final,
     };
 
-    console.log("ADDED ITEM 👉", newItem); // 🔍 DEBUG
+    console.log("ADDED ITEM 👉", newItem);
 
     setItems((prev) => [...prev, newItem]);
 
     // Update stock: decrease for selling (B2C)
-    const updatedStock = itemList.map(item =>
+    const updatedStock = itemList.map((item) =>
       item.itemName === itemName
         ? { ...item, netWeight: Number((item.netWeight - wt).toFixed(3)) }
         : item
@@ -156,11 +184,6 @@ export default function CreateTransaction({ navigation }) {
     setRate("");
   };
 
-
-
-
-
-
   const deleteRow = (index) => {
     const updated = [...items];
     updated.splice(index, 1);
@@ -171,7 +194,7 @@ export default function CreateTransaction({ navigation }) {
   const handleCustomerNameChange = (text) => {
     setCustomerName(text);
     if (text) {
-      const filtered = b2cCustomers.filter(customer =>
+      const filtered = b2cCustomers.filter((customer) =>
         customer.customerName.toLowerCase().includes(text.toLowerCase())
       );
       setFilteredCustomers(filtered);
@@ -180,13 +203,15 @@ export default function CreateTransaction({ navigation }) {
       setFilteredCustomers([]);
       setShowDropdown(false);
       setPhone("");
+      setAddress("");
     }
   };
 
   const selectCustomer = (customer) => {
     setCustomerName(customer.customerName);
     setPhone(customer.phone);
-    setDate(new Date().toLocaleDateString('en-GB'));
+    setAddress(customer.address || "");
+    setDate(new Date().toLocaleDateString("en-GB"));
     setShowDropdown(false);
   };
 
@@ -194,27 +219,32 @@ export default function CreateTransaction({ navigation }) {
   const handlePhoneChange = (text) => {
     setPhone(text);
     if (text) {
-      const filtered = b2cCustomers.filter(customer =>
+      const filtered = b2cCustomers.filter((customer) =>
         customer.phone.startsWith(text)
       );
       setFilteredCustomersByPhone(filtered);
       setShowPhoneDropdown(true);
-      const customer = b2cCustomers.find(customer => customer.phone === text);
+
+      // Auto-fill customer details when exact phone match found
+      const customer = b2cCustomers.find((customer) => customer.phone === text);
       if (customer) {
         setCustomerName(customer.customerName);
-        setDate(new Date().toLocaleDateString('en-GB'));
+        setAddress(customer.address || "");
+        setDate(new Date().toLocaleDateString("en-GB"));
       }
     } else {
       setFilteredCustomersByPhone([]);
       setShowPhoneDropdown(false);
       setCustomerName("");
+      setAddress("");
     }
   };
 
   const selectCustomerByPhone = (customer) => {
     setCustomerName(customer.customerName);
     setPhone(customer.phone);
-    setDate(new Date().toLocaleDateString('en-GB'));
+    setAddress(customer.address || "");
+    setDate(new Date().toLocaleDateString("en-GB"));
     setShowPhoneDropdown(false);
   };
 
@@ -222,7 +252,7 @@ export default function CreateTransaction({ navigation }) {
   const handleItemNameChange = (text) => {
     setItemName(text);
     if (text) {
-      const filtered = itemList.filter(item =>
+      const filtered = itemList.filter((item) =>
         item.itemName.toLowerCase().includes(text.toLowerCase())
       );
       setFilteredItems(filtered);
@@ -237,19 +267,51 @@ export default function CreateTransaction({ navigation }) {
   const selectItem = (item) => {
     setItemName(item.itemName);
     setSelectedItemNetWeight(item.netWeight);
-    setWeight(""); // User will enter the value to subtract
+    setWeight("");
     setShowItemDropdown(false);
   };
 
   // ---------------- CUSTOMER SUBMIT ----------------
-  const handleCustomerSubmit = () => {
-    if (!customerName || !phone) {
-      Alert.alert("Required", "Enter Customer Name & Phone");
-      return;
-    }
-    setShowItems(true);
-  };
+  const handleCustomerSubmit = async () => {
+  if (!customerName || !phone) {
+    Alert.alert("Required", "Enter Customer Name & Phone");
+    return;
+  }
 
+  try {
+    console.log("Submitting customer...", { customerName, phone, address, date, invoiceNo });
+
+    const response = await fetch(`${base_url}/B2Ccal`, { // <-- note /api
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        customerName,
+        Address: address,
+        Phone: phone,
+        Date: date.split("/").reverse().join("-"), // DD/MM/YYYY -> YYYY-MM-DD
+        InvoiceNumber: invoiceNo || "N/A",
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
+
+    const savedCustomer = await response.json();
+    console.log("✅ Customer saved:", savedCustomer);
+
+    // Show items section after successful save
+    setShowItems(true);
+
+    Alert.alert("Success", "Customer saved successfully");
+
+  } catch (error) {
+    console.error("❌ Error saving customer:", error);
+    Alert.alert("Error", `Failed to save customer: ${error.message}`);
+  }
+};
 
   const calculateReport = () => {
     let totalReceipt = 0;
@@ -257,8 +319,6 @@ export default function CreateTransaction({ navigation }) {
 
     items.forEach((item) => {
       totalReceipt += Number(item.weight || 0);
-
-      // Example pure calculation (touch based)
       totalReceiptPure +=
         (Number(item.weight || 0) * Number(item.touch || 0)) / 100;
     });
@@ -273,7 +333,6 @@ export default function CreateTransaction({ navigation }) {
     };
   };
 
-
   const formatTransactions = () =>
     items.map((item) => ({
       date,
@@ -283,9 +342,6 @@ export default function CreateTransaction({ navigation }) {
       receiptPure: ((item.weight * item.touch) / 100).toFixed(3),
       cashPure: ((item.weight * item.touch) / 100).toFixed(3),
     }));
-
-
-
 
   // ---------------- FINAL SUBMIT ----------------
   const handleFinalSubmit = () => {
@@ -317,7 +373,6 @@ export default function CreateTransaction({ navigation }) {
     });
   };
 
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#F5F7FA" }}>
       {/* ✅ HEADER */}
@@ -325,11 +380,13 @@ export default function CreateTransaction({ navigation }) {
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-left" size={26} color="#fff" style={{ top: 20 }} />
         </TouchableOpacity>
-        <Text style={styles.appHeaderTitle}>B2C cal Page</Text>
+        <Text style={styles.appHeaderTitle}>B2C Cal Page</Text>
         <View style={{ width: 30 }} />
         <TouchableOpacity
           style={{ position: "absolute", right: 20, top: "58%" }}
-          onPress={() => navigation.navigate("CreateCustomerMaster", { type: "B2C" })}
+          onPress={() =>
+            navigation.navigate("CreateCustomerMaster", { type: "B2C" })
+          }
         >
           <Feather name="user-plus" color="#000" size={25} />
         </TouchableOpacity>
@@ -339,8 +396,10 @@ export default function CreateTransaction({ navigation }) {
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        <ScrollView contentContainerStyle={{ paddingBottom: 160 }} style={styles.container}>
-
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: 160 }}
+          style={styles.container}
+        >
           {/* ---------------- CUSTOMER DETAILS ---------------- */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Customer Details</Text>
@@ -361,17 +420,28 @@ export default function CreateTransaction({ navigation }) {
                     style={styles.dropdownItem}
                     onPress={() => selectCustomer(customer)}
                   >
-                    <Text>{customer.customerName} - {customer.phone}</Text>
+                    <Text>
+                      {customer.customerName} - {customer.phone}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>
             )}
 
             <Text style={styles.label}>Address</Text>
-            <TextInput style={styles.input} value={address} onChangeText={setAddress} />
+            <TextInput
+              style={styles.input}
+              value={address}
+              onChangeText={setAddress}
+            />
 
             <Text style={styles.label}>Phone</Text>
-            <TextInput style={styles.input} value={phone} onChangeText={handlePhoneChange} keyboardType="phone-pad" />
+            <TextInput
+              style={styles.input}
+              value={phone}
+              onChangeText={handlePhoneChange}
+              keyboardType="phone-pad"
+            />
 
             {showPhoneDropdown && filteredCustomersByPhone.length > 0 && (
               <View style={styles.dropdown}>
@@ -381,7 +451,9 @@ export default function CreateTransaction({ navigation }) {
                     style={styles.dropdownItem}
                     onPress={() => selectCustomerByPhone(customer)}
                   >
-                    <Text>{customer.phone} - {customer.customerName}</Text>
+                    <Text>
+                      {customer.phone} - {customer.customerName}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -400,11 +472,18 @@ export default function CreateTransaction({ navigation }) {
 
               <View style={{ width: "48%" }}>
                 <Text style={styles.label}>Invoice No</Text>
-                <TextInput style={styles.input} value={invoiceNo} onChangeText={setInvoiceNo} />
+                <TextInput
+                  style={styles.input}
+                  value={invoiceNo}
+                  onChangeText={setInvoiceNo}
+                />
               </View>
             </View>
 
-            <TouchableOpacity style={styles.submitBtn} onPress={handleCustomerSubmit}>
+            <TouchableOpacity
+              style={styles.submitBtn}
+              onPress={handleCustomerSubmit}
+            >
               <Text style={styles.submitText}>SUBMIT CUSTOMER</Text>
             </TouchableOpacity>
           </View>
@@ -431,7 +510,9 @@ export default function CreateTransaction({ navigation }) {
                       style={styles.dropdownItem}
                       onPress={() => selectItem(item)}
                     >
-                      <Text>{item.itemName} - {item.netWeight}g</Text>
+                      <Text>
+                        {item.itemName} - {item.netWeight}g
+                      </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -489,11 +570,20 @@ export default function CreateTransaction({ navigation }) {
                     <View>
                       {/* TABLE HEADER */}
                       <View style={styles.tableHeader}>
-                        {["Item", "Wt", "Touch", "Rate", "Total", "GST", "Final", "X"].map(
-                          (h, i) => (
-                            <Text key={i} style={styles.th}>{h}</Text>
-                          )
-                        )}
+                        {[
+                          "Item",
+                          "Wt",
+                          "Touch",
+                          "Rate",
+                          "Total",
+                          "GST",
+                          "Final",
+                          "X",
+                        ].map((h, i) => (
+                          <Text key={i} style={styles.th}>
+                            {h}
+                          </Text>
+                        ))}
                       </View>
 
                       {/* TABLE ROWS */}
@@ -508,7 +598,9 @@ export default function CreateTransaction({ navigation }) {
                           <Text style={styles.td}>{row.final.toFixed(2)}</Text>
 
                           <TouchableOpacity onPress={() => deleteRow(index)}>
-                            <Text style={[styles.td, { color: "red" }]}>❌</Text>
+                            <Text style={[styles.td, { color: "red" }]}>
+                              ❌
+                            </Text>
                           </TouchableOpacity>
                         </View>
                       ))}
@@ -521,7 +613,7 @@ export default function CreateTransaction({ navigation }) {
               <TouchableOpacity
                 style={[
                   styles.finalSubmitBtn,
-                  items.length === 0 && { opacity: 0.5 }
+                  items.length === 0 && { opacity: 0.5 },
                 ]}
                 disabled={items.length === 0}
                 onPress={handleFinalSubmit}
@@ -532,7 +624,6 @@ export default function CreateTransaction({ navigation }) {
               </TouchableOpacity>
             </View>
           )}
-
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -561,16 +652,32 @@ const styles = StyleSheet.create({
 
   container: { flex: 1, backgroundColor: "#F5F7FA", padding: 16 },
 
-  card: { backgroundColor: "#fff", borderRadius: 16, padding: 16, marginBottom: 16, elevation: 3 },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    elevation: 3,
+  },
 
   cardTitle: { fontSize: 17, fontWeight: "700", marginBottom: 12 },
   label: { fontSize: 13, color: "#555", marginBottom: 4 },
 
-  input: { backgroundColor: "#F1F3F6", borderRadius: 10, padding: 12, marginBottom: 12 },
+  input: {
+    backgroundColor: "#F1F3F6",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+  },
 
   rowBetween: { flexDirection: "row", justifyContent: "space-between" },
 
-  submitBtn: { backgroundColor: "#2E7D32", padding: 14, borderRadius: 12, alignItems: "center" },
+  submitBtn: {
+    backgroundColor: "#2E7D32",
+    padding: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
   submitText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 
   tableHeader: { flexDirection: "row", backgroundColor: "#EEF2F6" },
@@ -579,12 +686,33 @@ const styles = StyleSheet.create({
   tableRow: { flexDirection: "row" },
   td: { width: 90, padding: 8, textAlign: "center" },
 
-  addRowBtn: { backgroundColor: "#135F25", padding: 14, borderRadius: 12, alignItems: "center", marginTop: 14 },
+  addRowBtn: {
+    backgroundColor: "#135F25",
+    padding: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 14,
+  },
   addRowText: { color: "#fff", fontWeight: "700" },
 
-  finalSubmitBtn: { backgroundColor: "#000", padding: 14, borderRadius: 12, alignItems: "center", marginTop: 10 },
+  finalSubmitBtn: {
+    backgroundColor: "#000",
+    padding: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 10,
+  },
   finalSubmitText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 
-  dropdown: { backgroundColor: "#fff", borderRadius: 10, elevation: 3, maxHeight: 150 },
-  dropdownItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: "#eee" },
+  dropdown: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    elevation: 3,
+    maxHeight: 150,
+  },
+  dropdownItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
 });
