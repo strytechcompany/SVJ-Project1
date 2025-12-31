@@ -11,7 +11,6 @@ import {
   Platform,
   SafeAreaView,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { Feather } from "@expo/vector-icons";
@@ -50,9 +49,12 @@ export default function CreateTransaction({ navigation }) {
   const [itemList, setItemList] = useState([]);
   const [filteredItems, setFilteredItems] = useState([]);
   const [showItemDropdown, setShowItemDropdown] = useState(false);
-  const [selectedItemNetWeight, setSelectedItemNetWeight] = useState("");
+  const [selectedItem, setSelectedItem] = useState(null);
 
-  // ✅ FIXED: Fetch B2C customers from API (using working pattern)
+  // ---------------- MODIFIED WEIGHT STATE ----------------
+  const [modifiedWeight, setModifiedWeight] = useState("");
+
+  // ✅ Fetch B2C customers from API
   useEffect(() => {
     fetchB2CCustomers();
   }, []);
@@ -69,11 +71,10 @@ export default function CreateTransaction({ navigation }) {
       
       const data = await response.json();
 
-      // Map the data to match your existing structure
       const formattedCustomers = data.map((customer) => ({
         id: customer._id || customer.id,
         customerName: customer.customerName,
-        phone: customer.phoneNumber || customer.phone, // Handle both field names
+        phone: customer.phoneNumber || customer.phone,
         address: customer.address || "",
         amount: parseFloat(customer.advanceBalance || 0),
         advanceBalance: parseFloat(customer.advanceBalance || 0),
@@ -90,70 +91,197 @@ export default function CreateTransaction({ navigation }) {
     }
   };
 
+  // ✅ Fetch Stock Master from API
+  const fetchStockMaster = async () => {
+    try {
+      console.log('🔍 Fetching stock from:', `${base_url}/stockMaster`);
+      
+      const response = await fetch(`${base_url}/stockMaster`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      const formattedStock = data.map((item) => ({
+        id: item._id,
+        itemName: item.itemName,
+        weight: parseFloat(item.weight || 0),
+        less: parseFloat(item.less || 0),
+        netWeight: parseFloat(item.netWeight || 0),
+        calculation: item.calculation || "",
+        pure: parseFloat(item.pure || 0),
+      }));
+
+      setItemList(formattedStock);
+      console.log("✅ Fetched Stock Master:", formattedStock);
+    } catch (error) {
+      console.error("❌ Error fetching stock master:", error);
+      Alert.alert(
+        "Error", 
+        `Failed to load stock: ${error.message}`
+      );
+    }
+  };
+
   // ---------------- LOAD STOCK MASTER ----------------
   useEffect(() => {
     if (showItems) {
-      const loadStock = async () => {
-        const data = await AsyncStorage.getItem("STOCK_MASTER");
-        if (data) {
-          setItemList(JSON.parse(data));
-        } else {
-          // Default stock if not set
-          const defaultStock = [
-            { id: "1", itemName: "Ring", netWeight: 50.0 },
-            { id: "2", itemName: "Chain", netWeight: 100.0 },
-            { id: "3", itemName: "Bangle", netWeight: 80.0 },
-            { id: "4", itemName: "Ear Stud", netWeight: 40.0 },
-            { id: "5", itemName: "Bracelet", netWeight: 30.0 },
-            { id: "6", itemName: "Pendant", netWeight: 20.0 },
-          ];
-          setItemList(defaultStock);
-          await AsyncStorage.setItem(
-            "STOCK_MASTER",
-            JSON.stringify(defaultStock)
-          );
-        }
-      };
-      loadStock();
+      fetchStockMaster();
     }
   }, [showItems]);
 
-  // ---------------- CALCULATIONS ----------------
-  const num = (v) => Number(v || 0);
-  const getActualWeight = () => {
-    const netWeight = num(selectedItemNetWeight);
-    const subtractValue = num(weight);
-    return netWeight - subtractValue;
-  };
-  const calcTotal = () => getActualWeight() * num(rate);
-  const calcGST = () => calcTotal() * 0.03;
-  const calcFinal = () => calcTotal() + calcGST();
+  // ✅ AUTO CALCULATE MODIFIED WEIGHT - Runs when weight changes
+  useEffect(() => {
+    if (selectedItem && weight) {
+      const wt = parseFloat(weight) || 0;
+      const remaining = selectedItem.weight - wt;
+      setModifiedWeight(remaining.toFixed(3));
+    } else {
+      setModifiedWeight("");
+    }
+  }, [weight, selectedItem]);
 
   // ---------------- ADD ITEM ----------------
   const addRow = async () => {
-    if (!itemName || !weight || !rate) {
-      Alert.alert("Required", "Enter Item, Weight & Rate");
-      return;
+  console.log("🔵 ADD ITEM - Function called");
+  
+  if (!itemName || !weight || !rate) {
+    console.log("❌ ADD ITEM - Validation failed: Missing required fields");
+    Alert.alert("Required", "Enter Item, Weight & Rate");
+    return;
+  }
+
+  const wt = Number(weight);
+  const t = Number(touch || 0);
+  const w = Number(wastage || 0);
+  const r = Number(rate);
+
+  const total = wt * r;
+  const gst = total * 0.03;
+  const final = total + gst;
+
+  console.log("📊 ADD ITEM - Calculated values:", {
+    weight: wt,
+    touch: t,
+    wastage: w,
+    rate: r,
+    total,
+    gst,
+    final
+  });
+
+  if (!selectedItem) {
+    console.log("❌ ADD ITEM - No item selected from stock");
+    Alert.alert("Error", "Please select an item from the stock list");
+    return;
+  }
+
+  console.log("🔍 ADD ITEM - Selected item:", selectedItem);
+
+  if (selectedItem.weight < wt) {
+    console.log(`❌ ADD ITEM - Insufficient stock. Available: ${selectedItem.weight}, Required: ${wt}`);
+    Alert.alert(
+      "Insufficient Stock",
+      `Available: ${selectedItem.weight.toFixed(3)} g`
+    );
+    return;
+  }
+
+  const newWeight = selectedItem.weight - wt;
+  console.log(`📉 ADD ITEM - Stock will be updated from ${selectedItem.weight}g to ${newWeight}g`);
+
+  try {
+    console.log("🚀 ADD ITEM - Starting API calls...");
+
+    // 1️⃣ SAVE ITEM TO AddItem DATABASE
+    console.log("📤 ADD ITEM - Saving to AddItem DB...", {
+      endpoint: `${base_url}/addItem`,
+      payload: {
+        customerName,
+        invoiceNo: invoiceNo || "N/A",
+        itemName,
+        weight: wt,
+        touch: t,
+        wm: w,
+        rate: r,
+        total,
+        gst,
+        final,
+        modifiedWeight: parseFloat(modifiedWeight),
+        stockMasterId: selectedItem.id,
+        date: date.split("/").reverse().join("-"),
+      }
+    });
+
+    const addItemResponse = await fetch(`${base_url}/addItem`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        customerName: customerName,
+        invoiceNo: invoiceNo || "N/A",
+        itemName: itemName,
+        weight: wt,
+        touch: t,
+        wm: w,
+        rate: r,
+        total: total,
+        gst: gst,
+        final: final,
+        modifiedWeight: parseFloat(modifiedWeight),
+        stockMasterId: selectedItem.id,
+        date: date.split("/").reverse().join("-"),
+      }),
+    });
+
+    if (!addItemResponse.ok) {
+      console.error(`❌ ADD ITEM - Failed to save to AddItem DB. Status: ${addItemResponse.status}`);
+      throw new Error(`Failed to save item: ${addItemResponse.status}`);
     }
 
-    const wt = Number(weight);
-    const t = Number(touch || 0);
-    const r = Number(rate);
+    const savedItem = await addItemResponse.json();
+    console.log("✅ ADD ITEM - Item saved to AddItem DB:", savedItem);
 
-    const total = wt * r;
-    const gst = total * 0.03;
-    const final = total + gst;
+    // 2️⃣ UPDATE STOCK IN DATABASE
+    console.log("📤 ADD ITEM - Updating stock in Stock Master...", {
+      endpoint: `${base_url}/stockMaster/${selectedItem.id}`,
+      payload: {
+        itemName: selectedItem.itemName,
+        weight: newWeight,
+        less: selectedItem.less,
+        netWeight: selectedItem.netWeight,
+        calculation: selectedItem.calculation,
+        pure: selectedItem.pure,
+      }
+    });
 
-    // Check stock availability
-    const selectedItem = itemList.find((item) => item.itemName === itemName);
-    if (!selectedItem || selectedItem.netWeight < wt) {
-      Alert.alert(
-        "Insufficient Stock",
-        `Available: ${selectedItem ? selectedItem.netWeight.toFixed(3) : 0} g`
-      );
-      return;
+    const stockResponse = await fetch(`${base_url}/stockMaster/${selectedItem.id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        itemName: selectedItem.itemName,
+        weight: newWeight,
+        less: selectedItem.less,
+        netWeight: selectedItem.netWeight,
+        calculation: selectedItem.calculation,
+        pure: selectedItem.pure,
+      }),
+    });
+
+    if (!stockResponse.ok) {
+      console.error(`❌ ADD ITEM - Failed to update stock. Status: ${stockResponse.status}`);
+      throw new Error(`Failed to update stock: ${stockResponse.status}`);
     }
 
+    const updatedStock = await stockResponse.json();
+    console.log("✅ ADD ITEM - Stock updated in DB:", updatedStock);
+
+    // 3️⃣ UPDATE LOCAL STATE
     const newItem = {
       itemName,
       weight: wt,
@@ -162,32 +290,114 @@ export default function CreateTransaction({ navigation }) {
       total,
       gst,
       final,
+      modifiedWeight: parseFloat(modifiedWeight),
     };
 
-    console.log("ADDED ITEM 👉", newItem);
-
-    setItems((prev) => [...prev, newItem]);
-
-    // Update stock: decrease for selling (B2C)
-    const updatedStock = itemList.map((item) =>
-      item.itemName === itemName
-        ? { ...item, netWeight: Number((item.netWeight - wt).toFixed(3)) }
-        : item
+    console.log("📝 ADD ITEM - Updating local state with new item:", newItem);
+    setItems((prev) => {
+      const updated = [...prev, newItem];
+      console.log("✅ ADD ITEM - Items state updated. Total items:", updated.length);
+      return updated;
+    });
+    
+    console.log("📝 ADD ITEM - Updating item list with new stock weight");
+    setItemList((prev) =>
+      prev.map((item) =>
+        item.id === selectedItem.id
+          ? { ...item, weight: newWeight }
+          : item
+      )
     );
-    setItemList(updatedStock);
-    await AsyncStorage.setItem("STOCK_MASTER", JSON.stringify(updatedStock));
 
+    // 4️⃣ CLEAR FORM
+    console.log("🧹 ADD ITEM - Clearing form fields");
     setItemName("");
     setWeight("");
     setTouch("");
     setWastage("");
     setRate("");
-  };
+    setSelectedItem(null);
+    setModifiedWeight("");
 
-  const deleteRow = (index) => {
-    const updated = [...items];
-    updated.splice(index, 1);
-    setItems(updated);
+    console.log("✅ ADD ITEM - Process completed successfully!");
+    Alert.alert("Success", "Item added successfully!");
+
+  } catch (error) {
+    console.error("❌ ADD ITEM - Error occurred:", error);
+    console.error("❌ ADD ITEM - Error details:", {
+      message: error.message,
+      stack: error.stack
+    });
+    Alert.alert("Error", `Failed to save item: ${error.message}`);
+  }
+};
+
+  const deleteRow = async (index) => {
+    const itemToDelete = items[index];
+    
+    Alert.alert(
+      "Delete Item",
+      "Are you sure you want to delete this item? This will restore the stock.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Find the original stock item
+              const stockItem = itemList.find(
+                (item) => item.itemName === itemToDelete.itemName
+              );
+
+              if (stockItem) {
+                // Restore the stock
+                const restoredWeight = stockItem.weight + itemToDelete.weight;
+
+                const response = await fetch(
+                  `${base_url}/stockMaster/${stockItem.id}`,
+                  {
+                    method: "PUT",
+                    headers: {
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                      itemName: stockItem.itemName,
+                      weight: restoredWeight,
+                      less: stockItem.less,
+                      netWeight: stockItem.netWeight,
+                      calculation: stockItem.calculation,
+                      pure: stockItem.pure,
+                    }),
+                  }
+                );
+
+                if (response.ok) {
+                  // Update local state
+                  const updated = [...items];
+                  updated.splice(index, 1);
+                  setItems(updated);
+
+                  // Update item list
+                  setItemList((prev) =>
+                    prev.map((item) =>
+                      item.id === stockItem.id
+                        ? { ...item, weight: restoredWeight }
+                        : item
+                    )
+                  );
+
+                  Alert.alert("Success", "Item deleted and stock restored");
+                }
+              }
+            } catch (error) {
+              console.error("❌ Error deleting item:", error);
+              Alert.alert("Error", "Failed to delete item");
+            }
+          },
+        },
+      ]
+    );
   };
 
   // ---------------- CUSTOMER NAME HANDLING ----------------
@@ -260,58 +470,60 @@ export default function CreateTransaction({ navigation }) {
     } else {
       setFilteredItems([]);
       setShowItemDropdown(false);
-      setSelectedItemNetWeight("");
+      setSelectedItem(null);
+      setModifiedWeight("");
     }
   };
 
   const selectItem = (item) => {
     setItemName(item.itemName);
-    setSelectedItemNetWeight(item.netWeight);
+    setSelectedItem(item);
     setWeight("");
+    setModifiedWeight("");
     setShowItemDropdown(false);
   };
 
   // ---------------- CUSTOMER SUBMIT ----------------
   const handleCustomerSubmit = async () => {
-  if (!customerName || !phone) {
-    Alert.alert("Required", "Enter Customer Name & Phone");
-    return;
-  }
-
-  try {
-    console.log("Submitting customer...", { customerName, phone, address, date, invoiceNo });
-
-    const response = await fetch(`${base_url}/B2Ccal`, { // <-- note /api
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        customerName,
-        Address: address,
-        Phone: phone,
-        Date: date.split("/").reverse().join("-"), // DD/MM/YYYY -> YYYY-MM-DD
-        InvoiceNumber: invoiceNo || "N/A",
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Server error: ${response.status}`);
+    if (!customerName || !phone) {
+      Alert.alert("Required", "Enter Customer Name & Phone");
+      return;
     }
 
-    const savedCustomer = await response.json();
-    console.log("✅ Customer saved:", savedCustomer);
+    try {
+      console.log("Submitting customer...", { customerName, phone, address, date, invoiceNo });
 
-    // Show items section after successful save
-    setShowItems(true);
+      const response = await fetch(`${base_url}/B2Ccal`, { 
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customerName,
+          Address: address,
+          Phone: phone,
+          Date: date.split("/").reverse().join("-"), 
+          InvoiceNumber: invoiceNo || "N/A",
+        }),
+      });
 
-    Alert.alert("Success", "Customer saved successfully");
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
 
-  } catch (error) {
-    console.error("❌ Error saving customer:", error);
-    Alert.alert("Error", `Failed to save customer: ${error.message}`);
-  }
-};
+      const savedCustomer = await response.json();
+      console.log("✅ Customer saved:", savedCustomer);
+
+      // Show items section after successful save
+      setShowItems(true);
+
+      Alert.alert("Success", "Customer saved successfully");
+
+    } catch (error) {
+      console.error("❌ Error saving customer:", error);
+      Alert.alert("Error", `Failed to save customer: ${error.message}`);
+    }
+  };
 
   const calculateReport = () => {
     let totalReceipt = 0;
@@ -511,21 +723,29 @@ export default function CreateTransaction({ navigation }) {
                       onPress={() => selectItem(item)}
                     >
                       <Text>
-                        {item.itemName} - {item.netWeight}g
+                        {item.itemName} - {item.weight}g
                       </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               )}
 
-              {/* WEIGHT */}
+              {/* WEIGHT WITH INLINE MODIFIED WEIGHT */}
               <Text style={styles.label}>Weight (g)</Text>
-              <TextInput
-                style={styles.input}
-                value={weight}
-                onChangeText={setWeight}
-                keyboardType="decimal-pad"
-              />
+              <View style={styles.weightInputContainer}>
+                <TextInput
+                  style={styles.weightInput}
+                  value={weight}
+                  onChangeText={setWeight}
+                  keyboardType="decimal-pad"
+                  placeholder="Enter weight"
+                />
+                {modifiedWeight && (
+                  <Text style={styles.modifiedWeightText}>
+                    Modified Weight: {modifiedWeight} g
+                  </Text>
+                )}
+              </View>
 
               {/* TOUCH */}
               <Text style={styles.label}>Touch</Text>
@@ -578,6 +798,7 @@ export default function CreateTransaction({ navigation }) {
                           "Total",
                           "GST",
                           "Final",
+                          "Mod.Wt",
                           "X",
                         ].map((h, i) => (
                           <Text key={i} style={styles.th}>
@@ -596,6 +817,7 @@ export default function CreateTransaction({ navigation }) {
                           <Text style={styles.td}>{row.total.toFixed(2)}</Text>
                           <Text style={styles.td}>{row.gst.toFixed(2)}</Text>
                           <Text style={styles.td}>{row.final.toFixed(2)}</Text>
+                          <Text style={styles.td}>{row.modifiedWeight}</Text>
 
                           <TouchableOpacity onPress={() => deleteRow(index)}>
                             <Text style={[styles.td, { color: "red" }]}>
@@ -714,5 +936,23 @@ const styles = StyleSheet.create({
     padding: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#eee",
+  },
+
+  weightInputContainer: {
+    marginBottom: 12,
+  },
+
+  weightInput: {
+    backgroundColor: "#F1F3F6",
+    borderRadius: 10,
+    padding: 12,
+  },
+
+  modifiedWeightText: {
+    fontSize: 13,
+    color: "#2E7D32",
+    fontWeight: "600",
+    marginTop: 6,
+    marginLeft: 4,
   },
 });
