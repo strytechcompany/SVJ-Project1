@@ -1,29 +1,25 @@
 const express = require('express');
 const router = express.Router();
-const Item = require('../models/Item'); // Make sure the path is correct
+const Item = require('../models/Item'); // Adjust path if needed
 
 // POST /items - create a new item
 router.post('/', async (req, res) => {
   try {
     const {
       itemName,
-      weight,
       buyingTouch,
       sellingTouch,
       cash,
-      cashPercentage,   
-      cashWeight
+      cashPercentage
     } = req.body;
 
     // Create a new Item
     const newItem = new Item({
       itemName,
-      weight,
       buyingTouch,
       sellingTouch,
       cash,
-      cashPercentage,
-      cashWeight
+      cashPercentage
     });
 
     // Save to database
@@ -39,11 +35,10 @@ router.post('/', async (req, res) => {
   }
 });
 
-
 // GET /items - get all items
 router.get('/', async (req, res) => {
   try {
-    const items = await Item.find().sort({ createdAt: -1 }); // Get all items, newest first
+    const items = await Item.find().sort({ createdAt: -1 }); // newest first
     res.status(200).json(items);
   } catch (error) {
     console.error(error);
@@ -58,7 +53,7 @@ router.get('/:id', async (req, res) => {
     if (!item) {
       return res.status(404).json({ message: 'Item not found' });
     }
-    res.status(200).json(item);   
+    res.status(200).json(item);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error', error: error.message });

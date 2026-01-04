@@ -19,15 +19,12 @@ const STORAGE_KEY = "ITEM_LIST";
 export default function ItemsEntry({ navigation }) {
   // -------- Stock Inputs --------
   const [itemName, setItemName] = useState("");
-  const [weight, setWeight] = useState("");
   const [less, setLess] = useState("");
   const [percentage, setPercentage] = useState("");
-  const [netWeight, setNetWeight] = useState("");
 
   // -------- Cash Section --------
   const [cash, setCash] = useState("");
   const [cashPercentage, setCashPercentage] = useState("");
-  const [cashWeight, setCashWeight] = useState("");
 
   // -------- Meta --------
   const [selectedDate, setSelectedDate] = useState("");
@@ -60,16 +57,8 @@ export default function ItemsEntry({ navigation }) {
     }
   };
 
-  // -------- Auto Net Weight --------
-  useEffect(() => {
-    const w = parseFloat(weight);
-    const b = parseFloat(less);
-    if (!isNaN(w) && !isNaN(b)) setNetWeight((w - b).toFixed(3));
-    else setNetWeight("");
-  }, [weight, less]);
-
   const handleSubmit = async () => {
-    if (!itemName || !weight || !less || !percentage || !cash || !cashPercentage || !cashWeight) {
+    if (!itemName || !less || !percentage || !cash || !cashPercentage) {
       Alert.alert("Error", "Please fill all required fields");
       return;
     }
@@ -79,15 +68,12 @@ export default function ItemsEntry({ navigation }) {
     const newItem = {
       id: localId,
       itemName,
-      weight: parseFloat(weight),
       buyingTouch: parseFloat(less),
       sellingTouch: parseFloat(percentage),
       cash: parseFloat(cash),
       cashPercentage: parseFloat(cashPercentage),
-      cashWeight: parseFloat(cashWeight),
-      netWeight,
       date: selectedDate,
-      status: "saving", // status indicator for UI
+      status: "saving",
     };
 
     // ---- Instantly show item in UI ----
@@ -95,27 +81,21 @@ export default function ItemsEntry({ navigation }) {
     setItems(updatedList);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
 
-    // ---- Show Saved Info Message ----
     setSavedMessage("Saved successfully!");
     setTimeout(() => setSavedMessage(""), 3000);
 
-    // ---- Clear form ----
+    // Clear form
     setItemName("");
-    setWeight("");
     setLess("");
     setPercentage("");
-    setNetWeight("");
     setCash("");
     setCashPercentage("");
-    setCashWeight("");
 
-    // ---- API save (drop to DB) ----
+    // ---- API save ----
     try {
       const response = await fetch(`${base_url}/items`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newItem),
       });
 
@@ -129,11 +109,8 @@ export default function ItemsEntry({ navigation }) {
         return;
       }
 
-      if (response.ok) {
-        updateStatus(localId, "saved");
-      } else {
-        updateStatus(localId, "error");
-      }
+      if (response.ok) updateStatus(localId, "saved");
+      else updateStatus(localId, "error");
     } catch (err) {
       updateStatus(localId, "error");
     }
@@ -171,7 +148,6 @@ export default function ItemsEntry({ navigation }) {
           <Text style={styles.headerText}>Item Entry</Text>
         </View>
 
-        {/* SAVED MESSAGE */}
         {savedMessage !== "" && (
           <View style={styles.savedMsgBox}>
             <Text style={styles.savedMsg}>{savedMessage}</Text>
@@ -191,14 +167,6 @@ export default function ItemsEntry({ navigation }) {
 
           <TextInput
             style={styles.input}
-            placeholder="Weight (g)"
-            keyboardType="numeric"
-            value={weight}
-            onChangeText={setWeight}
-          />
-
-          <TextInput
-            style={styles.input}
             placeholder="Buying Touch %"
             keyboardType="numeric"
             value={less}
@@ -211,12 +179,6 @@ export default function ItemsEntry({ navigation }) {
             keyboardType="numeric"
             value={percentage}
             onChangeText={setPercentage}
-          />
-
-          <TextInput
-            style={[styles.input, styles.readonly]}
-            value={`Net Weight : ${netWeight}`}
-            editable={false}
           />
 
           {/* -------- CASH SECTION -------- */}
@@ -238,14 +200,6 @@ export default function ItemsEntry({ navigation }) {
             onChangeText={setCashPercentage}
           />
 
-          <TextInput
-            style={styles.input}
-            placeholder="Weight"
-            keyboardType="numeric"
-            value={cashWeight}
-            onChangeText={setCashWeight}
-          />
-
           {/* -------- SUBMIT -------- */}
           <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit}>
             <Text style={styles.submitText}>Save</Text>
@@ -254,7 +208,6 @@ export default function ItemsEntry({ navigation }) {
           {/* -------- RECENT TRANSACTIONS -------- */}
           <Text style={styles.sectionTitle}>Recent Transactions</Text>
 
-          {/* 🔍 SEARCH BAR */}
           <TextInput
             style={styles.searchInput}
             placeholder="Search by stock name or date"
@@ -267,7 +220,9 @@ export default function ItemsEntry({ navigation }) {
           ) : (
             filteredTransactions.map((item, index) => (
               <View key={index} style={styles.transactionCard}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <View
+                  style={{ flexDirection: "row", justifyContent: "space-between" }}
+                >
                   <Text style={styles.txName}>{item.itemName}</Text>
 
                   {item.status === "saving" && (
@@ -281,8 +236,9 @@ export default function ItemsEntry({ navigation }) {
                   )}
                 </View>
 
-                <Text>Weight: {item.weight} g</Text>
-                <Text>Net Weight: {item.netWeight}</Text>
+                <Text>Buying Touch: {item.buyingTouch}%</Text>
+                <Text>Selling Touch: {item.sellingTouch}%</Text>
+
                 <Text style={styles.txDate}>{item.date}</Text>
               </View>
             ))
@@ -335,10 +291,6 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 12,
     backgroundColor: "#fff",
-  },
-  readonly: {
-    backgroundColor: "#E8F5E9",
-    fontWeight: "bold",
   },
   searchInput: {
     borderWidth: 1,

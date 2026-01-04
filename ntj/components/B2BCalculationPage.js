@@ -70,6 +70,7 @@ export default function CreateTransaction({ navigation }) {
   const selectCustomer = (customer) => {
     setSelectedCustomer(customer);
     setSearch(customer.name);
+    setPhone(customer.phone || "");
     setShowDropdown(false);
   };
 
@@ -104,6 +105,7 @@ export default function CreateTransaction({ navigation }) {
   const [loadingCustomers, setLoadingCustomers] = useState(true);
 
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [phone, setPhone] = useState("");
 
   const filteredCartCustomers = customers.filter(
     (c) => c.name && c.name.toLowerCase().includes(cartSearch.toLowerCase())
@@ -115,6 +117,7 @@ export default function CreateTransaction({ navigation }) {
       try {
         setLoadingCustomers(true);
         const response = await fetch(`${base_url}/customers`);
+
 
         if (!response.ok) {
           throw new Error("Failed to fetch customers");
@@ -193,7 +196,10 @@ export default function CreateTransaction({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       if (route.params?.newCustomer) {
-        setCustomers((prev) => [...prev, route.params.newCustomer]);
+        const newCust = route.params.newCustomer;
+        setCustomers((prev) => [...prev, newCust]);
+        setSelectedCustomer(newCust);
+        setPhone(newCust.phone || "");
         // Clear the param to avoid re-adding
         navigation.setParams({ newCustomer: undefined });
       }
@@ -286,8 +292,9 @@ export default function CreateTransaction({ navigation }) {
       console.log("📥 Response body:", responseText);
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${responseText}`);
-      }
+  throw new Error(`HTTP ${response.status}: ${responseText}`);
+}
+
 
       const savedEntry = JSON.parse(responseText);
       console.log("✅ Saved successfully:", savedEntry);
@@ -324,10 +331,10 @@ export default function CreateTransaction({ navigation }) {
 
       Alert.alert("Success", "Issue entry saved to database successfully!");
     } catch (error) {
-      console.error("❌ Error:", error);
-      Alert.alert("Error", `Failed to save: ${error.message}`);
-    }
-  };
+  console.error("❌ Error:", error);
+  Alert.alert("Error", `Failed to save: ${error.message}`);
+}
+};
 
   const addReceiptItem = async () => {
     console.log("🟢 addReceiptItem called");
@@ -832,16 +839,26 @@ export default function CreateTransaction({ navigation }) {
             <Text style={styles.sectionTitle}>Customer Info</Text>
           </View>
 
-          <Text style={styles.infoText}>{selectedCustomer.name}</Text>
-          <Text style={styles.infoText}>
-            Company: {selectedCustomer.company}
-          </Text>
+          <View style={styles.customerInfoRow}>
+            <View style={styles.customerDetails}>
+              <Text style={styles.infoText}>{selectedCustomer.name}</Text>
+              <Text style={styles.infoText}>
+                Company: {selectedCustomer.company}
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={phone}
+                placeholder="Phone Number"
+                keyboardType="phone-pad"
+                editable={false}
+              />
+            </View>
 
-          <Text style={styles.label}>Old Balance</Text>
-          <Text style={styles.greenValue}>{fmt(oldBalance)} g</Text>
-
-          <Text style={styles.label}>Advance Balance</Text>
-          <Text style={styles.blackValue}>{fmt(advBalance)} g</Text>
+            <View style={styles.balanceContainer}>
+              <Text style={styles.balanceText}>Old: {fmt(oldBalance)}g</Text>
+              <Text style={styles.balanceText}>Adv: {fmt(advBalance)}g</Text>
+            </View>
+          </View>
         </View>
       )}
 
@@ -853,41 +870,19 @@ export default function CreateTransaction({ navigation }) {
             <Text style={styles.sectionTitle}>Issue Entry</Text>
           </View>
 
-          {/* ITEM DROPDOWN */}
-          <TouchableOpacity
-            style={styles.dropdownCardSmall}
-            onPress={() => {
-              if (!loadingItems) {
-                setIssueItemDropdownOpen(!issueItemDropdownOpen);
-              }
+          {/* SEARCH BOX */}
+          <TextInput
+            placeholder="Search items..."
+            style={styles.searchBox}
+            value={issueItemSearch}
+            onChangeText={(text) => {
+              setIssueItemSearch(text);
+              setIssueItemDropdownOpen(text.length > 0);
             }}
-          >
-            <View style={styles.rowCenter}>
-              <Icon name="box" size={20} />
-              <Text style={styles.dropdownText}>
-                {loadingItems
-                  ? "Loading items..."
-                  : selectedIssueItem
-                  ? selectedIssueItem
-                  : itemsList.length === 0
-                  ? "No items available"
-                  : "Select Item"}
-              </Text>
-            </View>
-            <Icon
-              name={issueItemDropdownOpen ? "chevron-up" : "chevron-down"}
-              size={20}
-            />
-          </TouchableOpacity>
+          />
 
           {issueItemDropdownOpen && !loadingItems && (
             <View style={styles.cardTiny}>
-              <TextInput
-                placeholder="Search items..."
-                style={styles.searchBox}
-                value={issueItemSearch}
-                onChangeText={setIssueItemSearch}
-              />
               {itemsList.length > 0 ? (
                 itemsList
                   .filter((it) =>
@@ -900,7 +895,7 @@ export default function CreateTransaction({ navigation }) {
                       onPress={() => {
                         setSelectedIssueItem(it);
                         setIssueItemDropdownOpen(false);
-                        setIssueItemSearch("");
+                        setIssueItemSearch(it);
                       }}
                     >
                       <Text style={styles.listItemText}>{it}</Text>
@@ -1020,41 +1015,19 @@ export default function CreateTransaction({ navigation }) {
             <Text style={styles.sectionTitle}>Receipt Entry</Text>
           </View>
 
-          {/* ITEM DROPDOWN */}
-          <TouchableOpacity
-            style={styles.dropdownCardSmall}
-            onPress={() => {
-              if (!loadingItems) {
-                setReceiptItemDropdownOpen(!receiptItemDropdownOpen);
-              }
+          {/* SEARCH BOX */}
+          <TextInput
+            placeholder="Search items..."
+            style={styles.searchBox}
+            value={receiptItemSearch}
+            onChangeText={(text) => {
+              setReceiptItemSearch(text);
+              setReceiptItemDropdownOpen(text.length > 0);
             }}
-          >
-            <View style={styles.rowCenter}>
-              <Icon name="box" size={20} />
-              <Text style={styles.dropdownText}>
-                {loadingItems
-                  ? "Loading items..."
-                  : selectedReceiptItem
-                  ? selectedReceiptItem
-                  : itemsList.length === 0
-                  ? "No items available"
-                  : "Select Item"}
-              </Text>
-            </View>
-            <Icon
-              name={receiptItemDropdownOpen ? "chevron-up" : "chevron-down"}
-              size={20}
-            />
-          </TouchableOpacity>
+          />
 
           {receiptItemDropdownOpen && !loadingItems && (
             <View style={styles.cardTiny}>
-              <TextInput
-                placeholder="Search items..."
-                style={styles.searchBox}
-                value={receiptItemSearch}
-                onChangeText={setReceiptItemSearch}
-              />
               {itemsList.length > 0 ? (
                 itemsList
                   .filter((it) =>
@@ -1067,7 +1040,7 @@ export default function CreateTransaction({ navigation }) {
                       onPress={() => {
                         setSelectedReceiptItem(it);
                         setReceiptItemDropdownOpen(false);
-                        setReceiptItemSearch("");
+                        setReceiptItemSearch(it);
                       }}
                     >
                       <Text style={styles.listItemText}>{it}</Text>
@@ -1087,17 +1060,6 @@ export default function CreateTransaction({ navigation }) {
                 style={styles.input}
                 value={receiptWeight}
                 onChangeText={setReceiptWeight}
-                keyboardType="decimal-pad"
-                placeholder="0.000"
-              />
-            </View>
-
-            <View style={styles.inputBox}>
-              <Text style={styles.subLabel}>Stone (g)</Text>
-              <TextInput
-                style={styles.input}
-                value={receiptStone}
-                onChangeText={setReceiptStone}
                 keyboardType="decimal-pad"
                 placeholder="0.000"
               />
@@ -1662,5 +1624,22 @@ const styles = StyleSheet.create({
     elevation: 3,
     marginTop: 5,
     maxHeight: 200,
+  },
+
+  customerInfoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  customerDetails: {
+    flex: 1,
+  },
+  balanceContainer: {
+    alignItems: "flex-end",
+  },
+  balanceText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#333",
   },
 });
