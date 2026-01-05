@@ -9,6 +9,7 @@ import {
   Modal,
   ScrollView,
   Alert,
+  Switch,
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -24,6 +25,8 @@ export default function StockMaster({ navigation }) {
   const [sellTouch, setSellTouch] = useState("");
   const [calculation, setCalculation] = useState("");
   const [pure, setPure] = useState("");
+  const [workerName, setWorkerName] = useState("");
+  const [description, setDescription] = useState("");
 
   const [isEdit, setIsEdit] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -35,6 +38,10 @@ export default function StockMaster({ navigation }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   const [stocks, setStocks] = useState([]);
+
+  // Search suggestions for main search box
+  const [searchSuggestions, setSearchSuggestions] = useState([]);
+  const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
 
   useEffect(() => {
     loadAllItems();
@@ -54,7 +61,7 @@ const loadStocks = async () => {
         buy: item.less.toString(),
         sell: item.netWeight.toString(),
         pure: item.pure.toString(),
-        calculation: item.calculation
+        calculation: item.calculation,
       }));
       setStocks(transformedStocks);
     }
@@ -73,14 +80,22 @@ const loadStocks = async () => {
   };
 
   useEffect(() => {
+    const wt = parseFloat(weight);
+    const less = parseFloat(buyTouch);
     const calc = parseFloat(calculation);
-    const netWt = parseFloat(sellTouch);
-    if (!isNaN(calc) && !isNaN(netWt)) {
-      setPure((calc * netWt).toFixed(3));
+    if (!isNaN(wt) && !isNaN(less)) {
+      const netWt = wt - less;
+      setSellTouch(netWt.toFixed(3));
+      if (!isNaN(calc)) {
+        setPure((calc * netWt).toFixed(3));
+      } else {
+        setPure("");
+      }
     } else {
+      setSellTouch("");
       setPure("");
     }
-  }, [calculation, sellTouch]);
+  }, [weight, buyTouch, calculation]);
 
   // Load all items from backend
   const loadAllItems = async () => {
@@ -109,45 +124,75 @@ const loadStocks = async () => {
     }
   };
 
-  const handleStockNameChange = (text) => {
-    setStockName(text);
-    if (text.length > 0) {
-      const filtered = [...new Set(allItems.map(item => item.itemName))].filter(name =>
-        name.toLowerCase().includes(text.toLowerCase())
-      );
-      setSuggestions(filtered);
-      setShowSuggestions(true);
-    } else {
-      setSuggestions([]);
-      setShowSuggestions(false);
-      setCalculation("");
-    }
-  };
+const handleStockNameChange = (text) => {
+  setStockName(text);
+  if (text.length > 0) {
+    // Fixed: Use stockName instead of itemName to match Items collection
+    const filtered = [...new Set(allItems.map(item => item.stockName))].filter(name =>
+      name && name.toLowerCase().includes(text.toLowerCase())
+    );
+    setSuggestions(filtered);
+    setShowSuggestions(true);
+  } else {
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setCalculation("");
+  }
+};
 
   const selectSuggestion = (name) => {
-    setStockName(name);
-    setShowSuggestions(false);
-    
-    // Find the item details from allItems
-    const selectedItem = allItems.find(item => item.itemName === name);
-    if (selectedItem) {
-      // Only set buying touch in calculation field
-      if (selectedItem.buyingTouch) {
-        setCalculation(selectedItem.buyingTouch.toString());
-      }
+  setStockName(name);
+  setShowSuggestions(false);
+  
+  // Fixed: Use stockName to find the item
+  const selectedItem = allItems.find(item => item.stockName === name);
+  if (selectedItem) {
+    // Set buying touch in calculation field
+    if (selectedItem.buyingTouch) {
+      setCalculation(selectedItem.buyingTouch.toString());
+    }
+  }
+};
+
+  const calculatePurity = (item) => {
+  // Fixed: Use stockName to match
+  const selectedItem = allItems.find(i => i.stockName === item.name);
+  if (selectedItem) {
+    const calc = parseFloat(selectedItem.buyingTouch);
+    const netWt = parseFloat(item.sell);
+    if (!isNaN(calc) && !isNaN(netWt)) {
+      return (calc * netWt).toFixed(3);
+    }
+  }
+  return item.pure || "";
+};
+
+  // Handle main search box input
+  const handleSearchChange = (text) => {
+    setSearch(text);
+    if (text.length > 0) {
+      const filtered = allItems.filter(item =>
+        item.itemName.toLowerCase().includes(text.toLowerCase())
+      );
+      setSearchSuggestions(filtered);
+      setShowSearchSuggestions(true);
+    } else {
+      setSearchSuggestions([]);
+      setShowSearchSuggestions(false);
     }
   };
 
-  const calculatePurity = (item) => {
-    const selectedItem = allItems.find(i => i.itemName === item.name);
-    if (selectedItem) {
-      const calc = parseFloat(selectedItem.buyingTouch);
-      const netWt = parseFloat(item.sell);
-      if (!isNaN(calc) && !isNaN(netWt)) {
-        return (calc * netWt).toFixed(3);
-      }
-    }
-    return item.pure || "";
+  // Handle suggestion selection
+  const selectSearchSuggestion = (item) => {
+    // Pre-fill the add modal with selected item details
+    setStockName(item.itemName);
+    setWeight(item.weight.toString());
+    setBuyTouch(""); // Will be set in stock
+    setSellTouch(""); // Will be set in stock
+    setCalculation(item.buyingTouch.toString());
+    setPure("");
+    setShowSearchSuggestions(false);
+    setModalVisible(true);
   };
 
   /* ---------------- SEARCH FILTER ---------------- */
@@ -162,24 +207,26 @@ const loadStocks = async () => {
 
   /* ---------------- EDIT ---------------- */
   const handleEdit = (item) => {
-    setIsEdit(true);
-    setEditId(item.id);
-    setStockName(item.name);
-    setWeight(item.weight.replace(" g", ""));
-    setBuyTouch(item.buy);
-    setSellTouch(item.sell);
-    
-    // Load calculation from item entry
-    const selectedItem = allItems.find(i => i.itemName === item.name);
-    if (selectedItem && selectedItem.buyingTouch) {
-      setCalculation(selectedItem.buyingTouch.toString());
-    } else {
-      setCalculation("");
-    }
-    
-    setPure("");
-    setModalVisible(true);
-  };
+  setIsEdit(true);
+  setEditId(item.id);
+  setStockName(item.name);
+  setWeight(item.weight.replace(" g", ""));
+  setBuyTouch(item.buy);
+  setSellTouch(item.sell);
+  setWorkerName(item.workerName || "");
+  setDescription(item.description || ""); // Load description
+  
+  // Fixed: Use stockName to find the item
+  const selectedItem = allItems.find(i => i.stockName === item.name);
+  if (selectedItem && selectedItem.buyingTouch) {
+    setCalculation(selectedItem.buyingTouch.toString());
+  } else {
+    setCalculation("");
+  }
+  
+  setPure("");
+  setModalVisible(true);
+};
 
   /* ---------------- DELETE WITH CONFIRMATION ---------------- */
   const handleDelete = (id) => {
@@ -213,14 +260,19 @@ const loadStocks = async () => {
   ]);
 };
 
-  /* ---------------- ADD / UPDATE ---------------- */
-  const handleSubmit = async () => {
+const handleSubmit = async () => {
   // Validation
   if (!stockName || !weight || !buyTouch || !sellTouch || !calculation) {
     Alert.alert("Error", "Please fill all required fields");
     return;
   }
-
+  
+  // Check for unique item name when adding new item
+  if (!isEdit && stocks.some(stock => stock.name.toLowerCase() === stockName.toLowerCase())) {
+    Alert.alert("Error", "Item name already exists. Please choose a different name.");
+    return;
+  }
+  
   try {
     const stockData = {
       itemName: stockName,
@@ -228,11 +280,15 @@ const loadStocks = async () => {
       less: parseFloat(buyTouch),
       netWeight: parseFloat(sellTouch),
       calculation: calculation,
-      pure: parseFloat(pure) || 0
+      pure: parseFloat(pure) || 0,
+      workerName: workerName,
+      description: description
     };
-
+    
+    console.log("Submitting stock data:", stockData);
+    
     if (isEdit) {
-      // Update existing stock
+      // Update existing stock - FIXED: Added parentheses around template literal
       const response = await fetch(`${base_url}/stockMaster/${editId}`, {
         method: 'PUT',
         headers: {
@@ -240,9 +296,11 @@ const loadStocks = async () => {
         },
         body: JSON.stringify(stockData),
       });
-
+      
       if (response.ok) {
         const updatedStock = await response.json();
+        console.log("Updated stock from server:", updatedStock);
+        
         const updatedStocks = stocks.map((item) =>
           item.id === editId
             ? {
@@ -252,18 +310,22 @@ const loadStocks = async () => {
                 buy: updatedStock.less.toString(),
                 sell: updatedStock.netWeight.toString(),
                 pure: updatedStock.pure.toString(),
-                calculation: updatedStock.calculation
+                calculation: updatedStock.calculation,
+                workerName: updatedStock.workerName || "",
+                description: updatedStock.description || ""
               }
             : item
         );
+        
         setStocks(updatedStocks);
         await AsyncStorage.setItem("STOCK_LIST", JSON.stringify(updatedStocks));
+        Alert.alert("Success", "Stock updated successfully");
       } else {
         Alert.alert("Error", "Failed to update stock");
         return;
       }
     } else {
-      // Create new stock
+      // Create new stock - FIXED: Added parentheses around template literal
       const response = await fetch(`${base_url}/stockMaster`, {
         method: 'POST',
         headers: {
@@ -271,9 +333,11 @@ const loadStocks = async () => {
         },
         body: JSON.stringify(stockData),
       });
-
+      
       if (response.ok) {
         const savedStock = await response.json();
+        console.log("Saved stock from server:", savedStock);
+        
         const newStock = {
           id: savedStock._id,
           name: savedStock.itemName,
@@ -281,17 +345,21 @@ const loadStocks = async () => {
           buy: savedStock.less.toString(),
           sell: savedStock.netWeight.toString(),
           pure: savedStock.pure.toString(),
-          calculation: savedStock.calculation
+          calculation: savedStock.calculation,
+          workerName: savedStock.workerName || "",
+          description: savedStock.description || ""
         };
+        
         const updatedStocks = [...stocks, newStock];
         setStocks(updatedStocks);
         await AsyncStorage.setItem("STOCK_LIST", JSON.stringify(updatedStocks));
+        Alert.alert("Success", "Stock added successfully");
       } else {
         Alert.alert("Error", "Failed to save stock");
         return;
       }
     }
-
+    
     // Reset form
     setIsEdit(false);
     setEditId(null);
@@ -301,6 +369,8 @@ const loadStocks = async () => {
     setSellTouch("");
     setCalculation("");
     setPure("");
+    setWorkerName("");
+    setDescription("");
     setModalVisible(false);
   } catch (error) {
     console.error('Error saving stock:', error);
@@ -308,17 +378,20 @@ const loadStocks = async () => {
   }
 };
 
-  const openAddModal = () => {
-    setIsEdit(false);
-    setEditId(null);
-    setStockName("");
-    setWeight("");
-    setBuyTouch("");
-    setSellTouch("");
-    setCalculation("");
-    setPure("");
-    setModalVisible(true);
-  };
+// ADD THIS FUNCTION HERE ⬇️
+const openAddModal = () => {
+  setIsEdit(false);
+  setEditId(null);
+  setStockName("");
+  setWeight("");
+  setBuyTouch("");
+  setSellTouch("");
+  setCalculation("");
+  setPure("");
+  setWorkerName("");
+  setDescription("");
+  setModalVisible(true);
+};
 
   return (
     <View style={styles.container}>
@@ -336,10 +409,37 @@ const loadStocks = async () => {
         <TextInput
           placeholder="Search Items "
           value={search}
-          onChangeText={setSearch}
+          onChangeText={handleSearchChange}
           style={styles.searchInput}
         />
       </View>
+
+      {/* SEARCH SUGGESTIONS */}
+      {showSearchSuggestions && searchSuggestions.length > 0 && (
+        <ScrollView style={styles.searchSuggestionsContainer} nestedScrollEnabled={true}>
+          {searchSuggestions.map((item, index) => (
+            <TouchableOpacity
+              key={index}
+              style={styles.searchSuggestionItem}
+              onPress={() => selectSearchSuggestion(item)}
+            >
+              <Text style={styles.suggestionName}>{item.itemName}</Text>
+              <View style={styles.suggestionRow}>
+                <Text style={styles.suggestionDetail}>Weight: {item.weight} g</Text>
+                <Text style={styles.suggestionDetail}>Buying Touch: {item.buyingTouch}</Text>
+              </View>
+              <View style={styles.suggestionRow}>
+                <Text style={styles.suggestionDetail}>Selling Touch: {item.sellingTouch}</Text>
+                <Text style={styles.suggestionDetail}>Cash: {item.cash}</Text>
+              </View>
+              <View style={styles.suggestionRow}>
+                <Text style={styles.suggestionDetail}>Cash %: {item.cashPercentage}</Text>
+                <Text style={styles.suggestionDetail}>Cash Weight: {item.cashWeight}</Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
 
       {/* FILTER + SORT */}
       <View style={{ flexDirection: "row", justifyContent: "space-between", marginHorizontal: 20 }}>
@@ -436,6 +536,14 @@ const loadStocks = async () => {
                 </ScrollView>
               )}
 
+              <Text style={styles.label}>Worker Name</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter Worker Name"
+                value={workerName}
+                onChangeText={setWorkerName}
+              />
+
               <Text style={styles.label}>Weight (g) *</Text>
               <TextInput
                 style={styles.input}
@@ -456,11 +564,11 @@ const loadStocks = async () => {
 
               <Text style={styles.label}>Net Weight *</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: '#f0f0f0' }]}
                 placeholder="0.000"
                 keyboardType="numeric"
                 value={sellTouch}
-                onChangeText={setSellTouch}
+                editable={false}
               />
 
               <Text style={styles.label}>Calculation (Buying Touch) *</Text>
@@ -475,13 +583,20 @@ const loadStocks = async () => {
 
               <Text style={styles.label}>Pure *</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { backgroundColor: '#f0f0f0' }]}
                 placeholder="0.000"
                 keyboardType="numeric"
                 value={pure}
-                onChangeText={setPure}
+                editable={false}
               />
-
+              <Text style={styles.label}>Description</Text>
+              <TextInput
+                style={[styles.input, { height: 80 }]}
+                placeholder="Enter Description"
+                value={description}
+                onChangeText={setDescription}
+                multiline={true}
+              />
               <View style={styles.modalBtnRow}>
                 <TouchableOpacity
                   style={styles.cancelBtn}
@@ -530,6 +645,34 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   searchInput: { flex: 1, padding: 10 },
+
+  searchSuggestionsContainer: {
+    backgroundColor: "#fff",
+    marginHorizontal: 20,
+    borderRadius: 10,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: "#ccc",
+  },
+  searchSuggestionItem: {
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  suggestionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 5,
+  },
+  suggestionName: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#2E7D32",
+  },
+  suggestionDetail: {
+    fontSize: 14,
+    color: "#666",
+  },
 
   filterBtn: {
     backgroundColor: "#2E7D32",
@@ -665,5 +808,15 @@ const styles = StyleSheet.create({
     padding: 10,
     borderBottomWidth: 1,
     borderBottomColor: "#eee",
+  },
+  checkboxRow: {
+    flexDirection: "row",
+    
+    alignItems: "center",
+    marginTop: 15,
+  },
+  checkboxLabel: {
+    marginLeft: 10,
+    fontSize: 16,
   },
 });

@@ -20,8 +20,10 @@ router.post('/', async (req, res) => {
             weight: req.body.weight,
             less: req.body.less,
             netWeight: req.body.netWeight,
-            calculation: req.body.calculation, // Changed to lowercase
-            pure: req.body.pure // Changed to lowercase
+            calculation: req.body.calculation,
+            pure: req.body.pure,
+            workerName: req.body.workerName || "",
+            description: req.body.description || ""
         });
 
         const savedStock = await stockData.save();
@@ -42,10 +44,17 @@ router.put('/:id', async (req, res) => {
                 less: req.body.less,
                 netWeight: req.body.netWeight,
                 calculation: req.body.calculation,
-                pure: req.body.pure
+                pure: req.body.pure,
+                workerName: req.body.workerName || "",
+                description: req.body.description || ""
             },
-            { new: true }
+            { new: true, runValidators: true }
         );
+        
+        if (!updatedStock) {
+            return res.status(404).json({ message: 'Stock not found' });
+        }
+        
         res.json(updatedStock);
     } catch (err) {
         res.status(400).json({ message: err.message });
@@ -55,7 +64,12 @@ router.put('/:id', async (req, res) => {
 // DELETE: Delete a StockMaster entry
 router.delete('/:id', async (req, res) => {
     try {
-        await StockMaster.findByIdAndDelete(req.params.id);
+        const deletedStock = await StockMaster.findByIdAndDelete(req.params.id);
+        
+        if (!deletedStock) {
+            return res.status(404).json({ message: 'Stock not found' });
+        }
+        
         res.json({ message: 'Stock deleted successfully' });
     } catch (err) {
         res.status(500).json({ message: err.message });

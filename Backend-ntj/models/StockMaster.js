@@ -6,7 +6,9 @@ const StockMasterSchema = new mongoose.Schema({
     less: { type: Number, required: true },
     netWeight: { type: Number, required: true },
     calculation: { type: String, required: true },
-    pure: { type: Number, required: true }, 
+    pure: { type: Number, required: true },
+    workerName: { type: String, default: "" },
+    description: { type: String, default: "" }
 }, { timestamps: true });
 
 module.exports = mongoose.model('StockMaster', StockMasterSchema);
