@@ -1,4 +1,3 @@
-// screens/CreateTransaction.js
 import React, { useState, useCallback, useEffect } from "react";
 import {
   View,
@@ -868,6 +867,14 @@ export default function CreateTransaction({ navigation }) {
           <View style={styles.issueHeader}>
             <View style={styles.greenDot} />
             <Text style={styles.sectionTitle}>Issue Entry</Text>
+            <View style={styles.cartContainer}>
+              <Icon name="cart" size={24} color="#000" />
+              {issueItems.length > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{issueItems.length}</Text>
+                </View>
+              )}
+            </View>
           </View>
 
           {/* SEARCH BOX */}
@@ -1013,6 +1020,14 @@ export default function CreateTransaction({ navigation }) {
           <View style={styles.issueHeader}>
             <View style={[styles.greenDot, { backgroundColor: "#0aa76a" }]} />
             <Text style={styles.sectionTitle}>Receipt Entry</Text>
+            <View style={styles.cartContainer}>
+              <Icon name="cart" size={24} color="#000" />
+              {receiptItems.length > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{receiptItems.length}</Text>
+                </View>
+              )}
+            </View>
           </View>
 
           {/* SEARCH BOX */}
@@ -1641,5 +1656,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#333",
+  },
+  cartContainer: {
+    position: "relative",
+    marginLeft: "auto",
+  },
+  badge: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    backgroundColor: "#FF5722",
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  badgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "bold",
   },
 });
