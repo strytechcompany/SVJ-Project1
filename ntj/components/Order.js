@@ -1,5 +1,4 @@
-// screens/Order.js
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -8,42 +7,59 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { Ionicons } from "@expo/vector-icons";
+import { base_url } from "./config";
 
 export default function Order({ navigation }) {
   const [selectedTab, setSelectedTab] = useState("Pending");
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [orders, setOrders] = useState([
-    {
-      id: "AKSORD29",
-      customer: "Rahu",
-      worker: "Karthik",
-      date: "2025-11-23",
-      phone: "9043829808",
-      type: "Chain",
-      status: "Pending",
-    },
-    {
-      id: "AKSORD28",
-      customer: "Karthikeyen",
-      worker: "Abdul Ahad",
-      date: "2025-11-19",
-      phone: "9965781338",
-      type: "Chain",
-      status: "Pending",
-    },
-    {
-      id: "AKSORD27",
-      customer: "Anand",
-      worker: "Test1",
-      date: "2025-10-26",
-      phone: "9999999999",
-      type: "Chain",
-      status: "Pending",
-    },
-  ]);
+  // ============================
+  //    FETCH ORDERS FROM API
+  // ============================
+  const fetchOrders = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${base_url}/orders`);
+      const data = await response.json();
+      if (response.ok) {
+        setOrders(
+          data.map((order) => ({
+            customer: order.customerName,
+            phone: order.mobileNumber,
+            type: order.itemName,
+            weight: order.itemWeight,
+            payment: order.paymentType,
+            date: order.deliveryDate ? order.deliveryDate.split("T")[0] : "-", // format date
+            status: "Pending", // backend doesn't have status yet, default to Pending
+          }))
+        );
+      } else {
+        Alert.alert("Error", data.message || "Failed to fetch orders");
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", "Server not reachable");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders();
+  }, []);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchOrders();
+  }, []);
 
   // ============================
   //       DELETE ORDER
@@ -57,8 +73,22 @@ export default function Order({ navigation }) {
         {
           text: "Delete",
           style: "destructive",
-          onPress: () => {
-            setOrders((prev) => prev.filter((o) => o.id !== id));
+          onPress: async () => {
+            try {
+              const response = await fetch(`${base_url}/orders/${id}`, {
+                method: "DELETE",
+              });
+              if (response.ok) {
+                setOrders((prev) => prev.filter((o) => o.id !== id));
+                Alert.alert("Deleted", "Order deleted successfully");
+              } else {
+                const data = await response.json();
+                Alert.alert("Error", data.message || "Failed to delete order");
+              }
+            } catch (error) {
+              console.error(error);
+              Alert.alert("Error", "Server not reachable");
+            }
           },
         },
       ]
@@ -98,28 +128,34 @@ export default function Order({ navigation }) {
         <Text style={styles.text}> Customer: {item.customer}</Text>
       </View>
 
-      {/* Date */}
-      <View style={styles.row}>
-        <Icon name="calendar" size={18} color="#1B4D1B" />
-        <Text style={styles.text}> {item.date}</Text>
-      </View>
-
-      {/* Worker */}
-      <View style={styles.row}>
-        <Icon name="account-cog" size={18} color="#1B4D1B" />
-        <Text style={styles.text}> Worker: {item.worker}</Text>
-      </View>
-
       {/* Phone */}
       <View style={styles.row}>
         <Icon name="phone" size={18} color="#1B4D1B" />
         <Text style={styles.text}> {item.phone}</Text>
       </View>
 
-      {/* Type */}
+      {/* Item Type */}
       <View style={styles.row}>
         <Icon name="necklace" size={18} color="#1B4D1B" />
-        <Text style={styles.text}> {item.type}</Text>
+        <Text style={styles.text}> Item: {item.type}</Text>
+      </View>
+
+      {/* Weight */}
+      <View style={styles.row}>
+        <Icon name="weight-kilogram" size={18} color="#1B4D1B" />
+        <Text style={styles.text}> Weight: {item.weight} GMS</Text>
+      </View>
+
+      {/* Payment Type */}
+      <View style={styles.row}>
+        <Icon name="cash" size={18} color="#1B4D1B" />
+        <Text style={styles.text}> Payment: {item.payment}</Text>
+      </View>
+
+      {/* Delivery Date */}
+      <View style={styles.row}>
+        <Icon name="calendar" size={18} color="#1B4D1B" />
+        <Text style={styles.text}> Delivery: {item.date}</Text>
       </View>
 
       {/* Status Badge */}
@@ -169,19 +205,27 @@ export default function Order({ navigation }) {
       </View>
 
       {/* List */}
-      <ScrollView>
-        <FlatList
-          data={filteredOrders}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id}
-          scrollEnabled={false}
-        />
-      </ScrollView>
+      {loading ? (
+        <ActivityIndicator size="large" color="#1B4D1B" style={{ marginTop: 30 }} />
+      ) : (
+        <ScrollView
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          <FlatList
+            data={filteredOrders}
+            renderItem={renderItem}
+            keyExtractor={(item) => item.id}
+            scrollEnabled={false}
+          />
+        </ScrollView>
+      )}
 
       {/* Add Button */}
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => navigation.navigate("AddOrder")}
+        onPress={() => navigation.navigate("AddOrder", { onGoBack: fetchOrders })}
       >
         <Ionicons name="add" size={30} color="#fff" />
       </TouchableOpacity>

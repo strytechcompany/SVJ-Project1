@@ -13,6 +13,7 @@ const transactionRoutes = require('./routes/Transaction');
 const b2ccalRoutes = require('./routes/B2Ccal');
 const additemRoutes = require('./routes/AddItem');
 const RetailTransactionRoutes = require("./routes/RetailTransaction");
+const orderRoutes = require('./routes/Order');
 
 const app = express();
 const PORT = 3000;
@@ -37,6 +38,7 @@ app.use('/api/transactions', transactionRoutes);
 app.use('/api/B2Ccal', b2ccalRoutes);
 app.use('/api/addItem', additemRoutes);
 app.use("/api/retail", RetailTransactionRoutes);
+app.use('/api/orders', orderRoutes);
 
 // Test route
 app.get('/', (req, res) => {

@@ -9,32 +9,34 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { base_url } from "./config";
 
-const STORAGE_KEY = "ITEM_LIST";
-
 export default function ItemsEntry({ navigation }) {
-  // -------- Stock Inputs --------
-  const [itemName, setItemName] = useState("");
-  const [less, setLess] = useState("");
+  // -------- Stock Details Inputs --------
+  const [stockName, setStockName] = useState("");
+  const [itemDetails, setItemDetails] = useState("");
+  const [buyingTouch, setBuyingTouch] = useState("");
+  const [sellingTouch, setSellingTouch] = useState("");
   const [percentage, setPercentage] = useState("");
-
-  // -------- Cash Section --------
-  const [cash, setCash] = useState("");
-  const [cashPercentage, setCashPercentage] = useState("");
 
   // -------- Meta --------
   const [selectedDate, setSelectedDate] = useState("");
   const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // 🔍 Search
   const [search, setSearch] = useState("");
 
   // UI Saved Message
   const [savedMessage, setSavedMessage] = useState("");
+
+  // Edit mode
+  const [editingItemId, setEditingItemId] = useState(null);
 
   const today = (() => {
     const d = new Date();
@@ -45,83 +47,128 @@ export default function ItemsEntry({ navigation }) {
 
   useEffect(() => {
     setSelectedDate(today);
-    loadItems();
+    fetchItems();
   }, []);
 
-  const loadItems = async () => {
+  // Fetch items from database
+  const fetchItems = async () => {
     try {
-      const data = await AsyncStorage.getItem(STORAGE_KEY);
-      if (data) setItems(JSON.parse(data));
+      setLoading(true);
+      const response = await fetch(`${base_url}/items`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setItems(data);
+      } else {
+        Alert.alert("Error", "Failed to load items from database");
+      }
     } catch (error) {
-      console.error("Error loading items:", error);
+      console.error("Error fetching items:", error);
+      Alert.alert("Error", "Could not connect to server");
+    } finally {
+      setLoading(false);
     }
   };
 
+  // Pull to refresh
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchItems();
+    setRefreshing(false);
+  };
+
+  // Handle Save or Update
   const handleSubmit = async () => {
-    if (!itemName || !less || !percentage || !cash || !cashPercentage) {
+    if (
+      !stockName ||
+      !itemDetails ||
+      !buyingTouch ||
+      !sellingTouch ||
+      !percentage
+    ) {
       Alert.alert("Error", "Please fill all required fields");
       return;
     }
 
-    const localId = Date.now().toString();
-
-    const newItem = {
-      id: localId,
-      itemName,
-      buyingTouch: parseFloat(less),
-      sellingTouch: parseFloat(percentage),
-      cash: parseFloat(cash),
-      cashPercentage: parseFloat(cashPercentage),
+    const payload = {
+      stockName,
+      itemDetails,
+      buyingTouch: parseFloat(buyingTouch),
+      sellingTouch: parseFloat(sellingTouch),
+      percentage: parseFloat(percentage),
       date: selectedDate,
-      status: "saving",
     };
 
-    // ---- Instantly show item in UI ----
-    const updatedList = [...items, newItem];
-    setItems(updatedList);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
-
-    setSavedMessage("Saved successfully!");
-    setTimeout(() => setSavedMessage(""), 3000);
-
-    // Clear form
-    setItemName("");
-    setLess("");
-    setPercentage("");
-    setCash("");
-    setCashPercentage("");
-
-    // ---- API save ----
     try {
-      const response = await fetch(`${base_url}/items`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newItem),
-      });
+      setLoading(true);
 
-      const responseText = await response.text();
+      if (editingItemId) {
+        // ---------- UPDATE EXISTING ITEM ----------
+        const response = await fetch(`${base_url}/items/${editingItemId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (e) {
-        updateStatus(localId, "error");
-        return;
+        if (response.ok) {
+          setSavedMessage("Updated successfully!");
+          setTimeout(() => setSavedMessage(""), 3000);
+          clearForm();
+          await fetchItems();
+        } else {
+          const errorData = await response.json();
+          Alert.alert("Error", errorData.message || "Failed to update item");
+        }
+      } else {
+        // ---------- CREATE NEW ITEM ----------
+        const response = await fetch(`${base_url}/items`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (response.ok) {
+          setSavedMessage("Saved successfully!");
+          setTimeout(() => setSavedMessage(""), 3000);
+          clearForm();
+          await fetchItems();
+        } else {
+          const errorData = await response.json();
+          Alert.alert("Error", errorData.message || "Failed to save item");
+        }
       }
-
-      if (response.ok) updateStatus(localId, "saved");
-      else updateStatus(localId, "error");
-    } catch (err) {
-      updateStatus(localId, "error");
+    } catch (error) {
+      console.error("Error saving/updating item:", error);
+      Alert.alert(
+        "Error",
+        "Could not save/update item. Please check your connection."
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
-  const updateStatus = async (id, newStatus) => {
-    const updated = items.map((it) =>
-      it.id === id ? { ...it, status: newStatus } : it
-    );
-    setItems(updated);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  const clearForm = () => {
+    setStockName("");
+    setItemDetails("");
+    setBuyingTouch("");
+    setSellingTouch("");
+    setPercentage("");
+    setEditingItemId(null);
+  };
+
+  // -------- Edit item ----------
+  const handleEdit = (item) => {
+    setStockName(item.stockName);
+    setItemDetails(item.itemDetails);
+    setBuyingTouch(item.buyingTouch.toString());
+    setSellingTouch(item.sellingTouch.toString());
+    setPercentage(item.percentage.toString());
+    setSelectedDate(item.date);
+    setEditingItemId(item._id || item.id);
   };
 
   // -------- Recent 10 Transactions --------
@@ -130,7 +177,8 @@ export default function ItemsEntry({ navigation }) {
   // 🔍 Filtered transactions
   const filteredTransactions = recentTransactions.filter(
     (item) =>
-      item.itemName?.toLowerCase().includes(search.toLowerCase()) ||
+      item.stockName?.toLowerCase().includes(search.toLowerCase()) ||
+      item.itemDetails?.toLowerCase().includes(search.toLowerCase()) ||
       item.date?.includes(search)
   );
 
@@ -146,6 +194,12 @@ export default function ItemsEntry({ navigation }) {
             <Icon name="arrow-left" size={26} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerText}>Item Entry</Text>
+          <TouchableOpacity
+            onPress={fetchItems}
+            style={{ marginLeft: "auto" }}
+          >
+            <Icon name="refresh" size={26} color="#fff" />
+          </TouchableOpacity>
         </View>
 
         {savedMessage !== "" && (
@@ -154,92 +208,152 @@ export default function ItemsEntry({ navigation }) {
           </View>
         )}
 
-        <ScrollView contentContainerStyle={styles.formContainer}>
-          {/* -------- STOCK DETAILS -------- */}
+        <ScrollView
+          contentContainerStyle={styles.formContainer}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+        >
+          {/* STOCK DETAILS */}
           <Text style={styles.sectionTitle}>Stock Details</Text>
 
           <TextInput
             style={styles.input}
             placeholder="Stock Name"
-            value={itemName}
-            onChangeText={setItemName}
+            value={stockName}
+            onChangeText={setStockName}
+            editable={!loading}
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Item Details"
+            value={itemDetails}
+            onChangeText={setItemDetails}
+            editable={!loading}
           />
 
           <TextInput
             style={styles.input}
             placeholder="Buying Touch %"
             keyboardType="numeric"
-            value={less}
-            onChangeText={setLess}
+            value={buyingTouch}
+            onChangeText={setBuyingTouch}
+            editable={!loading}
           />
 
           <TextInput
             style={styles.input}
             placeholder="Selling Touch %"
             keyboardType="numeric"
+            value={sellingTouch}
+            onChangeText={setSellingTouch}
+            editable={!loading}
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Percentage %"
+            keyboardType="numeric"
             value={percentage}
             onChangeText={setPercentage}
+            editable={!loading}
           />
 
-          {/* -------- CASH SECTION -------- */}
-          <Text style={styles.sectionTitle}>Cash</Text>
-
-          <TextInput
-            style={styles.input}
-            placeholder="Cash"
-            keyboardType="numeric"
-            value={cash}
-            onChangeText={setCash}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Percentage"
-            keyboardType="numeric"
-            value={cashPercentage}
-            onChangeText={setCashPercentage}
-          />
-
-          {/* -------- SUBMIT -------- */}
-          <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit}>
-            <Text style={styles.submitText}>Save</Text>
+          {/* SAVE / UPDATE BUTTON */}
+          <TouchableOpacity
+            style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
+            onPress={handleSubmit}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.submitText}>
+                {editingItemId ? "Update" : "Save"}
+              </Text>
+            )}
           </TouchableOpacity>
 
-          {/* -------- RECENT TRANSACTIONS -------- */}
-          <Text style={styles.sectionTitle}>Recent Transactions</Text>
+          {/* CLEAR FORM BUTTON */}
+          {editingItemId && (
+            <TouchableOpacity
+              style={[styles.editBtn]}
+              onPress={clearForm}
+              disabled={loading}
+            >
+              <Text style={styles.submitText}>Cancel Edit</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* RECENT TRANSACTIONS */}
+          <View style={styles.transactionHeader}>
+            <Text style={styles.sectionTitle}>Recent Transactions</Text>
+            <Text style={styles.transactionCount}>
+              ({filteredTransactions.length})
+            </Text>
+          </View>
 
           <TextInput
             style={styles.searchInput}
-            placeholder="Search by stock name or date"
+            placeholder="Search by stock name, details or date"
             value={search}
             onChangeText={setSearch}
           />
 
-          {filteredTransactions.length === 0 ? (
-            <Text style={styles.noData}>No transactions found</Text>
+          {loading && items.length === 0 ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#2E7D32" />
+              <Text style={styles.loadingText}>Loading transactions...</Text>
+            </View>
+          ) : filteredTransactions.length === 0 ? (
+            <Text style={styles.noData}>
+              {search ? "No matching transactions found" : "No transactions found"}
+            </Text>
           ) : (
             filteredTransactions.map((item, index) => (
-              <View key={index} style={styles.transactionCard}>
-                <View
-                  style={{ flexDirection: "row", justifyContent: "space-between" }}
-                >
-                  <Text style={styles.txName}>{item.itemName}</Text>
-
-                  {item.status === "saving" && (
-                    <Icon name="loading" size={20} color="#FF9800" />
-                  )}
-                  {item.status === "saved" && (
-                    <Icon name="check-circle" size={20} color="#2E7D32" />
-                  )}
-                  {item.status === "error" && (
-                    <Icon name="alert-circle" size={20} color="red" />
-                  )}
+              <View key={item._id || index} style={styles.transactionCard}>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.txName}>{item.stockName || "N/A"}</Text>
+                  <TouchableOpacity onPress={() => handleEdit(item)}>
+                    <Icon name="pencil" size={18} color="#1B5E20" />
+                  </TouchableOpacity>
                 </View>
 
-                <Text>Buying Touch: {item.buyingTouch}%</Text>
-                <Text>Selling Touch: {item.sellingTouch}%</Text>
+                <View style={styles.cardDivider} />
 
-                <Text style={styles.txDate}>{item.date}</Text>
+                <View style={styles.detailRow}>
+                  <Icon name="text-box-outline" size={16} color="#666" />
+                  <Text style={styles.txDetail}>{item.itemDetails || "N/A"}</Text>
+                </View>
+
+                <View style={styles.statsContainer}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Buying Touch</Text>
+                    <Text style={styles.statValue}>
+                      {item.buyingTouch != null ? `${item.buyingTouch}%` : "N/A"}
+                    </Text>
+                  </View>
+                  <View style={styles.statDivider} />
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Selling Touch</Text>
+                    <Text style={styles.statValue}>
+                      {item.sellingTouch != null ? `${item.sellingTouch}%` : "N/A"}
+                    </Text>
+                  </View>
+                  <View style={styles.statDivider} />
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Percentage</Text>
+                    <Text style={styles.statValue}>
+                      {item.percentage != null ? `${item.percentage}%` : "N/A"}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.cardFooter}>
+                  <Icon name="calendar" size={14} color="#999" />
+                  <Text style={styles.txDate}>{item.date || "N/A"}</Text>
+                </View>
               </View>
             ))
           )}
@@ -277,12 +391,22 @@ const styles = StyleSheet.create({
     color: "#2E7D32",
     fontWeight: "bold",
   },
-  formContainer: { padding: 20 },
+  formContainer: { padding: 20, paddingBottom: 40 },
   sectionTitle: {
     marginTop: 20,
     fontSize: 16,
     fontWeight: "bold",
     color: "#2E7D32",
+  },
+  transactionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 20,
+  },
+  transactionCount: {
+    fontSize: 14,
+    color: "#666",
+    marginLeft: 8,
   },
   input: {
     borderWidth: 1,
@@ -291,6 +415,7 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 12,
     backgroundColor: "#fff",
+    fontSize: 14,
   },
   searchInput: {
     borderWidth: 1,
@@ -299,31 +424,122 @@ const styles = StyleSheet.create({
     padding: 10,
     marginTop: 12,
     backgroundColor: "#fff",
+    fontSize: 14,
   },
   submitBtn: {
     backgroundColor: "#1B5E20",
     padding: 15,
     borderRadius: 12,
     marginTop: 25,
+    alignItems: "center",
+  },
+  submitBtnDisabled: {
+    backgroundColor: "#A5D6A7",
+  },
+  editBtn: {
+    backgroundColor: "#FF9800",
+    padding: 15,
+    borderRadius: 12,
+    marginTop: 12,
+    alignItems: "center",
   },
   submitText: {
     color: "#fff",
     textAlign: "center",
     fontWeight: "bold",
+    fontSize: 16,
+  },
+  loadingContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 40,
+  },
+  loadingText: {
+    marginTop: 10,
+    color: "#666",
+    fontSize: 14,
   },
   transactionCard: {
     backgroundColor: "#fff",
-    padding: 12,
-    borderRadius: 10,
-    marginTop: 10,
-    elevation: 2,
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 12,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
-  txName: { fontWeight: "bold", fontSize: 15 },
-  txDate: { fontSize: 12, color: "#666", marginTop: 4 },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  txName: {
+    fontWeight: "bold",
+    fontSize: 16,
+    color: "#1B5E20",
+    flex: 1,
+  },
+  cardDivider: {
+    height: 1,
+    backgroundColor: "#E0E0E0",
+    marginBottom: 12,
+  },
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  txDetail: {
+    fontSize: 14,
+    color: "#555",
+    marginLeft: 8,
+    flex: 1,
+  },
+  statsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: "#F5F6F8",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  statItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+  statDivider: {
+    width: 1,
+    backgroundColor: "#D0D0D0",
+    marginHorizontal: 8,
+  },
+  statLabel: {
+    fontSize: 11,
+    color: "#666",
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 15,
+    fontWeight: "bold",
+    color: "#1B5E20",
+  },
+  cardFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  txDate: {
+    fontSize: 12,
+    color: "#999",
+    marginLeft: 6,
+    fontStyle: "italic",
+  },
   noData: {
     textAlign: "center",
     color: "#999",
-    marginTop: 20,
+    marginTop: 30,
     fontStyle: "italic",
+    fontSize: 14,
   },
 });

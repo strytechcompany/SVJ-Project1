@@ -1,4 +1,3 @@
-// screens/AddOrder.js
 import React, { useState } from "react";
 import {
   View,
@@ -9,6 +8,7 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { base_url } from "./config"; 
 
 export default function AddOrder({ navigation }) {
   const [itemName, setItemName] = useState("");
@@ -20,22 +20,41 @@ export default function AddOrder({ navigation }) {
 
   const paymentOptions = ["UPI", "Cash", "Bank Transfer", "Card"];
 
-  const saveOrder = () => {
+  const saveOrder = async () => {
     if (!itemName || !weight || !customerName || !mobile) {
       Alert.alert("Missing Fields", "Please fill all fields.");
       return;
     }
 
     const newOrder = {
-      id: "ORDER" + Math.floor(Math.random() * 1000),
       itemName,
-      weight,
+      itemWeight: parseFloat(weight),
       customerName,
-      mobile,
+      mobileNumber: mobile,
       paymentType,
     };
 
-    navigation.navigate("Order", { newOrder });
+    try {
+      const response = await fetch(`${base_url}/orders`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newOrder),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        Alert.alert("Success", "Order saved successfully");
+        navigation.navigate("Order", { newOrder: data.order });
+      } else {
+        Alert.alert("Error", data.message || "Failed to save order");
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", "Server not reachable");
+    }
   };
 
   return (
@@ -71,7 +90,6 @@ export default function AddOrder({ navigation }) {
           onChangeText={setWeight}
         />
 
-
         {/* CUSTOMER NAME */}
         <Text style={styles.label}>Customer Name</Text>
         <TextInput
@@ -93,7 +111,6 @@ export default function AddOrder({ navigation }) {
 
         {/* PAYMENT TYPE */}
         <Text style={styles.label}>Payment Type</Text>
-
         <View style={styles.paymentRow}>
           {paymentOptions.map((option) => (
             <TouchableOpacity
@@ -157,13 +174,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 15,
   },
-
   paymentRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     marginTop: 10,
   },
-
   payBtn: {
     borderWidth: 1,
     borderColor: "#1B4D1B",
@@ -173,20 +188,16 @@ const styles = StyleSheet.create({
     marginRight: 10,
     marginBottom: 10,
   },
-
   payBtnActive: {
     backgroundColor: "#1B4D1B",
   },
-
   payText: {
     color: "#1B4D1B",
     fontWeight: "700",
   },
-
   payTextActive: {
     color: "#fff",
   },
-
   saveButton: {
     backgroundColor: "#1B4D1B",
     padding: 16,
