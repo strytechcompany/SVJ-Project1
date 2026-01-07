@@ -167,10 +167,10 @@ export default function CreateTransaction({ navigation }) {
 
         console.log("Fetched items:", data);
 
-        const itemNames = data.map((item) => item.itemName).filter(Boolean);
+        const itemsList = data.map((item) => ({ itemName: item.itemName, weight: item.quantity || 0 })).filter(item => item.itemName);
 
-        console.log("Item names:", itemNames);
-        setItemsList(itemNames);
+        console.log("Items list:", itemsList);
+        setItemsList(itemsList);
 
         const stockObj = {};
         data.forEach((item) => {
@@ -712,19 +712,29 @@ export default function CreateTransaction({ navigation }) {
 
       // Navigate to BillPreview after successful save
       navigation.navigate("BillPreview", {
-        customer: {
-          name: selectedCustomer.name,
-          phone: selectedCustomer.phone || "",
-          shop: selectedCustomer.company || "",
-          id: selectedCustomer.id || "",
-          balance: selectedCustomer.ob,
-          advance: selectedCustomer.ab,
-          type: "B2B",
-          email: selectedCustomer.email || "",
-        },
-        report: calculateReport(),
-        transactions: formatTransactions(),
-      });
+  customer: {
+    name: selectedCustomer.name,
+    phone: selectedCustomer.phone || "",
+    shop: selectedCustomer.company || "",
+    id: selectedCustomer.id || "",
+    balance: selectedCustomer.ob,
+    advance: selectedCustomer.ab,
+    type: "B2B",
+    email: selectedCustomer.email || "",
+  },
+
+  issueItems,
+  receiptItems,
+  cashTable,
+  report: calculateReport(),
+
+  meta: {
+    date,
+    oldBalance,
+    currentBalance: balance,
+  }
+});
+
 
       Alert.alert("Success", "Transaction saved successfully!");
     } catch (error) {
@@ -759,39 +769,6 @@ export default function CreateTransaction({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Customer Search */}
-      <View style={styles.card}>
-        {loadingCustomers ? (
-          <Text style={styles.infoText}>Loading customers...</Text>
-        ) : (
-          <>
-            <View style={styles.searchRow}>
-              <TextInput
-                placeholder="Search customers..."
-                style={styles.searchBox}
-                value={search}
-                onChangeText={handleCustomerNameChange}
-              />
-            </View>
-
-            {showDropdown && filteredCustomers.length > 0 && (
-              <View style={styles.dropdown}>
-                {filteredCustomers.map((cust, index) => (
-                  <TouchableOpacity
-                    key={cust.id || index}
-                    onPress={() => selectCustomer(cust)}
-                    style={styles.listItem}
-                  >
-                    <Text style={styles.listItemText}>
-                      {cust.name} - OB {cust.ob}g
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </>
-        )}
-      </View>
 
       {/* CUSTOMER CART */}
       {!selectedCustomer && !loadingCustomers && (
@@ -844,13 +821,7 @@ export default function CreateTransaction({ navigation }) {
               <Text style={styles.infoText}>
                 Company: {selectedCustomer.company}
               </Text>
-              <TextInput
-                style={styles.input}
-                value={phone}
-                placeholder="Phone Number"
-                keyboardType="phone-pad"
-                editable={false}
-              />
+              <Text style={styles.infoText}>Phone: {selectedCustomer.phone}</Text>
             </View>
 
             <View style={styles.balanceContainer}>
@@ -893,19 +864,19 @@ export default function CreateTransaction({ navigation }) {
               {itemsList.length > 0 ? (
                 itemsList
                   .filter((it) =>
-                    it.toLowerCase().includes(issueItemSearch.toLowerCase())
+                    it.itemName.toLowerCase().includes(issueItemSearch.toLowerCase())
                   )
                   .map((it, idx) => (
                     <TouchableOpacity
                       key={idx}
                       style={styles.listItem}
                       onPress={() => {
-                        setSelectedIssueItem(it);
+                        setSelectedIssueItem(it.itemName);
                         setIssueItemDropdownOpen(false);
-                        setIssueItemSearch(it);
+                        setIssueItemSearch(it.itemName);
                       }}
                     >
-                      <Text style={styles.listItemText}>{it}</Text>
+                      <Text style={styles.listItemText}>{it.itemName} - {it.weight}g</Text>
                     </TouchableOpacity>
                   ))
               ) : (
@@ -1046,19 +1017,19 @@ export default function CreateTransaction({ navigation }) {
               {itemsList.length > 0 ? (
                 itemsList
                   .filter((it) =>
-                    it.toLowerCase().includes(receiptItemSearch.toLowerCase())
+                    it.itemName.toLowerCase().includes(receiptItemSearch.toLowerCase())
                   )
                   .map((it, idx) => (
                     <TouchableOpacity
                       key={idx}
                       style={styles.listItem}
                       onPress={() => {
-                        setSelectedReceiptItem(it);
+                        setSelectedReceiptItem(it.itemName);
                         setReceiptItemDropdownOpen(false);
-                        setReceiptItemSearch(it);
+                        setReceiptItemSearch(it.itemName);
                       }}
                     >
-                      <Text style={styles.listItemText}>{it}</Text>
+                      <Text style={styles.listItemText}>{it.itemName} - {it.weight}g</Text>
                     </TouchableOpacity>
                   ))
               ) : (
@@ -1079,8 +1050,19 @@ export default function CreateTransaction({ navigation }) {
                 placeholder="0.000"
               />
             </View>
-          </View>
 
+            <View style={styles.inputBox}>
+              <Text style={styles.subLabel}>Result (g)</Text>
+              <TextInput
+                style={styles.input}
+                value={receiptStone}
+                onChangeText={setReceiptStone}
+                keyboardType="decimal-pad"
+                placeholder="0.000"
+              />
+            </View>
+          </View>
+        
           <View style={styles.row}>
             <View style={styles.inputBox}>
               <Text style={styles.subLabel}>Touch (%)</Text>

@@ -6,7 +6,8 @@ const ItemSchema = new mongoose.Schema({
   buyingTouch: { type: Number, required: true },
   sellingTouch: { type: Number, required: true },
   percentage: { type: Number, required: true },
-  date: { type: String, required: true }, // store date as string like "dd/mm/yyyy"
+  date: { type: String, required: true }, 
+  type: { type: String, enum: ['issue', 'receipt'], default: null }, // issue or receipt
 }, { timestamps: true });
 
 module.exports = mongoose.model('Item', ItemSchema);

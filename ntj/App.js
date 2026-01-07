@@ -43,6 +43,9 @@ import StockMaster from "./components/StockMaster";
 import ItemEntry from "./components/ItemEntry";
 import ItemList from "./components/ItemList";
 import CustomerDataList from "./components/CustomerDataList";
+import Dealer from "./components/Dealer";
+import PurchaseScreen from "./components/Purchase"
+
 
 const Stack = createNativeStackNavigator();
 
@@ -104,6 +107,9 @@ export default function App() {
         <Stack.Screen name="Settings" component={SettingsScreen} />
         {/* {/Customer Data List/} */}
         <Stack.Screen name="CustomerDataList" component={CustomerDataList} />
+        <Stack.Screen name="Dealer" component={Dealer} />
+        <Stack.Screen name="PurchaseScreen" component={PurchaseScreen} />
+      
       </Stack.Navigator>
     </NavigationContainer>
   );

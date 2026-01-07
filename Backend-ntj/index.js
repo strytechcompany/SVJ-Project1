@@ -16,6 +16,7 @@ const RetailTransactionRoutes = require("./routes/RetailTransaction");
 const orderRoutes = require('./routes/Order');
 const suspenseRoutes = require("./routes/SuspenseTransaction");
 const dealerRoutes = require("./routes/Dealer");
+const PurchaseRoutes = require("./routes/Purchase");
 
 const app = express();
 const PORT = 3000;
@@ -43,6 +44,7 @@ app.use("/api/retail", RetailTransactionRoutes);
 app.use('/api/orders', orderRoutes);
 app.use("/api/suspense", suspenseRoutes);
 app.use("/api/customersDealer", dealerRoutes);
+app.use("/api/purchases", PurchaseRoutes);
 
 // Test route
 app.get('/', (req, res) => {

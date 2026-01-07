@@ -23,6 +23,10 @@ export default function ItemsEntry({ navigation }) {
   const [sellingTouch, setSellingTouch] = useState("");
   const [percentage, setPercentage] = useState("");
 
+  // two separate checkboxes
+  const [issueChecked, setIssueChecked] = useState(false);
+  const [receiptChecked, setReceiptChecked] = useState(false);
+
   // -------- Meta --------
   const [selectedDate, setSelectedDate] = useState("");
   const [items, setItems] = useState([]);
@@ -100,6 +104,8 @@ export default function ItemsEntry({ navigation }) {
       sellingTouch: parseFloat(sellingTouch),
       percentage: parseFloat(percentage),
       date: selectedDate,
+      issue: issueChecked,
+      receipt: receiptChecked,
     };
 
     try {
@@ -157,6 +163,8 @@ export default function ItemsEntry({ navigation }) {
     setBuyingTouch("");
     setSellingTouch("");
     setPercentage("");
+    setIssueChecked(false);
+    setReceiptChecked(false);
     setEditingItemId(null);
   };
 
@@ -169,6 +177,18 @@ export default function ItemsEntry({ navigation }) {
     setPercentage(item.percentage.toString());
     setSelectedDate(item.date);
     setEditingItemId(item._id || item.id);
+
+    if (typeof item.issue === "boolean") {
+      setIssueChecked(item.issue);
+    } else {
+      setIssueChecked(false);
+    }
+
+    if (typeof item.receipt === "boolean") {
+      setReceiptChecked(item.receipt);
+    } else {
+      setReceiptChecked(false);
+    }
   };
 
   // -------- Recent 10 Transactions --------
@@ -260,6 +280,41 @@ export default function ItemsEntry({ navigation }) {
             editable={!loading}
           />
 
+          {/* TWO CHECKBOXES: ISSUE & RECEIPT (only checkboxes, no percentage display) */}
+          <View style={styles.checkboxRowTwo}>
+            {/* Issue box */}
+            <TouchableOpacity
+              style={styles.checkboxItem}
+              onPress={() => setIssueChecked((prev) => !prev)}
+              activeOpacity={0.7}
+            >
+              <Icon
+                name={
+                  issueChecked ? "checkbox-marked" : "checkbox-blank-outline"
+                }
+                size={22}
+                color="#1B5E20"
+              />
+              <Text style={styles.checkboxLabel}>Issue</Text>
+            </TouchableOpacity>
+
+            {/* Receipt box */}
+            <TouchableOpacity
+              style={styles.checkboxItem}
+              onPress={() => setReceiptChecked((prev) => !prev)}
+              activeOpacity={0.7}
+            >
+              <Icon
+                name={
+                  receiptChecked ? "checkbox-marked" : "checkbox-blank-outline"
+                }
+                size={22}
+                color="#1B5E20"
+              />
+              <Text style={styles.checkboxLabel}>Receipt</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* SAVE / UPDATE BUTTON */}
           <TouchableOpacity
             style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
@@ -308,7 +363,9 @@ export default function ItemsEntry({ navigation }) {
             </View>
           ) : filteredTransactions.length === 0 ? (
             <Text style={styles.noData}>
-              {search ? "No matching transactions found" : "No transactions found"}
+              {search
+                ? "No matching transactions found"
+                : "No transactions found"}
             </Text>
           ) : (
             filteredTransactions.map((item, index) => (
@@ -324,28 +381,36 @@ export default function ItemsEntry({ navigation }) {
 
                 <View style={styles.detailRow}>
                   <Icon name="text-box-outline" size={16} color="#666" />
-                  <Text style={styles.txDetail}>{item.itemDetails || "N/A"}</Text>
+                  <Text style={styles.txDetail}>
+                    {item.itemDetails || "N/A"}
+                  </Text>
                 </View>
 
                 <View style={styles.statsContainer}>
                   <View style={styles.statItem}>
                     <Text style={styles.statLabel}>Buying Touch</Text>
                     <Text style={styles.statValue}>
-                      {item.buyingTouch != null ? `${item.buyingTouch}%` : "N/A"}
+                      {item.buyingTouch != null
+                        ? `${item.buyingTouch}%`
+                        : "N/A"}
                     </Text>
                   </View>
                   <View style={styles.statDivider} />
                   <View style={styles.statItem}>
                     <Text style={styles.statLabel}>Selling Touch</Text>
                     <Text style={styles.statValue}>
-                      {item.sellingTouch != null ? `${item.sellingTouch}%` : "N/A"}
+                      {item.sellingTouch != null
+                        ? `${item.sellingTouch}%`
+                        : "N/A"}
                     </Text>
                   </View>
                   <View style={styles.statDivider} />
                   <View style={styles.statItem}>
                     <Text style={styles.statLabel}>Percentage</Text>
                     <Text style={styles.statValue}>
-                      {item.percentage != null ? `${item.percentage}%` : "N/A"}
+                      {item.percentage != null
+                        ? `${item.percentage}%`
+                        : "N/A"}
                     </Text>
                   </View>
                 </View>
@@ -404,9 +469,11 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   transactionCount: {
-    fontSize: 14,
+    fontSize: 20,
     color: "#666",
     marginLeft: 8,
+    fontWeight: "bold",
+    top: 10,
   },
   input: {
     borderWidth: 1,
@@ -541,5 +608,22 @@ const styles = StyleSheet.create({
     marginTop: 30,
     fontStyle: "italic",
     fontSize: 14,
+  },
+
+  // TWO CHECKBOXES ROW (Issue + Receipt)
+  checkboxRowTwo: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 16,
+    justifyContent: "space-between",
+  },
+  checkboxItem: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  checkboxLabel: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: "#333",
   },
 });

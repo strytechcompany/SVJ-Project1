@@ -25,8 +25,6 @@ router.post("/", async (req, res) => {
     const newDealer = new Dealer({
       customerName,
       phoneNumber,
-      emailId,
-      shopName,
       gstin,
       address,
       oldBalance: oldBalance || 0,

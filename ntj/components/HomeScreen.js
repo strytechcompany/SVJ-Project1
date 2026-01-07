@@ -173,6 +173,14 @@ export default function HomeScreen() {
           <Text style={styles.menuText}>Users List</Text>
         </TouchableOpacity>
 
+      <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => handleMenuNavigation("Purchase")}
+        >
+          <Icon name="account-group-outline" size={25} color="#fff" />
+          <Text style={styles.menuText}>Purchase</Text>
+        </TouchableOpacity>
+        
         <TouchableOpacity
           style={styles.menuItem}
           onPress={() => handleMenuNavigation("WorkerList")}

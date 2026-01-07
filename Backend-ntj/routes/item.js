@@ -5,13 +5,42 @@ const Item = require('../models/Item');
 // CREATE NEW ITEM
 router.post('/', async (req, res) => {
   try {
-    const { stockName, itemDetails, buyingTouch, sellingTouch, percentage, date } = req.body;
+    const { 
+      stockName, 
+      itemDetails, 
+      buyingTouch, 
+      sellingTouch, 
+      percentage, 
+      date,
+      issue,
+      receipt 
+    } = req.body;
 
     if (!stockName || !itemDetails || buyingTouch == null || sellingTouch == null || percentage == null || !date) {
-      return res.status(400).json({ message: "All fields are required" });
+      return res.status(400).json({ message: "All required fields must be filled" });
     }
 
-    const newItem = new Item({ stockName, itemDetails, buyingTouch, sellingTouch, percentage, date });
+    // Determine type based on checkboxes
+    let type = null;
+    if (issue && receipt) {
+      // If both are checked, you can decide the priority or handle differently
+      type = 'issue'; // Default to issue if both checked
+    } else if (issue) {
+      type = 'issue';
+    } else if (receipt) {
+      type = 'receipt';
+    }
+
+    const newItem = new Item({ 
+      stockName, 
+      itemDetails, 
+      buyingTouch, 
+      sellingTouch, 
+      percentage, 
+      date,
+      type
+    });
+    
     const savedItem = await newItem.save();
 
     res.status(201).json({ message: 'Item created successfully', item: savedItem });
@@ -47,11 +76,38 @@ router.get('/:id', async (req, res) => {
 // UPDATE ITEM BY ID
 router.put('/:id', async (req, res) => {
   try {
-    const { stockName, itemDetails, buyingTouch, sellingTouch, percentage, date } = req.body;
+    const { 
+      stockName, 
+      itemDetails, 
+      buyingTouch, 
+      sellingTouch, 
+      percentage, 
+      date,
+      issue,
+      receipt 
+    } = req.body;
+
+    // Determine type based on checkboxes
+    let type = null;
+    if (issue && receipt) {
+      type = 'issue'; // Default to issue if both checked
+    } else if (issue) {
+      type = 'issue';
+    } else if (receipt) {
+      type = 'receipt';
+    }
 
     const updatedItem = await Item.findByIdAndUpdate(
       req.params.id,
-      { stockName, itemDetails, buyingTouch, sellingTouch, percentage, date },
+      { 
+        stockName, 
+        itemDetails, 
+        buyingTouch, 
+        sellingTouch, 
+        percentage, 
+        date,
+        type
+      },
       { new: true, runValidators: true }
     );
 

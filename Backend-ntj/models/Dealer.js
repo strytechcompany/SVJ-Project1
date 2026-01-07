@@ -11,14 +11,6 @@ const dealerSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
-  emailId: {
-    type: String,
-    trim: true,
-  },
-  shopName: {
-    type: String,
-    trim: true,
-  },
   gstin: {
     type: String,
     trim: true,
@@ -40,7 +32,7 @@ const dealerSchema = new mongoose.Schema({
     default: "Dealer",
   },
 }, {
-  timestamps: true, // createdAt and updatedAt
+  timestamps: true,
 });
 
 module.exports = mongoose.model("Dealer", dealerSchema);
