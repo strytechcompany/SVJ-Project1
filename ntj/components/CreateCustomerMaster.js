@@ -16,72 +16,132 @@ import { base_url } from "./config";
 export default function CreateCustomerMaster({ navigation, route }) {
   const customers = route.params?.customers || [];
 
-  // Get type from navigation (B2C or B2B)
+  // Get type from navigation (B2C, B2B, or Dealer)
   const [customerType, setCustomerType] = useState(route.params?.type || "B2C");
 
   const [customerName, setCustomerName] = useState("");
   const [customerNumber, setCustomerNumber] = useState("");
   const [email, setEmail] = useState("");
   const [shopName, setShopName] = useState("");
+  const [gstin, setGstin] = useState(""); // Dealer/B2B specific
+  const [address, setAddress] = useState(""); // Dealer specific
   const [oldBalance, setOldBalance] = useState("");
   const [advanceBalance, setAdvanceBalance] = useState("");
 
-  // Save customer to API
+  // Save customer function
   const saveCustomer = async () => {
     if (!customerName || !customerNumber) {
       Alert.alert("Error", "Name and Phone Number are required.");
       return;
     }
 
+    // Check locally if the name already exists in the current list
+    const nameExists = customers.some(
+      (c) => c.customerName.toLowerCase() === customerName.trim().toLowerCase()
+    );
+    if (nameExists) {
+      Alert.alert(
+        "Duplicate Name ❌",
+        `${customerType} Customer with name "${customerName}" already exists. Please use a different name.`
+      );
+      return;
+    }
+
     const newCustomer = {
       customerName,
       phoneNumber: customerNumber,
-      emailId: email,
+      emailId: customerType !== "Dealer" ? email : undefined,
       shopName,
+      gstin: undefined,
+      address: customerType !== "Dealer" ? address : undefined,
       oldBalance: parseFloat(oldBalance) || 0,
       advanceBalance: parseFloat(advanceBalance) || 0,
+      customerType,
     };
 
     try {
       let url = "";
-      if (customerType === "B2C") {
-        url = `${base_url}/customersB2C`;
-      } else {
-        url = `${base_url}/customers`;
-      }
+      if (customerType === "B2C") url = `${base_url}/customersB2C`;
+      else if (customerType === "B2B") url = `${base_url}/customersB2B`;
+      else if (customerType === "Dealer") url = `${base_url}/customersDealer`;
 
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newCustomer),
       });
 
       const data = await response.json();
 
-      if (response.ok) {
-        Alert.alert("Success", "Customer saved successfully");
-        navigation.navigate("CustomerMasterList", {
+      // Handle backend duplicate error
+      if (!response.ok && data.message?.toLowerCase().includes("already exists")) {
+        Alert.alert(
+          "Duplicate Name ❌",
+          `${customerType} Customer with name "${customerName}" already exists. Please use a different name.`
+        );
+        return;
+      }
+
+      // Success
+      if (response.ok && data) {
+        Alert.alert("Success ✅", `${customerType} Customer saved successfully`);
+
+        // Reset form fields
+        setCustomerName("");
+        setCustomerNumber("");
+        setEmail("");
+        setShopName("");
+        setGstin("");
+        setAddress("");
+        setOldBalance("");
+        setAdvanceBalance("");
+
+        // Navigate to type-specific list
+        const listScreen = getListScreenName(customerType);
+        navigation.navigate(listScreen, {
           customers: [...customers, data],
+          type: customerType,
         });
       } else {
-        Alert.alert("Error", data.message || "Failed to save customer");
+        Alert.alert("Error ❌", data.message || "Failed to save customer");
       }
     } catch (error) {
       console.error(error);
-      Alert.alert("Error", "Something went wrong while saving customer");
+      Alert.alert("Error ❌", "Something went wrong while saving customer");
     }
   };
+
+  // Helper to get list screen name based on type
+  const getListScreenName = (type) => {
+    switch (type) {
+      case "B2B": return "CustomerMasterListB2B";
+      case "Dealer": return "CustomerMasterListDealer";
+      default: return "CustomerMasterListB2C"; // B2C default
+    }
+  };
+
+  // Render input helper
+  const renderInput = (label, value, setter, keyboard = "default") => (
+    <View style={styles.inputContainer}>
+      <Text style={styles.label}>{label} *</Text>
+      <TextInput
+        style={styles.input}
+        value={value}
+        keyboardType={keyboard}
+        onChangeText={setter}
+        placeholder={label}
+      />
+    </View>
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: "#fff" }}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{ top: 14 }}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={28} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerText}>Create Customer</Text>
+        <Text style={styles.headerText}>Create {customerType} Customer</Text>
       </View>
 
       {/* Keyboard Avoiding View */}
@@ -99,7 +159,7 @@ export default function CreateCustomerMaster({ navigation, route }) {
             flexGrow: 1,
           }}
         >
-          {/* Customer Type */}
+          {/* Customer Type Selector */}
           <View style={styles.typeRow}>
             <TouchableOpacity
               style={[styles.typeBtn, customerType === "B2B" && styles.typeActive]}
@@ -118,38 +178,56 @@ export default function CreateCustomerMaster({ navigation, route }) {
                 B2C
               </Text>
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.typeBtn, customerType === "Dealer" && styles.typeActive]}
+              onPress={() => setCustomerType("Dealer")}
+            >
+              <Text style={[styles.typeText, customerType === "Dealer" && styles.typeActiveText]}>
+                Dealer
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          {/* Input Fields */}
-          {renderInput("Customer Name", customerName, setCustomerName)}
-          {renderInput("Phone Number", customerNumber, setCustomerNumber, "numeric")}
-          {renderInput("Email ID", email, setEmail)}
-          {customerType === "B2B" && renderInput("Shop Name", shopName, setShopName)}
+          {/* COMMON FIELDS - All customer types */}
+          {renderInput(customerType === "Dealer" ? "Dealer Name" : "Customer Name", customerName, setCustomerName)}
+          {renderInput("Phone Number", customerNumber, setCustomerNumber, "phone-pad")}
+
+          {/* B2B SPECIFIC FIELDS */}
+          {customerType === "B2B" && (
+            <>
+              {renderInput("Shop Name", shopName, setShopName)}
+              {renderInput("Address", address, setAddress, "default")}
+            </>
+          )}
+
+          {/* B2C SPECIFIC FIELDS */}
+          {customerType === "B2C" && (
+            <>
+              {renderInput("Address", address, setAddress, "default")}
+            </>
+          )}
+
+          {/* DEALER SPECIFIC FIELDS */}
+          {customerType === "Dealer" && (
+            <>
+              {renderInput("Address", address, setAddress, "default")}
+            </>
+          )}
+
+          {/* BALANCE FIELDS - All customer types */}
           {renderInput("Old Balance", oldBalance, setOldBalance, "numeric")}
           {renderInput("Advance Balance", advanceBalance, setAdvanceBalance, "numeric")}
 
           {/* Save Button */}
           <TouchableOpacity style={styles.saveBtn} onPress={saveCustomer}>
-            <Text style={styles.saveText}>Save Customer</Text>
+            <Text style={styles.saveText}>Save {customerType} Customer</Text>
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
 }
-
-const renderInput = (label, value, setter, keyboard = "default") => (
-  <View>
-    <Text style={styles.label}>{label}</Text>
-    <TextInput
-      style={styles.input}
-      value={value}
-      keyboardType={keyboard}
-      onChangeText={setter}
-      placeholder={label}
-    />
-  </View>
-);
 
 const styles = StyleSheet.create({
   header: {
@@ -161,6 +239,9 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
+  },
+  backBtn: {
+    top: 14,
   },
   headerText: {
     color: "#fff",
@@ -176,7 +257,7 @@ const styles = StyleSheet.create({
   },
   typeBtn: {
     width: 120,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: 10,
     backgroundColor: "#e6e6e6",
     marginHorizontal: 6,
@@ -188,33 +269,39 @@ const styles = StyleSheet.create({
   typeText: {
     fontSize: 16,
     color: "#333",
+    fontWeight: "500",
   },
   typeActiveText: {
     color: "#fff",
     fontWeight: "700",
   },
-  label: {
+  inputContainer: {
     marginTop: 15,
+  },
+  label: {
     fontWeight: "600",
     color: "#333",
+    marginBottom: 5,
   },
   input: {
     borderWidth: 1,
-    borderColor: "#ccc",
+    borderColor: "#ddd",
     borderRadius: 10,
-    padding: 10,
-    marginTop: 5,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: "#fafafa",
   },
   saveBtn: {
     backgroundColor: "#2E7D32",
-    padding: 15,
+    padding: 16,
     borderRadius: 12,
     alignItems: "center",
-    marginVertical: 20,
+    marginTop: 30,
+    marginBottom: 20,
   },
   saveText: {
     color: "#fff",
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: "bold",
   },
 });
