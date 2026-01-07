@@ -1,9 +1,8 @@
-// routes/customer.js
 const express = require('express');
 const router = express.Router();
 const Customer = require('../models/Customer');
 
-// Get all customers
+// Get all B2B customers
 router.get('/', async (req, res) => {
   try {
     const customers = await Customer.find();
@@ -17,9 +16,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
-    if (!customer) {
-      return res.status(404).json({ message: 'Customer not found' });
-    }
+    if (!customer) return res.status(404).json({ message: 'Customer not found' });
     res.json(customer);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -28,16 +25,22 @@ router.get('/:id', async (req, res) => {
 
 // Create new customer
 router.post('/', async (req, res) => {
-  const customer = new Customer({
-    customerName: req.body.customerName,
-    phoneNumber: req.body.phoneNumber,
-    emailId: req.body.emailId,
-    shopName: req.body.shopName,
-    oldBalance: req.body.oldBalance,
-    advanceBalance: req.body.advanceBalance
-  });
+  const { customerName, phoneNumber, shopName, address, oldBalance, advanceBalance } = req.body;
 
   try {
+    // Check duplicate
+    const exists = await Customer.findOne({ customerName: customerName.trim(), shopName: shopName.trim() });
+    if (exists) return res.status(400).json({ message: 'Customer already exists' });
+
+    const customer = new Customer({
+      customerName,
+      phoneNumber,
+      shopName,
+      address,
+      oldBalance: oldBalance || 0,
+      advanceBalance: advanceBalance || 0,
+    });
+
     const newCustomer = await customer.save();
     res.status(201).json(newCustomer);
   } catch (err) {
@@ -49,16 +52,16 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
-    if (!customer) {
-      return res.status(404).json({ message: 'Customer not found' });
-    }
+    if (!customer) return res.status(404).json({ message: 'Customer not found' });
 
-    if (req.body.customerName) customer.customerName = req.body.customerName;
-    if (req.body.phoneNumber) customer.phoneNumber = req.body.phoneNumber;
-    if (req.body.emailId) customer.emailId = req.body.emailId;
-    if (req.body.shopName) customer.shopName = req.body.shopName;
-    if (req.body.oldBalance !== undefined) customer.oldBalance = req.body.oldBalance;
-    if (req.body.advanceBalance !== undefined) customer.advanceBalance = req.body.advanceBalance;
+    const { customerName, phoneNumber, shopName, address, oldBalance, advanceBalance } = req.body;
+
+    if (customerName) customer.customerName = customerName;
+    if (phoneNumber) customer.phoneNumber = phoneNumber;
+    if (shopName) customer.shopName = shopName;
+    if (address) customer.address = address;
+    if (oldBalance !== undefined) customer.oldBalance = oldBalance;
+    if (advanceBalance !== undefined) customer.advanceBalance = advanceBalance;
 
     const updatedCustomer = await customer.save();
     res.json(updatedCustomer);
@@ -71,9 +74,7 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
-    if (!customer) {
-      return res.status(404).json({ message: 'Customer not found' });
-    }
+    if (!customer) return res.status(404).json({ message: 'Customer not found' });
 
     await customer.deleteOne();
     res.json({ message: 'Customer deleted successfully' });

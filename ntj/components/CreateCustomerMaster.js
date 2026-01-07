@@ -62,7 +62,7 @@ export default function CreateCustomerMaster({ navigation, route }) {
     try {
       let url = "";
       if (customerType === "B2C") url = `${base_url}/customersB2C`;
-      else if (customerType === "B2B") url = `${base_url}/customersB2B`;
+      else if (customerType === "B2B") url = `${base_url}/customers`;
       else if (customerType === "Dealer") url = `${base_url}/customersDealer`;
 
       const response = await fetch(url, {

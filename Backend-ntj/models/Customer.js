@@ -1,47 +1,49 @@
-// models/Customer.js
 const mongoose = require('mongoose');
 
+// Generate 6-digit customer ID
 function generateCustomerId() {
-  return Math.floor(100000 + Math.random() * 900000); // 6-digit random number
+  return Math.floor(100000 + Math.random() * 900000);
 }
 
 const customerSchema = new mongoose.Schema({
   customerId: {
     type: Number,
     default: generateCustomerId,
-    unique: true
+    unique: true,
   },
   customerName: {
     type: String,
     required: true,
-    trim: true
+    trim: true,
   },
   phoneNumber: {
     type: String,
     required: true,
-    trim: true
-  },
-  emailId: {
-    type: String,
-    required: true,
     trim: true,
-    lowercase: true
   },
   shopName: {
     type: String,
     required: true,
-    trim: true
+    trim: true,
+  },
+  address: {
+    type: String,
+    required: true,
+    trim: true,
   },
   oldBalance: {
     type: Number,
-    default: 0
+    default: 0,
   },
   advanceBalance: {
     type: Number,
-    default: 0
-  }
+    default: 0,
+  },
 }, {
   timestamps: true
 });
+
+// Unique index to prevent duplicate customerName + shopName
+customerSchema.index({ customerName: 1, shopName: 1 }, { unique: true });
 
 module.exports = mongoose.model('Customer', customerSchema);

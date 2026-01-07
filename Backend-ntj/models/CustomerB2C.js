@@ -20,10 +20,9 @@ const customerB2CSchema = new mongoose.Schema({
     type: String, 
     required: true 
   },
-  emailId: { 
+  address: { 
     type: String, 
-    required: true, 
-    unique: true 
+    required: true 
   },
   oldBalance: { 
     type: Number, 
