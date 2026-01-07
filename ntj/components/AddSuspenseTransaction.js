@@ -6,10 +6,10 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  Alert,
   Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { base_url } from "./config";
 
 export default function AddSuspenseTransaction({ navigation }) {
   const [name, setName] = useState("");
@@ -23,15 +23,49 @@ export default function AddSuspenseTransaction({ navigation }) {
   const [statusModal, setStatusModal] = useState(false);
   const [paymentModal, setPaymentModal] = useState(false);
 
-  const saveTransaction = () => {
+  // Success Modal State
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+
+  // ------------------------------------------
+  // POST REQUEST - SAVE TRANSACTION
+  // ------------------------------------------
+  const saveTransaction = async () => {
     if (!name || !amount || !oldBalance || !newBalance || !date) {
-      Alert.alert("Error", "Please fill all details");
+      alert("Please fill all details");
       return;
     }
 
-    Alert.alert("Success", "Transaction Added Successfully", [
-      { text: "OK", onPress: () => navigation.goBack() },
-    ]);
+    try {
+      const response = await fetch(`${base_url}/suspense`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          amount: Number(amount),
+          oldBalance: Number(oldBalance),
+          newBalance: Number(newBalance),
+          date,
+          status,
+          paymentType,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.status === 201) {
+        // Show success modal
+        setShowSuccessModal(true);
+      } else {
+        alert(data.error || "Something went wrong");
+      }
+    } catch (err) {
+      alert("Network Error: " + err.message);
+    }
+  };
+
+  const handleSuccessClose = () => {
+    setShowSuccessModal(false);
+    navigation.goBack();
   };
 
   return (
@@ -93,7 +127,7 @@ export default function AddSuspenseTransaction({ navigation }) {
           placeholder="YYYY-MM-DD"
         />
 
-        {/* Status Drop-down */}
+        {/* Status Dropdown */}
         <Text style={styles.label}>Status</Text>
         <TouchableOpacity
           style={styles.dropdown}
@@ -103,7 +137,7 @@ export default function AddSuspenseTransaction({ navigation }) {
           <Ionicons name="chevron-down" size={20} color="#1B4D1B" />
         </TouchableOpacity>
 
-        {/* Payment Type Drop-down */}
+        {/* Payment Type Dropdown */}
         <Text style={styles.label}>Payment Type</Text>
         <TouchableOpacity
           style={styles.dropdown}
@@ -164,6 +198,25 @@ export default function AddSuspenseTransaction({ navigation }) {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Success Popup Modal */}
+      <Modal transparent visible={showSuccessModal} animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.successBox}>
+            <Ionicons name="checkmark-circle" size={80} color="#1B4D1B" />
+            <Text style={styles.successTitle}>Success!</Text>
+            <Text style={styles.successSubtext}>
+              Transaction has been saved successfully.
+            </Text>
+            <TouchableOpacity
+              style={styles.successBtn}
+              onPress={handleSuccessClose}
+            >
+              <Text style={styles.successBtnText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -183,18 +236,15 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginLeft: 20,
   },
-
   container: {
     padding: 20,
   },
-
   label: {
     fontSize: 16,
     fontWeight: "600",
     marginTop: 15,
     color: "#1B4D1B",
   },
-
   input: {
     backgroundColor: "#f2f2f2",
     padding: 12,
@@ -202,7 +252,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 16,
   },
-
   dropdown: {
     backgroundColor: "#f2f2f2",
     padding: 12,
@@ -215,7 +264,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#333",
   },
-
   saveBtn: {
     backgroundColor: "#1B4D1B",
     padding: 15,
@@ -228,7 +276,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
   },
-
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.4)",
@@ -249,5 +296,37 @@ const styles = StyleSheet.create({
   modalText: {
     fontSize: 18,
     color: "#1B4D1B",
+  },
+  successBox: {
+    backgroundColor: "#fff",
+    width: "80%",
+    borderRadius: 15,
+    padding: 25,
+    alignItems: "center",
+    elevation: 10,
+  },
+  successTitle: {
+    fontSize: 24,
+    fontWeight: "700",
+    marginTop: 15,
+    color: "#1B4D1B",
+  },
+  successSubtext: {
+    fontSize: 16,
+    textAlign: "center",
+    marginVertical: 15,
+    color: "#333",
+  },
+  successBtn: {
+    backgroundColor: "#1B4D1B",
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 10,
+    marginTop: 10,
+  },
+  successBtnText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "600",
   },
 });
