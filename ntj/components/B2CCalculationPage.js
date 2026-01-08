@@ -16,7 +16,7 @@ import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { Feather } from "@expo/vector-icons";
 import { base_url } from "./config";
 
-export default function CreateTransaction({ navigation }) {
+export default function CreateTransaction({ navigation, route }) {
   const [b2cCustomers, setB2cCustomers] = useState([]);
 
   // ---------------- CUSTOMER STATES ----------------
@@ -29,6 +29,8 @@ export default function CreateTransaction({ navigation }) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [filteredCustomersByPhone, setFilteredCustomersByPhone] = useState([]);
   const [showPhoneDropdown, setShowPhoneDropdown] = useState(false);
+  const defaultGoldRate = route?.params?.goldRate || "11500";
+  
 
   const [showItems, setShowItems] = useState(false);
 
@@ -37,7 +39,7 @@ export default function CreateTransaction({ navigation }) {
   const [weight, setWeight] = useState("");
   const [touch, setTouch] = useState("");
   const [wastage, setWastage] = useState("");
-  const [rate, setRate] = useState("");
+  const [rate, setRate] = useState(defaultGoldRate);
 
   const [items, setItems] = useState([]);
 
@@ -143,20 +145,41 @@ export default function CreateTransaction({ navigation }) {
     }
   }, [weight, selectedItem]);
 
-  // ---------------- ADD ITEM ----------------
-  const addRow = async () => {
+ // ---------------- ADD ITEM (FIXED VERSION) ----------------
+const addRow = async () => {
   console.log("🔵 ADD ITEM - Function called");
+  console.log("🔍 Current values:", { itemName, weight, rate, touch, wastage });
   
-  if (!itemName || !weight || !rate) {
-    console.log("❌ ADD ITEM - Validation failed: Missing required fields");
-    Alert.alert("Required", "Enter Item, Weight & Rate");
+  // ✅ FIX 1: Better validation
+  if (!itemName || !itemName.trim()) {
+    console.log("❌ ADD ITEM - Missing item name");
+    Alert.alert("Required", "Enter Item Name");
     return;
   }
 
-  const wt = Number(weight);
-  const t = Number(touch || 0);
-  const w = Number(wastage || 0);
-  const r = Number(rate);
+  if (!weight || parseFloat(weight) <= 0) {
+    console.log("❌ ADD ITEM - Invalid weight");
+    Alert.alert("Required", "Enter valid Weight");
+    return;
+  }
+
+  if (!rate || parseFloat(rate) <= 0) {
+    console.log("❌ ADD ITEM - Invalid rate");
+    Alert.alert("Required", "Enter valid Rate");
+    return;
+  }
+
+  // ✅ FIX 2: Check if item is selected
+  if (!selectedItem) {
+    console.log("❌ ADD ITEM - No item selected from stock");
+    Alert.alert("Error", "Please select an item from the stock list");
+    return;
+  }
+
+  const wt = parseFloat(weight);
+  const t = parseFloat(touch || 0);
+  const w = parseFloat(wastage || 0);
+  const r = parseFloat(rate);
 
   const total = wt * r;
   const gst = total * 0.03;
@@ -172,110 +195,83 @@ export default function CreateTransaction({ navigation }) {
     final
   });
 
-  if (!selectedItem) {
-    console.log("❌ ADD ITEM - No item selected from stock");
-    Alert.alert("Error", "Please select an item from the stock list");
-    return;
-  }
-
   console.log("🔍 ADD ITEM - Selected item:", selectedItem);
 
   if (selectedItem.weight < wt) {
     console.log(`❌ ADD ITEM - Insufficient stock. Available: ${selectedItem.weight}, Required: ${wt}`);
     Alert.alert(
       "Insufficient Stock",
-      `Available: ${selectedItem.weight.toFixed(3)} g`
+      `Available: ${selectedItem.weight.toFixed(3)} g\nRequired: ${wt.toFixed(3)} g`
     );
     return;
   }
 
   const newWeight = selectedItem.weight - wt;
-  console.log(`📉 ADD ITEM - Stock will be updated from ${selectedItem.weight}g to ${newWeight}g`);
+  console.log(`📉 ADD ITEM - Stock will be updated from ${selectedItem.weight}g to ${newWeight.toFixed(3)}g`);
 
   try {
     console.log("🚀 ADD ITEM - Starting API calls...");
 
     // 1️⃣ SAVE ITEM TO AddItem DATABASE
-    console.log("📤 ADD ITEM - Saving to AddItem DB...", {
-      endpoint: `${base_url}/addItem`,
-      payload: {
-        customerName,
-        invoiceNo: invoiceNo || "N/A",
-        itemName,
-        weight: wt,
-        touch: t,
-        wm: w,
-        rate: r,
-        total,
-        gst,
-        final,
-        modifiedWeight: parseFloat(modifiedWeight),
-        stockMasterId: selectedItem.id,
-        date: date.split("/").reverse().join("-"),
-      }
-    });
+    const addItemPayload = {
+      customerName: customerName,
+      invoiceNo: invoiceNo || "N/A",
+      itemName: itemName,
+      weight: wt,
+      touch: t,
+      wm: w,
+      rate: r,
+      total: total,
+      gst: gst,
+      final: final,
+      modifiedWeight: parseFloat(modifiedWeight || 0),
+      stockMasterId: selectedItem.id,
+      date: date.split("/").reverse().join("-"),
+    };
+
+    console.log("📤 ADD ITEM - Saving to AddItem DB:", addItemPayload);
 
     const addItemResponse = await fetch(`${base_url}/addItem`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        customerName: customerName,
-        invoiceNo: invoiceNo || "N/A",
-        itemName: itemName,
-        weight: wt,
-        touch: t,
-        wm: w,
-        rate: r,
-        total: total,
-        gst: gst,
-        final: final,
-        modifiedWeight: parseFloat(modifiedWeight),
-        stockMasterId: selectedItem.id,
-        date: date.split("/").reverse().join("-"),
-      }),
+      body: JSON.stringify(addItemPayload),
     });
 
     if (!addItemResponse.ok) {
-      console.error(`❌ ADD ITEM - Failed to save to AddItem DB. Status: ${addItemResponse.status}`);
-      throw new Error(`Failed to save item: ${addItemResponse.status}`);
+      const errorText = await addItemResponse.text();
+      console.error(`❌ ADD ITEM - Failed to save. Status: ${addItemResponse.status}`, errorText);
+      throw new Error(`Failed to save item: ${addItemResponse.status} - ${errorText}`);
     }
 
     const savedItem = await addItemResponse.json();
     console.log("✅ ADD ITEM - Item saved to AddItem DB:", savedItem);
 
     // 2️⃣ UPDATE STOCK IN DATABASE
-    console.log("📤 ADD ITEM - Updating stock in Stock Master...", {
-      endpoint: `${base_url}/stockMaster/${selectedItem.id}`,
-      payload: {
-        itemName: selectedItem.itemName,
-        weight: newWeight,
-        less: selectedItem.less,
-        netWeight: selectedItem.netWeight,
-        calculation: selectedItem.calculation,
-        pure: selectedItem.pure,
-      }
-    });
+    const stockUpdatePayload = {
+      itemName: selectedItem.itemName,
+      weight: parseFloat(newWeight.toFixed(3)),
+      less: selectedItem.less,
+      netWeight: selectedItem.netWeight,
+      calculation: selectedItem.calculation,
+      pure: selectedItem.pure,
+    };
+
+    console.log("📤 ADD ITEM - Updating stock:", stockUpdatePayload);
 
     const stockResponse = await fetch(`${base_url}/stockMaster/${selectedItem.id}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        itemName: selectedItem.itemName,
-        weight: newWeight,
-        less: selectedItem.less,
-        netWeight: selectedItem.netWeight,
-        calculation: selectedItem.calculation,
-        pure: selectedItem.pure,
-      }),
+      body: JSON.stringify(stockUpdatePayload),
     });
 
     if (!stockResponse.ok) {
-      console.error(`❌ ADD ITEM - Failed to update stock. Status: ${stockResponse.status}`);
-      throw new Error(`Failed to update stock: ${stockResponse.status}`);
+      const errorText = await stockResponse.text();
+      console.error(`❌ ADD ITEM - Failed to update stock. Status: ${stockResponse.status}`, errorText);
+      throw new Error(`Failed to update stock: ${stockResponse.status} - ${errorText}`);
     }
 
     const updatedStock = await stockResponse.json();
@@ -286,38 +282,41 @@ export default function CreateTransaction({ navigation }) {
       itemName,
       weight: wt,
       touch: t,
+      wastage: w,
       rate: r,
       total,
       gst,
       final,
-      modifiedWeight: parseFloat(modifiedWeight),
+      modifiedWeight: parseFloat(modifiedWeight || 0),
     };
 
-    console.log("📝 ADD ITEM - Updating local state with new item:", newItem);
+    console.log("📝 ADD ITEM - Adding to local state:", newItem);
+    
     setItems((prev) => {
       const updated = [...prev, newItem];
       console.log("✅ ADD ITEM - Items state updated. Total items:", updated.length);
+      console.log("✅ ADD ITEM - Current items:", updated);
       return updated;
     });
     
-    console.log("📝 ADD ITEM - Updating item list with new stock weight");
     setItemList((prev) =>
       prev.map((item) =>
         item.id === selectedItem.id
-          ? { ...item, weight: newWeight }
+          ? { ...item, weight: parseFloat(newWeight.toFixed(3)) }
           : item
       )
     );
 
-    // 4️⃣ CLEAR FORM
+    // 4️⃣ CLEAR FORM - ✅ FIX 3: Properly reset rate
     console.log("🧹 ADD ITEM - Clearing form fields");
     setItemName("");
     setWeight("");
     setTouch("");
     setWastage("");
-    setRate("");
+    setRate(defaultGoldRate); // ✅ FIXED: Reset to default instead of empty string
     setSelectedItem(null);
     setModifiedWeight("");
+    setShowItemDropdown(false);
 
     console.log("✅ ADD ITEM - Process completed successfully!");
     Alert.alert("Success", "Item added successfully!");
@@ -332,6 +331,7 @@ export default function CreateTransaction({ navigation }) {
   }
 };
 
+  // ---------------- DELETE ITEM ----------------
   const deleteRow = async (index) => {
     const itemToDelete = items[index];
     
