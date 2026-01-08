@@ -117,7 +117,6 @@ export default function CreateTransaction({ navigation }) {
         setLoadingCustomers(true);
         const response = await fetch(`${base_url}/customers`);
 
-
         if (!response.ok) {
           throw new Error("Failed to fetch customers");
         }
@@ -152,12 +151,11 @@ export default function CreateTransaction({ navigation }) {
     fetchCustomers();
   }, []);
 
-  // Fetch items from stock master on mount
   useEffect(() => {
     const fetchItems = async () => {
       try {
         setLoadingItems(true);
-        const response = await fetch(`${base_url}/stockMaster`);
+        const response = await fetch(`${base_url}/items`);
 
         if (!response.ok) {
           throw new Error("Failed to fetch items");
@@ -167,17 +165,30 @@ export default function CreateTransaction({ navigation }) {
 
         console.log("Fetched items:", data);
 
-        const itemsList = data.map((item) => ({ itemName: item.itemName, weight: item.quantity || 0 })).filter(item => item.itemName);
+        // Create items list from schema
+        const itemsList = data
+          .map((item) => ({
+            itemName: item.stockName, // updated
+            itemDetails: item.itemDetails, // added
+            buyingTouch: item.buyingTouch,
+            sellingTouch: item.sellingTouch,
+            percentage: item.percentage,
+            type: item.type,
+            date: item.date,
+          }))
+          .filter((item) => item.itemName); // ensure stockName exists
 
         console.log("Items list:", itemsList);
         setItemsList(itemsList);
 
+        // Build stock object (since quantity doesn't exist, default to 0)
         const stockObj = {};
         data.forEach((item) => {
-          if (item.itemName) {
-            stockObj[item.itemName] = item.quantity || 0;
+          if (item.stockName) {
+            stockObj[item.stockName] = 0; // No quantity in schema
           }
         });
+
         setItemsStock(stockObj);
       } catch (error) {
         console.error("Error fetching items:", error);
@@ -291,9 +302,8 @@ export default function CreateTransaction({ navigation }) {
       console.log("📥 Response body:", responseText);
 
       if (!response.ok) {
-  throw new Error(`HTTP ${response.status}: ${responseText}`);
-}
-
+        throw new Error(`HTTP ${response.status}: ${responseText}`);
+      }
 
       const savedEntry = JSON.parse(responseText);
       console.log("✅ Saved successfully:", savedEntry);
@@ -330,10 +340,10 @@ export default function CreateTransaction({ navigation }) {
 
       Alert.alert("Success", "Issue entry saved to database successfully!");
     } catch (error) {
-  console.error("❌ Error:", error);
-  Alert.alert("Error", `Failed to save: ${error.message}`);
-}
-};
+      console.error("❌ Error:", error);
+      Alert.alert("Error", `Failed to save: ${error.message}`);
+    }
+  };
 
   const addReceiptItem = async () => {
     console.log("🟢 addReceiptItem called");
@@ -712,29 +722,28 @@ export default function CreateTransaction({ navigation }) {
 
       // Navigate to BillPreview after successful save
       navigation.navigate("BillPreview", {
-  customer: {
-    name: selectedCustomer.name,
-    phone: selectedCustomer.phone || "",
-    shop: selectedCustomer.company || "",
-    id: selectedCustomer.id || "",
-    balance: selectedCustomer.ob,
-    advance: selectedCustomer.ab,
-    type: "B2B",
-    email: selectedCustomer.email || "",
-  },
+        customer: {
+          name: selectedCustomer.name,
+          phone: selectedCustomer.phone || "",
+          shop: selectedCustomer.company || "",
+          id: selectedCustomer.id || "",
+          balance: selectedCustomer.ob,
+          advance: selectedCustomer.ab,
+          type: "B2B",
+          email: selectedCustomer.email || "",
+        },
 
-  issueItems,
-  receiptItems,
-  cashTable,
-  report: calculateReport(),
+        issueItems,
+        receiptItems,
+        cashTable,
+        report: calculateReport(),
 
-  meta: {
-    date,
-    oldBalance,
-    currentBalance: balance,
-  }
-});
-
+        meta: {
+          date,
+          oldBalance,
+          currentBalance: balance,
+        },
+      });
 
       Alert.alert("Success", "Transaction saved successfully!");
     } catch (error) {
@@ -768,7 +777,6 @@ export default function CreateTransaction({ navigation }) {
           <Feather name="user-plus" color="#000" size={30} />
         </TouchableOpacity>
       </View>
-
 
       {/* CUSTOMER CART */}
       {!selectedCustomer && !loadingCustomers && (
@@ -821,7 +829,9 @@ export default function CreateTransaction({ navigation }) {
               <Text style={styles.infoText}>
                 Company: {selectedCustomer.company}
               </Text>
-              <Text style={styles.infoText}>Phone: {selectedCustomer.phone}</Text>
+              <Text style={styles.infoText}>
+                Phone: {selectedCustomer.phone}
+              </Text>
             </View>
 
             <View style={styles.balanceContainer}>
@@ -863,8 +873,14 @@ export default function CreateTransaction({ navigation }) {
             <View style={styles.cardTiny}>
               {itemsList.length > 0 ? (
                 itemsList
-                  .filter((it) =>
-                    it.itemName.toLowerCase().includes(issueItemSearch.toLowerCase())
+                  .filter(
+                    (it) =>
+                      // Filter by search
+                      it.itemName
+                        .toLowerCase()
+                        .includes(issueItemSearch.toLowerCase()) &&
+                      // Filter by required type
+                      it.type === "issue"
                   )
                   .map((it, idx) => (
                     <TouchableOpacity
@@ -876,7 +892,12 @@ export default function CreateTransaction({ navigation }) {
                         setIssueItemSearch(it.itemName);
                       }}
                     >
-                      <Text style={styles.listItemText}>{it.itemName} - {it.weight}g</Text>
+                      <Text style={styles.listItemText}>{it.itemName}</Text>
+
+                      {/* You may add other fields */}
+                      <Text style={{ fontSize: 12, color: "#777" }}>
+                        {it.itemDetails}
+                      </Text>
                     </TouchableOpacity>
                   ))
               ) : (
@@ -1016,8 +1037,14 @@ export default function CreateTransaction({ navigation }) {
             <View style={styles.cardTiny}>
               {itemsList.length > 0 ? (
                 itemsList
-                  .filter((it) =>
-                    it.itemName.toLowerCase().includes(receiptItemSearch.toLowerCase())
+                  .filter(
+                    (it) =>
+                      // Filter by search input
+                      it.itemName
+                        .toLowerCase()
+                        .includes(receiptItemSearch.toLowerCase()) &&
+                      // Filter by type = receipt
+                      it.type === "receipt"
                   )
                   .map((it, idx) => (
                     <TouchableOpacity
@@ -1029,7 +1056,13 @@ export default function CreateTransaction({ navigation }) {
                         setReceiptItemSearch(it.itemName);
                       }}
                     >
-                      <Text style={styles.listItemText}>{it.itemName} - {it.weight}g</Text>
+                      {/* Main label */}
+                      <Text style={styles.listItemText}>{it.itemName}</Text>
+
+                      {/* Additional details line */}
+                      <Text style={{ fontSize: 12, color: "#777" }}>
+                        {it.itemDetails}
+                      </Text>
                     </TouchableOpacity>
                   ))
               ) : (
@@ -1062,7 +1095,7 @@ export default function CreateTransaction({ navigation }) {
               />
             </View>
           </View>
-        
+
           <View style={styles.row}>
             <View style={styles.inputBox}>
               <Text style={styles.subLabel}>Touch (%)</Text>
