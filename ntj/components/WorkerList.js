@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -6,86 +6,123 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
+  ActivityIndicator,
+  Modal,
+  Alert,
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
+import { base_url } from "./config.js";
 
 export default function Users({ navigation }) {
   const [selectedFilter, setSelectedFilter] = useState("All User");
   const [search, setSearch] = useState("");
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // --- USER LIST DATA ---
-  const [users, setUsers] = useState([
-    { id: 1, name: "Siva", role: "Admin", email: "siva@gmail.com", phone: "12345678" },
-    { id: 2, name: "Ywyw", role: "Admin", email: "ywy@js.i", phone: "09876543" },
-    { id: 3, name: "Aravind", role: "Admin", email: "asaravind13@gmail.com", phone: "12345678" },
-    { id: 4, name: "Tom", role: "Admin", email: "tom@gmail.com", phone: "55667788" },
-    { id: 5, name: "John P", role: "Super Admin", email: "john@gmail.com", phone: "11223344" },
-    { id: 6, name: "Kumar", role: "Admin", email: "kumar@gmail.com", phone: "33445566" },
-    { id: 7, name: "Ravi", role: "Super Admin", email: "ravi@gmail.com", phone: "44556677" },
-    { id: 8, name: "Sam", role: "Admin", email: "sam@gmail.com", phone: "00998877" },
-    { id: 9, name: "Alex", role: "Admin", email: "alex@gmail.com", phone: "44559988" },
-    { id: 10, name: "Bala", role: "Super Admin", email: "bala@gmail.com", phone: "66778899" },
-  ]);
+  // Modal states for adding user
+  const [modalVisible, setModalVisible] = useState(false);
+  const [newUser, setNewUser] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    role: "Admin",
+  });
 
-  // FILTER & SEARCH
+  // Fetch users from backend
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const response = await fetch(`${base_url}/users`);
+        if (!response.ok) throw new Error("Failed to fetch users");
+        const data = await response.json();
+        const normalizedData = data.map((u, index) => ({
+          id: u.id || u._id || index,
+          ...u,
+        }));
+        setUsers(normalizedData);
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchUsers();
+  }, []);
+
+  // Filter and search
   const filteredUsers = users.filter((item) => {
     const searchMatch =
-      item.name.toLowerCase().includes(search.toLowerCase()) ||
-      item.email.toLowerCase().includes(search.toLowerCase());
-
+      item.name?.toLowerCase().includes(search.toLowerCase()) ||
+      item.email?.toLowerCase().includes(search.toLowerCase());
     if (selectedFilter === "All User") return searchMatch;
     return item.role === selectedFilter && searchMatch;
   });
 
-  // Render each user card
+  // Add user to backend
+  const handleAddUser = async () => {
+    if (!newUser.name || !newUser.email || !newUser.phone) {
+      Alert.alert("Error", "Please fill all fields");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${base_url}/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newUser),
+      });
+
+      if (!response.ok) throw new Error("Failed to add user");
+      const addedUser = await response.json();
+
+      // Update local state
+      setUsers((prev) => [
+        ...prev,
+        { id: addedUser.id || addedUser._id, ...addedUser },
+      ]);
+      setModalVisible(false);
+      setNewUser({ name: "", email: "", phone: "", role: "Admin" });
+    } catch (err) {
+      Alert.alert("Error", err.message);
+    }
+  };
+
   const renderUser = ({ item }) => (
     <View style={styles.card}>
       <Text style={styles.userName}>{item.name}</Text>
-
       <View style={styles.roleTag}>
         <Text style={styles.roleText}>{item.role}</Text>
       </View>
-
       <View style={styles.row}>
         <Icon name="email-outline" size={18} />
         <Text style={styles.infoText}> {item.email}</Text>
       </View>
-
       <View style={styles.row}>
         <Icon name="phone-outline" size={18} />
         <Text style={styles.infoText}> {item.phone}</Text>
       </View>
-
-      <View style={styles.actionRow}>
-        {/* EDIT BUTTON */}
-        <TouchableOpacity
-          onPress={() =>
-            navigation.navigate("EditUser", {
-              user: item,
-              updateUser: (updatedUser) => {
-                setUsers((prev) =>
-                  prev.map((u) => (u.id === updatedUser.id ? updatedUser : u))
-                );
-              },
-            })
-          }
-        >
-          <Icon name="pencil" size={24} color="blue" />
-        </TouchableOpacity>
-
-        {/* DELETE BUTTON */}
-        <TouchableOpacity
-          onPress={() => setUsers(users.filter((u) => u.id !== item.id))}
-        >
-          <Icon name="trash-can" size={24} color="red" />
-        </TouchableOpacity>
-      </View>
     </View>
   );
 
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+        <ActivityIndicator size="large" color="#1B4D1B" />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+        <Text style={{ color: "red" }}>{error}</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -132,12 +169,64 @@ export default function Users({ navigation }) {
       <FlatList
         data={filteredUsers}
         renderItem={renderUser}
-        keyExtractor={(item) => item.id.toString()}
+        keyExtractor={(item, index) =>
+          item.id ? item.id.toString() : index.toString()
+        }
         contentContainerStyle={{ paddingBottom: 100 }}
       />
 
+      {/* Add User Modal */}
+      <Modal visible={modalVisible} animationType="slide" transparent>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={{ fontSize: 18, fontWeight: "bold", marginBottom: 10 }}>
+              Add New User
+            </Text>
+            <TextInput
+              placeholder="Name"
+              value={newUser.name}
+              onChangeText={(text) => setNewUser({ ...newUser, name: text })}
+              style={styles.input}
+            />
+            <TextInput
+              placeholder="Email"
+              value={newUser.email}
+              onChangeText={(text) => setNewUser({ ...newUser, email: text })}
+              style={styles.input}
+            />
+            <TextInput
+              placeholder="Phone"
+              value={newUser.phone}
+              onChangeText={(text) => setNewUser({ ...newUser, phone: text })}
+              style={styles.input}
+            />
+            <TextInput
+              placeholder="Role (Admin / Super Admin)"
+              value={newUser.role}
+              onChangeText={(text) => setNewUser({ ...newUser, role: text })}
+              style={styles.input}
+            />
+
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 10 }}>
+              <TouchableOpacity onPress={handleAddUser} style={styles.modalBtn}>
+                <Text style={{ color: "#fff" }}>Add</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setModalVisible(false)}
+                style={[styles.modalBtn, { backgroundColor: "gray" }]}
+              >
+                <Text style={{ color: "#fff" }}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* ADD BUTTON */}
-      <TouchableOpacity style={styles.addBtn}>
+      <TouchableOpacity
+        style={styles.addBtn}
+        onPress={() => setModalVisible(true)}
+      >
         <Icon name="plus" size={30} color="#fff" />
       </TouchableOpacity>
     </View>
@@ -146,7 +235,6 @@ export default function Users({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f5f5f5" },
-
   header: {
     backgroundColor: "#1B4D1B",
     height: 150,
@@ -164,7 +252,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     top: 25,
   },
-
   searchBox: {
     margin: 15,
     flexDirection: "row",
@@ -175,7 +262,6 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   searchInput: { marginLeft: 10, fontSize: 16, flex: 1 },
-
   filterRow: {
     flexDirection: "row",
     justifyContent: "center",
@@ -188,18 +274,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#eee",
     marginHorizontal: 5,
   },
-  filterBtnActive: {
-    backgroundColor: "#1B4D1B",
-  },
-  filterText: {
-    color: "#333",
-    fontSize: 15,
-  },
-  filterTextActive: {
-    color: "#fff",
-    fontWeight: "bold",
-  },
-
+  filterBtnActive: { backgroundColor: "#1B4D1B" },
+  filterText: { color: "#333", fontSize: 15 },
+  filterTextActive: { color: "#fff", fontWeight: "bold" },
   card: {
     backgroundColor: "#fff",
     margin: 12,
@@ -208,7 +285,6 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   userName: { fontSize: 20, fontWeight: "bold" },
-
   roleTag: {
     backgroundColor: "#D7E9FF",
     alignSelf: "flex-start",
@@ -218,18 +294,8 @@ const styles = StyleSheet.create({
     marginVertical: 5,
   },
   roleText: { color: "#0066CC", fontWeight: "600" },
-
   row: { flexDirection: "row", alignItems: "center", marginTop: 5 },
-
   infoText: { fontSize: 15, color: "#555" },
-
-  actionRow: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    marginTop: 10,
-    gap: 15,
-  },
-
   addBtn: {
     position: "absolute",
     bottom: 60,
@@ -241,5 +307,32 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     elevation: 10,
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    paddingHorizontal: 20,
+  },
+  modalContent: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 20,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginVertical: 5,
+    borderRadius: 8,
+  },
+  modalBtn: {
+    backgroundColor: "#1B4D1B",
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    flex: 1,
+    marginHorizontal: 5,
   },
 });

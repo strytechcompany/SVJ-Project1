@@ -35,6 +35,7 @@ export default function HomeScreen() {
   const [filterType, setFilterType] = useState("All");
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [customers, setCustomers] = useState([]); // ← will hold B2B + B2C
+  const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
 
   // Fetch customers on mount
   useEffect(() => {
@@ -45,28 +46,28 @@ export default function HomeScreen() {
     try {
       const b2bResponse = await fetch(`${base_url}/customers`);
       const b2bData = await b2bResponse.json();
-      
+
       const b2cResponse = await fetch(`${base_url}/customersB2C`);
       const b2cData = await b2cResponse.json();
 
-      const b2bCustomers = b2bData.map(customer => ({
+      const b2bCustomers = b2bData.map((customer) => ({
         id: customer._id || customer.id, // fallback id
         name: customer.customerName,
         weight: `${customer.oldBalance || 0} g`, // map oldBalance → weight
-        type: 'B2B',
+        type: "B2B",
       }));
 
-      const b2cCustomers = b2cData.map(customer => ({
+      const b2cCustomers = b2cData.map((customer) => ({
         id: customer._id || customer.id,
         name: customer.customerName,
         weight: `${customer.oldBalance || 0} g`,
-        type: 'B2C',
+        type: "B2C",
       }));
 
       const allCustomers = [...b2bCustomers, ...b2cCustomers];
       setCustomers(allCustomers);
     } catch (error) {
-      console.error('Error fetching customer data:', error);
+      console.error("Error fetching customer data:", error);
       // Optionally set dummy data or show error
     }
   };
@@ -173,14 +174,14 @@ export default function HomeScreen() {
           <Text style={styles.menuText}>Users List</Text>
         </TouchableOpacity>
 
-      <TouchableOpacity
+        <TouchableOpacity
           style={styles.menuItem}
           onPress={() => handleMenuNavigation("Purchase")}
         >
           <Icon name="account-group-outline" size={25} color="#fff" />
           <Text style={styles.menuText}>Purchase</Text>
         </TouchableOpacity>
-        
+
         <TouchableOpacity
           style={styles.menuItem}
           onPress={() => handleMenuNavigation("WorkerList")}
@@ -231,6 +232,107 @@ export default function HomeScreen() {
         >
           <Text style={styles.editBtnText}>Edit Gold Rate</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={{
+            backgroundColor: "red",
+            padding: 12,
+            margin: 20,
+            borderRadius: 10,
+            alignItems: "center",
+          }}
+          onPress={() => setConfirmDeleteVisible(true)}
+        >
+          <Text style={{ color: "white", fontWeight: "bold" }}>
+            DELETE ALL DATA
+          </Text>
+        </TouchableOpacity>
+        <Modal visible={confirmDeleteVisible} transparent animationType="fade">
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: "rgba(0,0,0,0.5)",
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: "#fff",
+                padding: 25,
+                width: "80%",
+                borderRadius: 15,
+                alignItems: "center",
+              }}
+            >
+              <Text
+                style={{ fontSize: 18, fontWeight: "bold", marginBottom: 10 }}
+              >
+                Are you sure?
+              </Text>
+
+              <Text
+                style={{ fontSize: 14, textAlign: "center", marginBottom: 20 }}
+              >
+                This action will delete ALL DATA permanently and cannot be
+                undone.
+              </Text>
+
+              {/* YES button */}
+              <TouchableOpacity
+                style={{
+                  backgroundColor: "red",
+                  paddingVertical: 10,
+                  width: "100%",
+                  borderRadius: 10,
+                  marginBottom: 10,
+                }}
+                onPress={async () => {
+                  try {
+                    const response = await fetch(`${base_url}/deleteAll`, {
+                      method: "DELETE",
+                    });
+
+                    if (response.ok) {
+                      alert("All collections deleted successfully!");
+                    } else {
+                      alert("Failed to delete collections.");
+                    }
+                  } catch (error) {
+                    console.log(error);
+                    alert("Error connecting to server");
+                  }
+
+                  setConfirmDeleteVisible(false);
+                }}
+              >
+                <Text
+                  style={{
+                    color: "white",
+                    fontWeight: "bold",
+                    textAlign: "center",
+                  }}
+                >
+                  YES, DELETE EVERYTHING
+                </Text>
+              </TouchableOpacity>
+
+              {/* NO button */}
+              <TouchableOpacity
+                style={{
+                  backgroundColor: "#ddd",
+                  paddingVertical: 10,
+                  width: "100%",
+                  borderRadius: 10,
+                }}
+                onPress={() => setConfirmDeleteVisible(false)}
+              >
+                <Text style={{ fontWeight: "bold", textAlign: "center" }}>
+                  CANCEL
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         <Text style={styles.sectionTitle}>Quick Access</Text>
 
