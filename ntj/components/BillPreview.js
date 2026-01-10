@@ -1,326 +1,287 @@
 import React from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
-  Share,
-  SafeAreaView,
-} from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 export default function BillPreview({ route, navigation }) {
-  const {
-    customer = {},
-    report = {},
-    transactions = [],
-  } = route.params || {};
+  const { customer, issueItems, receiptItems, cash, summary } = route.params;
 
-  /* ---------------- SHARE ---------------- */
-  const handleShare = async () => {
-    try {
-      await Share.share({
-        message: `
-AKSHAYA GOLD
-
-Customer : ${customer.name}
-Mobile   : ${customer.phone}
-
-Cash     : ₹${report.cash}
-Cash Pure: ${report.cashPure} g
-        `,
-      });
-    } catch (error) {
-      console.log(error);
-    }
+  const generateHTML = () => {
+    return `
+      <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; }
+            h1 { text-align: center; }
+            h2 { margin-top: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            th, td { border: 1px solid black; padding: 8px; text-align: center; }
+            th { background-color: #f2f2f2; }
+            p { margin: 5px 0; }
+          </style>
+        </head>
+        <body>
+          <h1>BILL</h1>
+          <div>
+            <p><strong>Name:</strong> ${customer.name}</p>
+            <p><strong>Phone:</strong> ${customer.phone}</p>
+            <p><strong>Type:</strong> ${customer.type}</p>
+            <p><strong>Date:</strong> ${customer.date}</p>
+            <p><strong>OB:</strong> ${customer.oldBalance}</p>
+          </div>
+          <h2>ISSUE:</h2>
+          <table>
+            <tr>
+              <th>Name</th>
+              <th>G.Weight</th>
+              <th>M</th>
+              <th>N.Weight</th>
+              <th>Calc</th>
+              <th>Pure</th>
+            </tr>
+            ${issueItems.map(row => `
+              <tr>
+                <td>${row.name}</td>
+                <td>${row.gross}</td>
+                <td>${row.m}</td>
+                <td>${row.net}</td>
+                <td>${row.calc}</td>
+                <td>${row.pure}</td>
+              </tr>
+            `).join('')}
+          </table>
+          <h2>RECEIPT:</h2>
+          <table>
+            <tr>
+              <th>Name</th>
+              <th>Weight</th>
+              <th>Result</th>
+              <th>Calc</th>
+              <th>Pure</th>
+            </tr>
+            ${receiptItems && receiptItems.length > 0 ? receiptItems.map(row => `
+              <tr>
+                <td>${row.name}</td>
+                <td>${row.weight}</td>
+                <td>${row.result}</td>
+                <td>${row.calc}</td>
+                <td>${row.pure}</td>
+              </tr>
+            `).join('') : '<tr><td colspan="5">No receipt items</td></tr>'}
+          </table>
+          <h2>CASH:</h2>
+          <p>${cash ? `${cash.amount} / ${cash.rate} → ${cash.pure}` : 'N/A'}</p>
+          <h2>SUMMARY:</h2>
+          <table>
+            <tr>
+              <th>OB</th>
+              <th>ISSUE</th>
+              <th>RECEIPT</th>
+              <th>CASH</th>
+              <th>CURRENT</th>
+            </tr>
+            <tr>
+              <td>${summary ? summary.ob : 'N/A'}</td>
+              <td>${summary ? summary.issue : 'N/A'}</td>
+              <td>${summary ? summary.receipt : 'N/A'}</td>
+              <td>${summary ? summary.cash : 'N/A'}</td>
+              <td>${summary ? summary.current : 'N/A'}</td>
+            </tr>
+            <tr>
+              <td>${summary ? summary.obPlusIssue : 'N/A'}</td>
+              <td>-</td>
+              <td>${summary ? summary.receiptPlusCash : 'N/A'}</td>
+              <td>=</td>
+              <td>${summary ? (summary.obPlusIssue - summary.receiptPlusCash) : 'N/A'}</td>
+            </tr>
+          </table>
+        </body>
+      </html>
+    `;
   };
 
-  /* ---------------- PRINT ---------------- */
-  const handlePrint = async () => {
-    try {
-      const printMessage = `
-AKSHAYA GOLD BILL
-
-Customer Name: ${customer.name}
-Shop Name: ${customer.shop}
-Customer ID: ${customer.id}
-Mobile: ${customer.phone}
-Balance: ${customer.balance} g
-Type: ${customer.type}
-Email: ${customer.email}
-Advance Balance: ${customer.advance} g
-
-REPORTS:
-Total Issues (g): ${report.totalIssue}
-Total Issue Pure (g): ${report.totalIssuePure}
-Total Receipt (g): ${report.totalReceipt}
-Total Receipt Pure (g): ${report.totalReceiptPure}
-Cash (Rs): ${report.cash}
-Cash Pure (g): ${report.cashPure}
-
-TRANSACTIONS:
-${transactions.map((txn, idx) => `${idx + 1}. Date: ${txn.date}, Issue: ${txn.issue}g, Issue Pure: ${txn.issuePure}g, Receipt: ${txn.receipt}g, Receipt Pure: ${txn.receiptPure}g, Cash Pure: ${txn.cashPure}g`).join('\n')}
-      `;
-      await Share.share({
-        message: printMessage,
-      });
-    } catch (error) {
-      console.log(error);
-    }
-  };
-
-  /* ---------------- DOWNLOAD ---------------- */
   const handleDownload = async () => {
     try {
-      const downloadMessage = `
-AKSHAYA GOLD BILL
-
-Customer Name: ${customer.name}
-Shop Name: ${customer.shop}
-Customer ID: ${customer.id}
-Mobile: ${customer.phone}
-Balance: ${customer.balance} g
-Type: ${customer.type}
-Email: ${customer.email}
-Advance Balance: ${customer.advance} g
-
-REPORTS:
-Total Issues (g): ${report.totalIssue}
-Total Issue Pure (g): ${report.totalIssuePure}
-Total Receipt (g): ${report.totalReceipt}
-Total Receipt Pure (g): ${report.totalReceiptPure}
-Cash (Rs): ${report.cash}
-Cash Pure (g): ${report.cashPure}
-
-TRANSACTIONS:
-${transactions.map((txn, idx) => `${idx + 1}. Date: ${txn.date}, Issue: ${txn.issue}g, Issue Pure: ${txn.issuePure}g, Receipt: ${txn.receipt}g, Receipt Pure: ${txn.receiptPure}g, Cash Pure: ${txn.cashPure}g`).join('\n')}
-      `;
-      await Share.share({
-        message: downloadMessage,
-      });
+      const html = generateHTML();
+      const { uri } = await Print.printToFileAsync({ html });
+      Alert.alert('Download Successful', `PDF saved to: ${uri}`);
     } catch (error) {
-      console.log(error);
+      Alert.alert('Error', 'Failed to download PDF');
+      console.error(error);
+    }
+  };
+
+  const handleShare = async () => {
+    try {
+      const html = generateHTML();
+      const { uri } = await Print.printToFileAsync({ html });
+      await Sharing.shareAsync(uri);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to share PDF');
+      console.error(error);
     }
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      {/* HEADER */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Icon name="close" size={26} />
+    <ScrollView style={styles.page}>
+      <View style={styles.buttonContainer}>
+        <TouchableOpacity style={styles.button} onPress={handleDownload}>
+          <Icon name="download" size={20} color="#fff" />
+          <Text style={styles.buttonText}>Download</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={styles.button} onPress={handleShare}>
+          <Icon name="share" size={20} color="#fff" />
+          <Text style={styles.buttonText}>Share</Text>
+        </TouchableOpacity>
+      </View>
 
-        <View style={styles.headerIcons}>
-          <TouchableOpacity onPress={handlePrint}>
-            <Icon name="printer" size={22} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleDownload}>
-            <Icon name="download" size={22} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleShare}>
-            <Icon name="share-variant" size={22} />
-          </TouchableOpacity>
+      {/* HEADER */}
+      <View style={styles.headerBox}>
+        <Text style={styles.billTitle}>BILL</Text>
+
+        <View style={styles.headerRow}>
+          <View>
+            <Text>Name : {customer.name}</Text>
+            <Text>Phone : {customer.phone}</Text>
+          </View>
+
+          <View>
+            <Text>Type : {customer.type}</Text>
+            <Text>Date : {customer.date}</Text>
+            <Text>OB : {customer.oldBalance}</Text>
+          </View>
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.container}>
-        {/* TOP DETAILS */}
-        <View style={styles.topRow}>
-          {/* LEFT */}
-          <View style={{ width: "48%" }}>
-            <Text style={styles.label}>Customer Name</Text>
-            <Text style={styles.value}>{customer.name}</Text>
+      {/* ISSUE */}
+      <View style={styles.sectionBox}>
+        <Text style={styles.sectionTitle}>ISSUE :</Text>
 
-            <Text style={styles.label}>Shop Name</Text>
-            <Text style={styles.value}>{customer.shop}</Text>
+        <View style={styles.tableHeader}>
+          <Text style={styles.cell}>Name</Text>
+          <Text style={styles.cell}>G.Weight</Text>
+          <Text style={styles.cell}>M</Text>
+          <Text style={styles.cell}>N.Weight</Text>
+          <Text style={styles.cell}>Calc</Text>
+          <Text style={styles.cell}>Pure</Text>
+        </View>
 
-            <Text style={styles.label}>Customer ID</Text>
-            <Text style={styles.value}>{customer.id}</Text>
-
-            <Text style={styles.label}>Mobile</Text>
-            <Text style={styles.value}>{customer.phone}</Text>
-
-            <Text style={styles.label}>Balance</Text>
-            <Text style={styles.value}>{customer.balance} (g)</Text>
+        {issueItems.map((row, i) => (
+          <View key={i} style={styles.tableRow}>
+            <Text style={styles.cell}>{row.name}</Text>
+            <Text style={styles.cell}>{row.gross}</Text>
+            <Text style={styles.cell}>{row.m}</Text>
+            <Text style={styles.cell}>{row.net}</Text>
+            <Text style={styles.cell}>{row.calc}</Text>
+            <Text style={styles.cell}>{row.pure}</Text>
           </View>
+        ))}
+      </View>
 
-          {/* RIGHT */}
-          <View style={{ width: "48%", alignItems: "flex-end" }}>
-            <Text style={styles.shopName}>AKSHAYA GOLD</Text>
+      {/* RECEIPT */}
+      <View style={styles.sectionBox}>
+        <Text style={styles.sectionTitle}>RECEIPT :</Text>
 
-            <Text style={styles.label}>Type</Text>
-            <Text style={styles.value}>{customer.type}</Text>
-
-            <Text style={styles.label}>Email</Text>
-            <Text style={styles.value}>{customer.email}</Text>
-
-            <Text style={styles.label}>Advance Balance</Text>
-            <Text style={styles.value}>{customer.advance} (g)</Text>
-          </View>
+        <View style={styles.tableHeader}>
+          <Text style={styles.cell}>Name</Text>
+          <Text style={styles.cell}>Weight</Text>
+          <Text style={styles.cell}>Result</Text>
+          <Text style={styles.cell}>Calc</Text>
+          <Text style={styles.cell}>Pure</Text>
         </View>
 
-        {/* REPORTS */}
-        <Text style={styles.sectionTitle}>REPORTS</Text>
-
-        <View style={styles.reportTable}>
-          {[
-            ["Total Issues (g)", report.totalIssue],
-            ["Total Issue Pure (g)", report.totalIssuePure],
-            ["Total Receipt (g)", report.totalReceipt],
-            ["Total Receipt Pure (g)", report.totalReceiptPure],
-            ["Cash (Rs)", report.cash],
-            ["Cash Pure (g)", report.cashPure],
-          ].map(([key, value], index) => (
-            <View key={index} style={styles.reportRow}>
-              <Text style={styles.reportKey}>{key}</Text>
-              <Text style={styles.reportValue}>{value}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* TRANSACTIONS */}
-        <View style={styles.transactionHeader}>
-          <Text style={styles.transactionHeaderText}>TRANSACTIONS</Text>
-        </View>
-
-        <View style={styles.transactionTableHeader}>
-          <Text style={styles.th}>DATE</Text>
-          <Text style={styles.th}>ISSUE (g)</Text>
-          <Text style={styles.th}>ISSUE PURE</Text>
-          <Text style={styles.th}>RECEIPT (g)</Text>
-          <Text style={styles.th}>RECEIPT PURE</Text>
-          <Text style={styles.th}>CASH PURE</Text>
-        </View>
-
-        {transactions.length === 0 ? (
-          <Text style={{ textAlign: "center", marginTop: 20 }}>
-            No Transactions
-          </Text>
-        ) : (
-          transactions.map((row, index) => (
-            <View key={index} style={styles.transactionRow}>
-              <Text style={styles.td}>{row.date}</Text>
-              <Text style={styles.td}>{row.issue}</Text>
-              <Text style={styles.td}>{row.issuePure}</Text>
-              <Text style={styles.td}>{row.receipt}</Text>
-              <Text style={styles.td}>{row.receiptPure}</Text>
-              <Text style={styles.td}>{row.cashPure}</Text>
+        {receiptItems && receiptItems.length > 0 ? (
+          receiptItems.map((row, i) => (
+            <View key={i} style={styles.tableRow}>
+              <Text style={styles.cell}>{row.name}</Text>
+              <Text style={styles.cell}>{row.weight}</Text>
+              <Text style={styles.cell}>{row.result}</Text>
+              <Text style={styles.cell}>{row.calc}</Text>
+              <Text style={styles.cell}>{row.pure}</Text>
             </View>
           ))
+        ) : (
+          <Text style={styles.noData}>No receipt items</Text>
         )}
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+
+      {/* CASH */}
+      <View style={styles.cashBox}>
+        <Text style={styles.sectionTitle}>CASH :</Text>
+        <Text>{cash ? `${cash.amount} / ${cash.rate} → ${cash.pure}` : 'N/A'}</Text>
+      </View>
+
+      {/* SUMMARY */}
+      <View style={styles.summaryBox}>
+        <Text style={styles.sectionTitle}>SUMMARY :</Text>
+
+        <View style={styles.summaryHeader}>
+          <Text style={styles.sumCell}>OB</Text>
+          <Text style={styles.sumCell}>ISSUE</Text>
+          <Text style={styles.sumCell}>RECEIPT</Text>
+          <Text style={styles.sumCell}>CASH</Text>
+          <Text style={styles.sumCell}>CURRENT</Text>
+        </View>
+
+        <View style={styles.summaryRow}>
+          <Text style={styles.sumCell}>{summary ? summary.ob : 'N/A'}</Text>
+          <Text style={styles.sumCell}>{summary ? summary.issue : 'N/A'}</Text>
+          <Text style={styles.sumCell}>{summary ? summary.receipt : 'N/A'}</Text>
+          <Text style={styles.sumCell}>{summary ? summary.cash : 'N/A'}</Text>
+          <Text style={styles.sumCell}>{summary ? summary.current : 'N/A'}</Text>
+        </View>
+
+        <View style={styles.finalSummaryRow}>
+          <Text style={styles.sumCell}>{summary ? summary.obPlusIssue : 'N/A'}</Text>
+          <Text style={styles.sumCell}>-</Text>
+          <Text style={styles.sumCell}>{summary ? summary.receiptPlusCash : 'N/A'}</Text>
+          <Text style={styles.sumCell}>=</Text>
+          <Text style={styles.sumCell}>{summary ? (summary.obPlusIssue - summary.receiptPlusCash) : 'N/A'}</Text>
+        </View>
+
+      </View>
+
+    </ScrollView>
   );
 }
 
-/* ---------------- STYLES ---------------- */
-
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: "#fff" },
+  page: { padding: 12, backgroundColor: "#fff" },
 
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    padding: 16,
-  },
+  buttonContainer: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 10 },
 
-  headerIcons: {
-    flexDirection: "row",
-    gap: 16,
-  },
+  button: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#007bff', padding: 10, borderRadius: 5 },
 
-  container: {
-    padding: 16,
-  },
+  buttonText: { color: '#fff', marginLeft: 5, fontWeight: 'bold' },
 
-  topRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 20,
-  },
+  billTitle: { textAlign: "center", fontWeight: "bold", marginBottom: 8 },
 
-  shopName: {
-    fontSize: 18,
-    fontWeight: "800",
-    marginBottom: 10,
-  },
+  headerBox: { borderWidth: 1, padding: 10, marginBottom: 10 },
 
-  label: {
-    fontSize: 12,
-    color: "#555",
-    marginTop: 6,
-  },
+  headerRow: { flexDirection: "row", justifyContent: "space-between" },
 
-  value: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
+  sectionBox: { borderWidth: 1, marginBottom: 10 },
 
-  sectionTitle: {
-    fontWeight: "800",
-    marginVertical: 10,
-  },
+  sectionTitle: { margin: 6, fontWeight: "bold" },
 
-  reportTable: {
-    borderWidth: 1,
-    borderColor: "#000",
-  },
+  tableHeader: { flexDirection: "row", borderBottomWidth: 1 },
 
-  reportRow: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderColor: "#000",
-  },
+  tableRow: { flexDirection: "row", borderBottomWidth: 0.5 },
 
-  reportKey: {
-    width: "70%",
-    padding: 8,
-    fontWeight: "600",
-  },
+  cell: { flex: 1, textAlign: "center", paddingVertical: 6, fontSize: 11 },
 
-  reportValue: {
-    width: "30%",
-    padding: 8,
-    textAlign: "right",
-    fontWeight: "700",
-  },
+  cashBox: { borderWidth: 1, padding: 10, marginBottom: 10 },
 
-  transactionHeader: {
-    backgroundColor: "#0F766E",
-    marginTop: 20,
-  },
+  summaryBox: { borderWidth: 1, padding: 10, marginBottom: 10 },
 
-  transactionHeaderText: {
-    color: "#fff",
-    fontWeight: "700",
-    textAlign: "center",
-    padding: 8,
-  },
+  finalSummaryRow: { flexDirection: "row", borderBottomWidth: 0.5, justifyContent: 'center' },
 
-  transactionTableHeader: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-  },
+  summaryHeader: { flexDirection: "row", borderBottomWidth: 1 },
 
-  th: {
-    width: "16.6%",
-    fontSize: 11,
-    fontWeight: "700",
-    textAlign: "center",
-    paddingVertical: 6,
-  },
+  summaryRow: { flexDirection: "row", borderBottomWidth: 0.5 },
 
-  transactionRow: {
-    flexDirection: "row",
-    borderBottomWidth: 0.5,
-  },
+  sumCell: { flex: 1, textAlign: "center", padding: 8, fontWeight: "bold", fontSize: 11 },
 
-  td: {
-    width: "16.6%",
-    fontSize: 11,
-    textAlign: "center",
-    paddingVertical: 8,
-  },
+  noData: { textAlign: "center", color: "#999", marginTop: 10, fontStyle: "italic" },
 });
