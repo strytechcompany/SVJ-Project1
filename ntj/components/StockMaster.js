@@ -82,22 +82,25 @@ export default function StockMaster({ navigation }) {
   };
 
   useEffect(() => {
-    const wt = parseFloat(weight);
-    const less = parseFloat(buyTouch);
-    const calc = parseFloat(calculation);
-    if (!isNaN(wt) && !isNaN(less)) {
-      const netWt = wt - less;
-      setSellTouch(netWt.toFixed(3));
-      if (!isNaN(calc)) {
-        setPure((calc * netWt).toFixed(3));
-      } else {
-        setPure("");
-      }
+  const wt = parseFloat(weight);
+  const less = parseFloat(buyTouch);
+  const calc = parseFloat(calculation);
+
+  if (!isNaN(wt) && !isNaN(less)) {
+    const netWt = wt - less;
+    setSellTouch(Math.round(netWt).toString());
+
+    if (!isNaN(calc)) {
+      const pureValue = ((calc * netWt) / 100);
+      setPure(pureValue.toFixed(3));
     } else {
-      setSellTouch("");
       setPure("");
     }
-  }, [weight, buyTouch, calculation]);
+  } else {
+    setSellTouch("");
+    setPure("");
+  }
+}, [weight, buyTouch, calculation]);
 
   // Load all items from backend
   const loadAllItems = async () => {
