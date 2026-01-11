@@ -670,87 +670,114 @@ export default function CreateTransaction({ navigation }) {
   };
 
   const saveCompleteTransaction = async () => {
-    console.log("💾 saveCompleteTransaction called");
+  console.log("💾 saveCompleteTransaction called");
 
-    if (!selectedCustomer) {
-      Alert.alert("Error", "Please select a customer first");
-      return;
+  if (!selectedCustomer) {
+    Alert.alert("Error", "Please select a customer first");
+    return;
+  }
+
+  if (
+    issueItems.length === 0 &&
+    receiptItems.length === 0 &&
+    cashTable.length === 0
+  ) {
+    Alert.alert("Error", "No items added to transaction");
+    return;
+  }
+
+  const transactionData = {
+    issueTotal: Number(totalIssueWeight.toFixed(3)),
+    issuePure: Number(totalIssuePure.toFixed(3)),
+    oldBalance: Number(oldBalance.toFixed(3)),
+    receiptPure: Number(totalReceiptPure.toFixed(3)),
+    cashPure: Number(totalCashPure.toFixed(3)),
+    balance: Number(balance.toFixed(3)),
+    advBal: Number(advBalance.toFixed(3)),
+  };
+
+  console.log("📤 Transaction data to send:", transactionData);
+  console.log("🌐 URL:", `${base_url}/transactions`);
+
+  try {
+    const response = await fetch(`${base_url}/transactions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(transactionData),
+    });
+
+    console.log("📥 Response status:", response.status);
+
+    const responseText = await response.text();
+    console.log("📥 Response body:", responseText);
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${responseText}`);
     }
 
-    if (
-      issueItems.length === 0 &&
-      receiptItems.length === 0 &&
-      cashTable.length === 0
-    ) {
-      Alert.alert("Error", "No items added to transaction");
-      return;
-    }
+    const savedTransaction = JSON.parse(responseText);
+    console.log("✅ Transaction saved successfully:", savedTransaction);
 
-    const transactionData = {
-      issueTotal: Number(totalIssueWeight.toFixed(3)),
-      issuePure: Number(totalIssuePure.toFixed(3)),
-      oldBalance: Number(oldBalance.toFixed(3)),
-      receiptPure: Number(totalReceiptPure.toFixed(3)),
-      cashPure: Number(totalCashPure.toFixed(3)),
-      balance: Number(balance.toFixed(3)),
-      advBal: Number(advBalance.toFixed(3)),
+    // Format issue items for BillPreview
+    const formattedIssueItems = issueItems.map(item => ({
+      name: item.item,
+      gross: Number(item.weight).toFixed(3),
+      m: Number(item.stone).toFixed(3),
+      net: Number(item.weight - item.stone).toFixed(3),
+      calc: Number(item.touch).toFixed(2),
+      pure: Number(item.purity).toFixed(3),
+    }));
+
+    // Format receipt items for BillPreview
+    const formattedReceiptItems = receiptItems.map(item => ({
+      name: item.item,
+      weight: Number(item.weight).toFixed(3),
+      result: Number(item.stone).toFixed(3),
+      calc: Number(item.touch).toFixed(2),
+      pure: Number(item.purity).toFixed(3),
+    }));
+
+    // Format cash data
+    const formattedCash = cashTable.length > 0 ? {
+      amount: cashTable.reduce((sum, c) => sum + Number(c.rupees || 0), 0).toFixed(2),
+      rate: cashTable[0].goldRate.toFixed(2), // Use first entry's rate
+      pure: totalCashPure.toFixed(3),
+    } : null;
+
+    // Format summary data
+    const formattedSummary = {
+      ob: oldBalance.toFixed(3),
+      issue: totalIssuePure.toFixed(3),
+      receipt: totalReceiptPure.toFixed(3),
+      cash: totalCashPure.toFixed(3),
+      current: balance.toFixed(3),
+      obPlusIssue: Number(oldBalance + totalIssuePure).toFixed(3),
+      receiptPlusCash: Number(totalReceiptPure + totalCashPure).toFixed(3),
     };
 
-    console.log("📤 Transaction data to send:", transactionData);
-    console.log("🌐 URL:", `${base_url}/transactions`);
+    // Navigate to BillPreview with correctly formatted data
+    navigation.navigate("BillPreview", {
+      customer: {
+        name: selectedCustomer.name,
+        phone: selectedCustomer.phone || "",
+        type: "B2B",
+        date: date,
+        oldBalance: oldBalance.toFixed(3),
+      },
+      issueItems: formattedIssueItems,
+      receiptItems: formattedReceiptItems,
+      cash: formattedCash,
+      summary: formattedSummary,
+    });
 
-    try {
-      const response = await fetch(`${base_url}/transactions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(transactionData),
-      });
-
-      console.log("📥 Response status:", response.status);
-
-      const responseText = await response.text();
-      console.log("📥 Response body:", responseText);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${responseText}`);
-      }
-
-      const savedTransaction = JSON.parse(responseText);
-      console.log("✅ Transaction saved successfully:", savedTransaction);
-
-      // Navigate to BillPreview after successful save
-      navigation.navigate("BillPreview", {
-        customer: {
-          name: selectedCustomer.name,
-          phone: selectedCustomer.phone || "",
-          shop: selectedCustomer.company || "",
-          id: selectedCustomer.id || "",
-          balance: selectedCustomer.ob,
-          advance: selectedCustomer.ab,
-          type: "B2B",
-          email: selectedCustomer.email || "",
-        },
-
-        issueItems,
-        receiptItems,
-        cashTable,
-        report: calculateReport(),
-
-        meta: {
-          date,
-          oldBalance,
-          currentBalance: balance,
-        },
-      });
-
-      Alert.alert("Success", "Transaction saved successfully!");
-    } catch (error) {
-      console.error("❌ Error saving transaction:", error);
-      Alert.alert("Error", `Failed to save transaction: ${error.message}`);
-    }
-  };
+    Alert.alert("Success", "Transaction saved successfully!");
+  } catch (error) {
+    console.error("❌ Error saving transaction:", error);
+    Alert.alert("Error", `Failed to save transaction: ${error.message}`);
+  }
+};
 
   // -----------------------
   // UI rendering

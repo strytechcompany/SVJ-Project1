@@ -2905,10 +2905,20 @@ expo-modules-core@3.0.26:
   dependencies:
     invariant "^2.2.4"
 
+expo-print@^15.0.8:
+  version "15.0.8"
+  resolved "https://registry.npmjs.org/expo-print/-/expo-print-15.0.8.tgz"
+  integrity sha512-4O0Qzm0On5AmJIl9d+BT+ieTipFp658nHI4aX7vKEFPfj3dfQxG6rDJJpca+rrc9c4Ha8ZFYGvxJG5+4lFq2Pw==
+
 expo-server@^1.0.4:
   version "1.0.4"
   resolved "https://registry.npmjs.org/expo-server/-/expo-server-1.0.4.tgz"
   integrity sha512-IN06r3oPxFh3plSXdvBL7dx0x6k+0/g0bgxJlNISs6qL5Z+gyPuWS750dpTzOeu37KyBG0RcyO9cXUKzjYgd4A==
+
+expo-sharing@^14.0.8:
+  version "14.0.8"
+  resolved "https://registry.npmjs.org/expo-sharing/-/expo-sharing-14.0.8.tgz"
+  integrity sha512-A1pPr2iBrxypFDCWVAESk532HK+db7MFXbvO2sCV9ienaFXAk7lIBm6bkqgE6vzRd9O3RGdEGzYx80cYlc089Q==
 
 expo-status-bar@~3.0.8:
   version "3.0.8"
