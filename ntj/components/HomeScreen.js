@@ -11,20 +11,29 @@ import {
   TextInput,
   Animated,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { useNavigation } from "@react-navigation/native";
 import { FontAwesome } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { Foundation } from "@expo/vector-icons";
 import { base_url } from "./config"; // ← assuming config is in same folder
 
 export default function HomeScreen() {
   const navigation = useNavigation();
 
+  const getCurrentDate = () => {
+    const d = new Date();
+    return `${String(d.getDate()).padStart(2, "0")}-${String(
+      d.getMonth() + 1
+    ).padStart(2, "0")}-${d.getFullYear()}`;
+  };
+
   const [goldRate, setGoldRate] = useState("11500");
-  const [goldDate, setGoldDate] = useState("23-11-2025");
+  const [goldDate, setGoldDate] = useState(getCurrentDate());
 
   const [ftRate, setFtRate] = useState("150");
-  const [ftDate, setFtDate] = useState("23-11-2025");
+  const [ftDate, setFtDate] = useState(getCurrentDate());
 
   const [modalVisible, setModalVisible] = useState(false);
 
@@ -40,7 +49,23 @@ export default function HomeScreen() {
   // Fetch customers on mount
   useEffect(() => {
     fetchCustomers();
+    loadRates();
   }, []);
+
+  const loadRates = async () => {
+    try {
+      const savedGoldRate = await AsyncStorage.getItem("goldRate");
+      if (savedGoldRate) {
+        setGoldRate(savedGoldRate);
+      }
+      const savedFtRate = await AsyncStorage.getItem("ftRate");
+      if (savedFtRate) {
+        setFtRate(savedFtRate);
+      }
+    } catch (error) {
+      console.error("Error loading rates:", error);
+    }
+  };
 
   const fetchCustomers = async () => {
     try {
@@ -94,7 +119,13 @@ export default function HomeScreen() {
     closeMenu();
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    try {
+      await AsyncStorage.setItem("goldRate", goldRate);
+      await AsyncStorage.setItem("ftRate", ftRate);
+    } catch (error) {
+      console.error("Error saving rates:", error);
+    }
     setModalVisible(false);
   };
 
@@ -132,14 +163,6 @@ export default function HomeScreen() {
         >
           <Foundation name="database" color="#fff" size={24} />
           <Text style={styles.menuText}>Customer Data List </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={() => handleMenuNavigation("CustomerMasterList")}
-        >
-          <Icon name="cash-register" size={25} color="#fff" />
-          <Text style={styles.menuText}>Customer List</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -182,6 +205,7 @@ export default function HomeScreen() {
           <Text style={styles.menuText}>Purchase</Text>
         </TouchableOpacity>
 
+
         <TouchableOpacity
           style={styles.menuItem}
           onPress={() => handleMenuNavigation("WorkerList")}
@@ -196,6 +220,29 @@ export default function HomeScreen() {
         >
           <Icon name="account-group-outline" size={25} color="#fff" />
           <Text style={styles.menuText}>Issue and Receipt List</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => handleMenuNavigation("Dealer")}
+        >
+          <Icon name="account-group-outline" size={25} color="#fff" />
+          <Text style={styles.menuText}>Dealer List</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={{
+            backgroundColor: "red",
+            padding: 12,
+            margin: 20,
+            borderRadius: 10,
+            alignItems: "center",
+          }}
+          onPress={() => setConfirmDeleteVisible(true)}
+        >
+          <Text style={{ color: "white", fontWeight: "bold" }}>
+            DELETE ALL DATA
+          </Text>
         </TouchableOpacity>
       </Animated.View>
 
@@ -231,20 +278,6 @@ export default function HomeScreen() {
           onPress={() => setModalVisible(true)}
         >
           <Text style={styles.editBtnText}>Edit Gold Rate</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={{
-            backgroundColor: "red",
-            padding: 12,
-            margin: 20,
-            borderRadius: 10,
-            alignItems: "center",
-          }}
-          onPress={() => setConfirmDeleteVisible(true)}
-        >
-          <Text style={{ color: "white", fontWeight: "bold" }}>
-            DELETE ALL DATA
-          </Text>
         </TouchableOpacity>
         <Modal visible={confirmDeleteVisible} transparent animationType="fade">
           <View
@@ -339,36 +372,52 @@ export default function HomeScreen() {
         <View style={styles.quickAccessRow}>
           <TouchableOpacity
             style={styles.quickTile}
-            onPress={() => navigation.navigate("B2BCalculationPage")}
+            onPress={() => navigation.navigate("B2BCalculationPage", { ftRate})}
           >
             <Text style={styles.quickTileText}>B2B Transaction</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.quickTile}
-            onPress={() => navigation.navigate("B2Ct")}
+            onPress={() => navigation.navigate("B2CCalculationPage", { goldRate })}
           >
             <Text style={styles.quickTileText}> B2C Transaction</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.quickTile}
-            onPress={() => navigation.navigate("SuspenseTransaction")}
+            onPress={() => navigation.navigate("Payments")}
           >
-            <Text style={styles.quickTileText}>Suspense Transaction</Text>
+            <Text style={styles.quickTileText}>Payments</Text>
           </TouchableOpacity>
         </View>
-        <View style={styles.quickAccessRow1}>
+        <View style={styles.quickAccessRow}>
           <TouchableOpacity
             style={styles.quickTile}
             onPress={() => navigation.navigate("ItemEntry")}
           >
-            <Text style={styles.quickTileText}> Item Entry</Text>
+            <Text style={styles.quickTileText}>Item Entry</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickTile}
+            onPress={() => navigation.navigate("Estimate", { goldRate })}
+          >
+            <Text style={styles.quickTileText}>Estimate</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.quickTile}
+            onPress={() => navigation.navigate("CustomerDataList")}
+          >
+            <Text style={styles.quickTileText}>Customer </Text>
+            <Text style={styles.quickTileText}>Data List</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.quickAccessRow}>
+
         </View>
 
         <Text style={styles.sectionTitle}>Recent Transactions</Text>
-
         {/* Search Bar */}
         <View style={styles.searchContainer}>
           <TextInput
@@ -423,18 +472,37 @@ export default function HomeScreen() {
           data={filteredTransactions}
           keyExtractor={(item) => item.id || item.name}
           scrollEnabled={false}
-          renderItem={({ item }) => (
-            <View style={styles.transactionCard}>
-              <View>
-                <Text style={styles.txnName}>{item.name}</Text>
-                <Text style={styles.txnWeight}>GOLD WT : {item.weight}</Text>
-              </View>
+          renderItem={({ item }) => {
+            // Calculate balances: if current balance (oldBalance) is negative, convert to advance balance
+            const oldBalance = parseFloat(item.weight.replace(' g', '')) || 0;
+            let currentBalance = oldBalance;
+            let advanceBalance = 0; // Assuming advance balance is not directly available, set to 0
 
-              <View style={styles.customerTag}>
-                <Text style={styles.customerText}>{item.type}</Text>
+            if (currentBalance < 0) {
+              advanceBalance += Math.abs(currentBalance);
+              currentBalance = 0;
+            }
+
+            return (
+              <View style={styles.transactionCard}>
+                <View>
+                  <Text style={styles.txnName}>{item.name}</Text>
+                  <Text style={styles.txnWeight}>
+                    Current Balance: {currentBalance.toFixed(3)} g
+                  </Text>
+                  {advanceBalance > 0 && (
+                    <Text style={styles.txnWeight}>
+                      Advance Balance: {advanceBalance.toFixed(3)} g
+                    </Text>
+                  )}
+                </View>
+
+                <View style={styles.customerTag}>
+                  <Text style={styles.customerText}>{item.type}</Text>
+                </View>
               </View>
-            </View>
-          )}
+            );
+          }}
         />
       </ScrollView>
 
@@ -444,8 +512,8 @@ export default function HomeScreen() {
           <Icon name="home-outline" size={28} color="#2E7D32" />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => navigation.navigate("Search")}>
-          <Icon name="magnify" size={28} color="#555" />
+        <TouchableOpacity onPress={() => navigation.navigate("ReportScreen")}>
+             <Ionicons name="document-outline" color="#000" size={28} />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -617,6 +685,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "bold",
     color: "#1B4D1B",
+    bottom: 5,
   },
 
   quickAccessRow: {

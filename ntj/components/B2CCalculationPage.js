@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -11,12 +12,54 @@ import {
   Platform,
   SafeAreaView,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { Feather } from "@expo/vector-icons";
 import { base_url } from "./config";
 
 export default function CreateTransaction({ navigation, route }) {
+  const transactionType = route?.params?.type || "B2C";
+  const passedGoldRate = route?.params?.goldRate;
+  const estimate = route?.params?.estimate;
+
+  // ---------------- UTILITY FUNCTIONS FOR CALCULATIONS ----------------
+  const parseNum = (v) => {
+    const n = Number(String(v).replace(/[^0-9.-]+/g, ""));
+    return isNaN(n) ? 0 : n;
+  };
+
+  const calcTotal = (weight, wastage, rate) => {
+    const W = parseNum(weight);
+    const WM = parseNum(wastage);
+    const R = parseNum(rate);
+    const total = (W + WM) * R;
+    return Number(total.toFixed(2));
+  };
+  
+  const calcGST = (total, gstPercentage, gstEnabled) => {
+    if (!gstEnabled) return 0;
+    const T = parseNum(total);
+    const P = parseNum(gstPercentage);
+    const gst = T * (P / 100);
+    return Number(gst.toFixed(2));
+  };
+
+  
+  const calcFinal = (total, gst) => {
+    const T = parseNum(total);
+    const G = parseNum(gst);
+    const final = T + G;
+    return Number(final.toFixed(2));
+  };
+
+  // Calculate Pure Weight: (Weight * Touch) / 100
+  const calcPure = (weight, touch) => {
+    const W = parseNum(weight);
+    const T = parseNum(touch);
+    const pure = (W * T) / 100;
+    return Number(pure.toFixed(3));
+  };
   const [b2cCustomers, setB2cCustomers] = useState([]);
 
   // ---------------- CUSTOMER STATES ----------------
@@ -29,9 +72,6 @@ export default function CreateTransaction({ navigation, route }) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [filteredCustomersByPhone, setFilteredCustomersByPhone] = useState([]);
   const [showPhoneDropdown, setShowPhoneDropdown] = useState(false);
-  const defaultGoldRate = route?.params?.goldRate || "11500";
-  
-
   const [showItems, setShowItems] = useState(false);
 
   // ---------------- ITEM INPUT STATES ----------------
@@ -39,7 +79,36 @@ export default function CreateTransaction({ navigation, route }) {
   const [weight, setWeight] = useState("");
   const [touch, setTouch] = useState("");
   const [wastage, setWastage] = useState("");
-  const [rate, setRate] = useState(defaultGoldRate);
+  const [rate, setRate] = useState("11500");
+  const [gstEnabled, setGstEnabled] = useState(false);
+  const [gstPercentage, setGstPercentage] = useState("");
+  const [gstAmount, setGstAmount] = useState("");
+
+  // Load gold rate from AsyncStorage
+  // Load gold rate from navigation or AsyncStorage
+  useEffect(() => {
+    const loadGoldRate = async () => {
+      try {
+        // Priority 1: Use rate passed from navigation
+        if (passedGoldRate) {
+          console.log("✅ Using gold rate from HomeScreen:", passedGoldRate);
+          setRate(passedGoldRate);
+          return;
+        }
+
+        // Priority 2: Load from AsyncStorage
+        const storedRate = await AsyncStorage.getItem("goldRate");
+        if (storedRate) {
+          console.log("✅ Using stored gold rate:", storedRate);
+          setRate(storedRate);
+        }
+      } catch (error) {
+        console.error("Error loading gold rate:", error);
+      }
+    };
+    loadGoldRate();
+  }, [passedGoldRate]);
+
 
   const [items, setItems] = useState([]);
 
@@ -53,24 +122,88 @@ export default function CreateTransaction({ navigation, route }) {
   const [showItemDropdown, setShowItemDropdown] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
 
+  // ---------------- ITEM ENTRY ITEMS (from ItemEntry.js) ----------------
+  const [itemEntryItems, setItemEntryItems] = useState([]);
+
   // ---------------- MODIFIED WEIGHT STATE ----------------
   const [modifiedWeight, setModifiedWeight] = useState("");
+  const [hasProcessedEstimate, setHasProcessedEstimate] = useState(false);
+
+  // ---------------- HANDLE ESTIMATE PARAMS ----------------
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      const estimate = route?.params?.estimate;
+      if (estimate) {
+        console.log("📥 Received estimate:", estimate);
+
+        // Calculate values
+        const wt = parseFloat(estimate.weight) || 0;
+        const touch = parseFloat(estimate.wastagePercent) || 0;
+        const rate = parseFloat(estimate.goldRate) || 0;
+        const wastage = (wt * touch) / 100;
+        const total = (wt + wastage) * rate;
+        const gst = total * 0.03;
+        const final = total + gst;
+
+        // Create item object
+        const estimateItem = {
+          itemName: estimate.itemName,
+          weight: wt,
+          touch: touch,
+          wastage: wastage.toFixed(3),
+          rate: estimate.goldRate,
+          total: total,
+          gst: gst,
+          final: final,
+          modifiedWeight: 0, // No stock deduction for estimate
+          gstEnabled: true, // Assuming GST enabled for estimate
+        };
+
+        // Add to items array
+        setItems([estimateItem]);
+
+        // Populate input fields
+        setItemName(estimate.itemName);
+        setWeight(wt.toString());
+        setTouch(touch.toString());
+        setWastage(wastage.toFixed(3));
+        setRate(estimate.goldRate.toString());
+
+        // Show items section
+        setShowItems(true);
+
+        console.log("✅ Estimate item added to table:", estimateItem);
+      }
+    });
+    return unsubscribe;
+  }, [route.params?.estimate]);
 
   // ✅ Fetch B2C customers from API
   useEffect(() => {
     fetchB2CCustomers();
   }, []);
 
+  // ✅ Handle navigation params to update customers list after creating new customer
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      const updatedCustomers = route.params?.customers;
+      if (updatedCustomers) {
+        setB2cCustomers(updatedCustomers);
+      }
+    });
+    return unsubscribe;
+  }, [navigation, route.params]);
+
   const fetchB2CCustomers = async () => {
     try {
-      console.log('🔍 Fetching from:', `${base_url}/customersB2C`);
-      
+      console.log("🔍 Fetching from:", `${base_url}/customersB2C`);
+
       const response = await fetch(`${base_url}/customersB2C`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const data = await response.json();
 
       const formattedCustomers = data.map((customer) => ({
@@ -87,7 +220,7 @@ export default function CreateTransaction({ navigation, route }) {
     } catch (error) {
       console.error("❌ Error fetching B2C customers:", error);
       Alert.alert(
-        "Error", 
+        "Error",
         `Failed to load customers: ${error.message}\n\nMake sure:\n1. Backend server is running\n2. Check base_url in config.js`
       );
     }
@@ -96,16 +229,16 @@ export default function CreateTransaction({ navigation, route }) {
   // ✅ Fetch Stock Master from API
   const fetchStockMaster = async () => {
     try {
-      console.log('🔍 Fetching stock from:', `${base_url}/stockMaster`);
-      
+      console.log("🔍 Fetching stock from:", `${base_url}/stockMaster`);
+
       const response = await fetch(`${base_url}/stockMaster`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const data = await response.json();
-      
+
       const formattedStock = data.map((item) => ({
         id: item._id,
         itemName: item.itemName,
@@ -120,10 +253,7 @@ export default function CreateTransaction({ navigation, route }) {
       console.log("✅ Fetched Stock Master:", formattedStock);
     } catch (error) {
       console.error("❌ Error fetching stock master:", error);
-      Alert.alert(
-        "Error", 
-        `Failed to load stock: ${error.message}`
-      );
+      Alert.alert("Error", `Failed to load stock: ${error.message}`);
     }
   };
 
@@ -131,8 +261,42 @@ export default function CreateTransaction({ navigation, route }) {
   useEffect(() => {
     if (showItems) {
       fetchStockMaster();
+      fetchItemEntryItems();
     }
   }, [showItems]);
+
+  // ✅ Fetch Item Entry Items from API
+  const fetchItemEntryItems = async () => {
+    try {
+      console.log("🔍 Fetching item entry items from:", `${base_url}/items`);
+
+      const response = await fetch(`${base_url}/items`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      const formattedItems = data.map((item) => ({
+        id: item._id || item.id,
+        stockName: item.stockName,
+        itemDetails: item.itemDetails,
+        buyingTouch: parseFloat(item.buyingTouch || 0),
+        sellingTouch: parseFloat(item.sellingTouch || 0),
+        percentage: parseFloat(item.percentage || 0),
+        date: item.date,
+        issue: item.issue,
+        receipt: item.receipt,
+      }));
+
+      setItemEntryItems(formattedItems);
+      console.log("✅ Fetched Item Entry Items:", formattedItems);
+    } catch (error) {
+      console.error("❌ Error fetching item entry items:", error);
+      Alert.alert("Error", `Failed to load item entry items: ${error.message}`);
+    }
+  };
 
   // ✅ AUTO CALCULATE MODIFIED WEIGHT - Runs when weight changes
   useEffect(() => {
@@ -145,141 +309,68 @@ export default function CreateTransaction({ navigation, route }) {
     }
   }, [weight, selectedItem]);
 
- // ---------------- ADD ITEM (FIXED VERSION) ----------------
-const addRow = async () => {
-  console.log("🔵 ADD ITEM - Function called");
-  console.log("🔍 Current values:", { itemName, weight, rate, touch, wastage });
-  
-  // ✅ FIX 1: Better validation
-  if (!itemName || !itemName.trim()) {
-    console.log("❌ ADD ITEM - Missing item name");
-    Alert.alert("Required", "Enter Item Name");
-    return;
-  }
+  // 🔢 Auto calculate W/M = Weight × Touch
+  useEffect(() => {
+    const wt = parseFloat(weight) || 0;
+    const t = parseFloat(touch) || 0;
 
-  if (!weight || parseFloat(weight) <= 0) {
-    console.log("❌ ADD ITEM - Invalid weight");
-    Alert.alert("Required", "Enter valid Weight");
-    return;
-  }
-
-  if (!rate || parseFloat(rate) <= 0) {
-    console.log("❌ ADD ITEM - Invalid rate");
-    Alert.alert("Required", "Enter valid Rate");
-    return;
-  }
-
-  // ✅ FIX 2: Check if item is selected
-  if (!selectedItem) {
-    console.log("❌ ADD ITEM - No item selected from stock");
-    Alert.alert("Error", "Please select an item from the stock list");
-    return;
-  }
-
-  const wt = parseFloat(weight);
-  const t = parseFloat(touch || 0);
-  const w = parseFloat(wastage || 0);
-  const r = parseFloat(rate);
-
-  const total = wt * r;
-  const gst = total * 0.03;
-  const final = total + gst;
-
-  console.log("📊 ADD ITEM - Calculated values:", {
-    weight: wt,
-    touch: t,
-    wastage: w,
-    rate: r,
-    total,
-    gst,
-    final
-  });
-
-  console.log("🔍 ADD ITEM - Selected item:", selectedItem);
-
-  if (selectedItem.weight < wt) {
-    console.log(`❌ ADD ITEM - Insufficient stock. Available: ${selectedItem.weight}, Required: ${wt}`);
-    Alert.alert(
-      "Insufficient Stock",
-      `Available: ${selectedItem.weight.toFixed(3)} g\nRequired: ${wt.toFixed(3)} g`
-    );
-    return;
-  }
-
-  const newWeight = selectedItem.weight - wt;
-  console.log(`📉 ADD ITEM - Stock will be updated from ${selectedItem.weight}g to ${newWeight.toFixed(3)}g`);
-
-  try {
-    console.log("🚀 ADD ITEM - Starting API calls...");
-
-    // 1️⃣ SAVE ITEM TO AddItem DATABASE
-    const addItemPayload = {
-      customerName: customerName,
-      invoiceNo: invoiceNo || "N/A",
-      itemName: itemName,
-      weight: wt,
-      touch: t,
-      wm: w,
-      rate: r,
-      total: total,
-      gst: gst,
-      final: final,
-      modifiedWeight: parseFloat(modifiedWeight || 0),
-      stockMasterId: selectedItem.id,
-      date: date.split("/").reverse().join("-"),
-    };
-
-    console.log("📤 ADD ITEM - Saving to AddItem DB:", addItemPayload);
-
-    const addItemResponse = await fetch(`${base_url}/addItem`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(addItemPayload),
-    });
-
-    if (!addItemResponse.ok) {
-      const errorText = await addItemResponse.text();
-      console.error(`❌ ADD ITEM - Failed to save. Status: ${addItemResponse.status}`, errorText);
-      throw new Error(`Failed to save item: ${addItemResponse.status} - ${errorText}`);
+    if (wt > 0 && t > 0) {
+      const wmValue = ((wt * t)/100).toFixed(3);
+      setWastage(wmValue);
+    } else {
+      setWastage("");
     }
+  }, [weight, touch]);
 
-    const savedItem = await addItemResponse.json();
-    console.log("✅ ADD ITEM - Item saved to AddItem DB:", savedItem);
 
-    // 2️⃣ UPDATE STOCK IN DATABASE
-    const stockUpdatePayload = {
-      itemName: selectedItem.itemName,
-      weight: parseFloat(newWeight.toFixed(3)),
-      less: selectedItem.less,
-      netWeight: selectedItem.netWeight,
-      calculation: selectedItem.calculation,
-      pure: selectedItem.pure,
-    };
-
-    console.log("📤 ADD ITEM - Updating stock:", stockUpdatePayload);
-
-    const stockResponse = await fetch(`${base_url}/stockMaster/${selectedItem.id}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(stockUpdatePayload),
-    });
-
-    if (!stockResponse.ok) {
-      const errorText = await stockResponse.text();
-      console.error(`❌ ADD ITEM - Failed to update stock. Status: ${stockResponse.status}`, errorText);
-      throw new Error(`Failed to update stock: ${stockResponse.status} - ${errorText}`);
-    }
-
-    const updatedStock = await stockResponse.json();
-    console.log("✅ ADD ITEM - Stock updated in DB:", updatedStock);
-
-    // 3️⃣ UPDATE LOCAL STATE
-    const newItem = {
+  // ---------------- ADD ITEM (FIXED VERSION) ----------------
+  const addRow = async () => {
+    console.log("🔵 ADD ITEM - Function called");
+    console.log("🔍 Current values:", {
       itemName,
+      weight,
+      rate,
+      touch,
+      wastage,
+    });
+
+    // ✅ FIX 1: Better validation
+    if (!itemName || !itemName.trim()) {
+      console.log("❌ ADD ITEM - Missing item name");
+      Alert.alert("Required", "Enter Item Name");
+      return;
+    }
+
+    if (!weight || parseFloat(weight) <= 0) {
+      console.log("❌ ADD ITEM - Invalid weight");
+      Alert.alert("Required", "Enter valid Weight");
+      return;
+    }
+
+    if (!rate || parseFloat(rate) <= 0) {
+      console.log("❌ ADD ITEM - Invalid rate");
+      Alert.alert("Required", "Enter valid Rate");
+      return;
+    }
+
+    // ✅ FIX 2: Check if item is selected
+    if (!selectedItem) {
+      console.log("❌ ADD ITEM - No item selected from stock");
+      Alert.alert("Error", "Please select an item from the stock list");
+      return;
+    }
+
+    const wt = parseFloat(weight);
+    const t = parseFloat(touch || 0);
+    const w = parseFloat(wastage || 0);
+    const r = parseFloat(rate);
+
+    // Use separated calculation functions for better understanding
+    const total = calcTotal(wt, w, r);
+    const gst = calcGST(total, gstPercentage, gstEnabled);
+    const final = calcFinal(total, gst);
+
+    console.log("📊 ADD ITEM - Calculated values:", {
       weight: wt,
       touch: t,
       wastage: w,
@@ -287,54 +378,174 @@ const addRow = async () => {
       total,
       gst,
       final,
-      modifiedWeight: parseFloat(modifiedWeight || 0),
-    };
-
-    console.log("📝 ADD ITEM - Adding to local state:", newItem);
-    
-    setItems((prev) => {
-      const updated = [...prev, newItem];
-      console.log("✅ ADD ITEM - Items state updated. Total items:", updated.length);
-      console.log("✅ ADD ITEM - Current items:", updated);
-      return updated;
     });
-    
-    setItemList((prev) =>
-      prev.map((item) =>
-        item.id === selectedItem.id
-          ? { ...item, weight: parseFloat(newWeight.toFixed(3)) }
-          : item
-      )
+
+    console.log("🔍 ADD ITEM - Selected item:", selectedItem);
+
+    if (selectedItem.weight < wt) {
+      console.log(
+        `❌ ADD ITEM - Insufficient stock. Available: ${selectedItem.weight}, Required: ${wt}`
+      );
+      Alert.alert(
+        "Insufficient Stock",
+        `Available: ${selectedItem.weight.toFixed(3)} g\nRequired: ${wt.toFixed(
+          3
+        )} g`
+      );
+      return;
+    }
+
+    const newWeight = selectedItem.weight - wt;
+    console.log(
+      `📉 ADD ITEM - Stock will be updated from ${selectedItem.weight
+      }g to ${newWeight.toFixed(3)}g`
     );
 
-    // 4️⃣ CLEAR FORM - ✅ FIX 3: Properly reset rate
-    console.log("🧹 ADD ITEM - Clearing form fields");
-    setItemName("");
-    setWeight("");
-    setTouch("");
-    setWastage("");
-    setRate(defaultGoldRate); // ✅ FIXED: Reset to default instead of empty string
-    setSelectedItem(null);
-    setModifiedWeight("");
-    setShowItemDropdown(false);
+    try {
+      console.log("🚀 ADD ITEM - Starting API calls...");
 
-    console.log("✅ ADD ITEM - Process completed successfully!");
-    Alert.alert("Success", "Item added successfully!");
+      // 1️⃣ SAVE ITEM TO AddItem DATABASE
+      const addItemPayload = {
+        customerName: customerName,
+        invoiceNo: invoiceNo || "N/A",
+        itemName: itemName,
+        weight: wt,
+        touch: t,
+        wm: w,
+        rate: r,
+        total: total,
+        gst: gst,
+        final: final,
+        modifiedWeight: parseFloat(modifiedWeight || 0),
+        stockMasterId: selectedItem.id,
+        date: date.split("/").reverse().join("-"),
+      };
 
-  } catch (error) {
-    console.error("❌ ADD ITEM - Error occurred:", error);
-    console.error("❌ ADD ITEM - Error details:", {
-      message: error.message,
-      stack: error.stack
-    });
-    Alert.alert("Error", `Failed to save item: ${error.message}`);
-  }
-};
+      console.log("📤 ADD ITEM - Saving to AddItem DB:", addItemPayload);
+
+      const addItemResponse = await fetch(`${base_url}/addItem`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(addItemPayload),
+      });
+
+      if (!addItemResponse.ok) {
+        const errorText = await addItemResponse.text();
+        console.error(
+          `❌ ADD ITEM - Failed to save. Status: ${addItemResponse.status}`,
+          errorText
+        );
+        throw new Error(
+          `Failed to save item: ${addItemResponse.status} - ${errorText}`
+        );
+      }
+
+      const savedItem = await addItemResponse.json();
+      console.log("✅ ADD ITEM - Item saved to AddItem DB:", savedItem);
+
+      // 2️⃣ UPDATE STOCK IN DATABASE
+      const stockUpdatePayload = {
+        itemName: selectedItem.itemName,
+        weight: parseFloat(newWeight.toFixed(3)),
+        less: selectedItem.less,
+        netWeight: selectedItem.netWeight,
+        calculation: selectedItem.calculation,
+        pure: selectedItem.pure,
+      };
+
+      console.log("📤 ADD ITEM - Updating stock:", stockUpdatePayload);
+
+      const stockResponse = await fetch(
+        `${base_url}/stockMaster/${selectedItem.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(stockUpdatePayload),
+        }
+      );
+
+      if (!stockResponse.ok) {
+        const errorText = await stockResponse.text();
+        console.error(
+          `❌ ADD ITEM - Failed to update stock. Status: ${stockResponse.status}`,
+          errorText
+        );
+        throw new Error(
+          `Failed to update stock: ${stockResponse.status} - ${errorText}`
+        );
+      }
+
+      const updatedStock = await stockResponse.json();
+      console.log("✅ ADD ITEM - Stock updated in DB:", updatedStock);
+
+      // 3️⃣ UPDATE LOCAL STATE
+      const newItem = {
+        itemName,
+        weight: wt,
+        touch: t,
+        wastage: w,
+        rate: r,
+        total,
+        gst,
+        final,
+        modifiedWeight: parseFloat(modifiedWeight || 0),
+        gstEnabled,
+      };
+
+      console.log("📝 ADD ITEM - Adding to local state:", newItem);
+
+      setItems((prev) => {
+        const updated = [...prev, newItem];
+        console.log(
+          "✅ ADD ITEM - Items state updated. Total items:",
+          updated.length
+        );
+        console.log("✅ ADD ITEM - Current items:", updated);
+        return updated;
+      });
+
+      setItemList((prev) =>
+        prev.map((item) =>
+          item.id === selectedItem.id
+            ? { ...item, weight: parseFloat(newWeight.toFixed(3)) }
+            : item
+        )
+      );
+
+      // 4️⃣ CLEAR FORM - ✅ FIX 3: Keep previous rate
+      console.log("🧹 ADD ITEM - Clearing form fields");
+      setItemName("");
+      setWeight("");
+      setTouch("");
+      setWastage("");
+      // Keep the previous rate value, don't change it
+      setSelectedItem(null);
+      setModifiedWeight("");
+      setShowItemDropdown(false);
+
+      // Save the rate to AsyncStorage so HomeScreen reflects it
+      await AsyncStorage.setItem("goldRate", r.toString());
+
+      console.log("✅ ADD ITEM - Process completed successfully!");
+      Alert.alert("Success", "Item added successfully!");
+    } catch (error) {
+      console.error("❌ ADD ITEM - Error occurred:", error);
+      console.error("❌ ADD ITEM - Error details:", {
+        message: error.message,
+        stack: error.stack,
+      });
+      Alert.alert("Error", `Failed to save item: ${error.message}`);
+    }
+  };
 
   // ---------------- DELETE ITEM ----------------
   const deleteRow = async (index) => {
     const itemToDelete = items[index];
-    
+
     Alert.alert(
       "Delete Item",
       "Are you sure you want to delete this item? This will restore the stock.",
@@ -468,17 +679,31 @@ const addRow = async () => {
       setFilteredItems(filtered);
       setShowItemDropdown(true);
     } else {
-      setFilteredItems([]);
-      setShowItemDropdown(false);
+
+      setFilteredItems(itemList);
+      setShowItemDropdown(true);
       setSelectedItem(null);
       setModifiedWeight("");
+      setTouch("");
     }
   };
 
   const selectItem = (item) => {
     setItemName(item.itemName);
-    setSelectedItem(item);
+    setSelectedItem({ ...item, weight: Number(item.weight) });
     setWeight("");
+
+    // Find matching item in itemEntryItems by stockName
+    const matchingItemEntry = itemEntryItems.find(
+      (entry) => entry.stockName === item.itemName
+    );
+
+    // Auto-fill TOUCH with percentage from ItemEntry if found, else use pure value
+    const touchValue = matchingItemEntry
+      ? matchingItemEntry.percentage.toString()
+      : item.pure.toString();
+
+    setTouch(touchValue);
     setModifiedWeight("");
     setShowItemDropdown(false);
   };
@@ -491,9 +716,15 @@ const addRow = async () => {
     }
 
     try {
-      console.log("Submitting customer...", { customerName, phone, address, date, invoiceNo });
+      console.log("Submitting customer...", {
+        customerName,
+        phone,
+        address,
+        date,
+        invoiceNo,
+      });
 
-      const response = await fetch(`${base_url}/B2Ccal`, { 
+      const response = await fetch(`${base_url}/B2Ccal`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -502,7 +733,7 @@ const addRow = async () => {
           customerName,
           Address: address,
           Phone: phone,
-          Date: date.split("/").reverse().join("-"), 
+          Date: date.split("/").reverse().join("-"),
           InvoiceNumber: invoiceNo || "N/A",
         }),
       });
@@ -518,7 +749,6 @@ const addRow = async () => {
       setShowItems(true);
 
       Alert.alert("Success", "Customer saved successfully");
-
     } catch (error) {
       console.error("❌ Error saving customer:", error);
       Alert.alert("Error", `Failed to save customer: ${error.message}`);
@@ -556,7 +786,7 @@ const addRow = async () => {
     }));
 
   // ---------------- FINAL SUBMIT ----------------
-  const handleFinalSubmit = () => {
+  const handleFinalSubmit = async () => {
     if (items.length === 0) {
       Alert.alert("Error", "No items added");
       return;
@@ -569,6 +799,33 @@ const addRow = async () => {
     console.log("FINAL REPORT 👉", reportData);
     console.log("FINAL TXNS 👉", transactionData);
 
+    // Update customer's advance balance
+    try {
+      const customer = b2cCustomers.find(c => c.customerName === customerName && c.phone === phone);
+      if (customer) {
+        const totalAmount = parseFloat(reportData.cash);
+        const newAdvanceBalance = Math.max(0, customer.advanceBalance - totalAmount);
+
+        const updateResponse = await fetch(`${base_url}/customersB2C/${customer.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            advanceBalance: newAdvanceBalance.toFixed(3),
+          }),
+        });
+
+        if (!updateResponse.ok) {
+          console.error("Failed to update customer advance balance");
+        } else {
+          console.log("✅ Customer advance balance updated successfully");
+        }
+      }
+    } catch (error) {
+      console.error("Error updating customer advance balance:", error);
+    }
+
     navigation.navigate("BillPreview", {
       customer: {
         name: customerName,
@@ -576,12 +833,19 @@ const addRow = async () => {
         id: invoiceNo || "-",
         phone,
         balance: "0.000",
-        type: "B2C",
+        type: transactionType, // 👈 dynamic
         email: "-",
         advance: "0.000",
+        date: date,
       },
       report: reportData,
       transactions: transactionData,
+      items: items, // Pass items for B2C bill preview
+      gst: gstEnabled ? {
+        enabled: gstEnabled,
+        percentage: gstPercentage,
+        amount: gstAmount,
+      } : null,
     });
   };
 
@@ -589,7 +853,7 @@ const addRow = async () => {
     <SafeAreaView style={{ flex: 1, backgroundColor: "#F5F7FA" }}>
       {/* ✅ HEADER */}
       <View style={styles.appHeader}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <TouchableOpacity onPress={() => navigation.navigate("Home")}>
           <Icon name="arrow-left" size={26} color="#fff" style={{ top: 20 }} />
         </TouchableOpacity>
         <Text style={styles.appHeaderTitle}>B2C Cal Page</Text>
@@ -597,7 +861,7 @@ const addRow = async () => {
         <TouchableOpacity
           style={{ position: "absolute", right: 20, top: "58%" }}
           onPress={() =>
-            navigation.navigate("CreateCustomerMaster", { type: "B2C" })
+            navigation.navigate("CreateCustomerMaster", { type: "B2C",customers: b2cCustomers })
           }
         >
           <Feather name="user-plus" color="#000" size={25} />
@@ -617,12 +881,20 @@ const addRow = async () => {
             <Text style={styles.cardTitle}>Customer Details</Text>
 
             <Text style={styles.label}>Customer Name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Search customers..."
-              value={customerName}
-              onChangeText={handleCustomerNameChange}
-            />
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.inputWithButton}
+                placeholder="Search customers..."
+                value={customerName}
+                onChangeText={handleCustomerNameChange}
+              />
+              <TouchableOpacity
+                style={styles.plusButton}
+                onPress={() => navigation.navigate("CreateCustomerMaster", { type: "B2C" })}
+              >
+                <Icon name="plus" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
 
             {showDropdown && filteredCustomers.length > 0 && (
               <View style={styles.dropdown}>
@@ -712,23 +984,31 @@ const addRow = async () => {
                 placeholder="Enter item name"
                 value={itemName}
                 onChangeText={handleItemNameChange}
+                onFocus={() => {
+                  // Show all items when focused
+                  if (itemList.length > 0) {
+                    setFilteredItems(itemList);
+                    setShowItemDropdown(true);
+                  }
+                }}
               />
-
-              {showItemDropdown && filteredItems.length > 0 && (
-                <View style={styles.dropdown}>
-                  {filteredItems.map((item) => (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={styles.dropdownItem}
-                      onPress={() => selectItem(item)}
-                    >
-                      <Text>
-                        {item.itemName} - {item.weight}g
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
+              {showItemDropdown &&
+                Array.isArray(filteredItems) &&
+                filteredItems.length > 0 && (
+                  <View style={styles.dropdown}>
+                    {filteredItems.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={styles.dropdownItem}
+                        onPress={() => selectItem(item)}
+                      >
+                        <Text>
+                          {item.itemName} - {item.weight}g
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
 
               {/* WEIGHT WITH INLINE MODIFIED WEIGHT */}
               <Text style={styles.label}>Weight (g)</Text>
@@ -761,10 +1041,9 @@ const addRow = async () => {
               <TextInput
                 style={styles.input}
                 value={wastage}
-                onChangeText={setWastage}
-                keyboardType="decimal-pad"
+                editable={false}
+                placeholder="Auto"
               />
-
               {/* RATE */}
               <Text style={styles.label}>Rate</Text>
               <TextInput
@@ -773,6 +1052,44 @@ const addRow = async () => {
                 onChangeText={setRate}
                 keyboardType="decimal-pad"
               />
+
+              {/* GST CHECKBOX */}
+              <View style={styles.checkboxContainer}>
+                <TouchableOpacity
+                  style={styles.checkbox}
+                  onPress={() => setGstEnabled(!gstEnabled)}
+                >
+                  <Icon
+                    name={gstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
+                    size={24}
+                    color={gstEnabled ? "#2E7D32" : "#ccc"}
+                  />
+                  <Text style={styles.checkboxLabel}>Enable GST</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* GST INPUT FIELDS */}
+              {gstEnabled && (
+                <View>
+                  <Text style={styles.label}>GST Percentage (%)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={gstPercentage}
+                    onChangeText={setGstPercentage}
+                    keyboardType="decimal-pad"
+                    placeholder="0.0"
+                  />
+
+                  <Text style={[styles.label, { marginTop: 12 }]}>GST Amount (₹)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={gstAmount}
+                    onChangeText={setGstAmount}
+                    keyboardType="decimal-pad"
+                    placeholder="0.00"
+                  />
+                </View>
+              )}
 
               {/* ADD ITEM BUTTON */}
               <TouchableOpacity style={styles.addRowBtn} onPress={addRow}>
@@ -797,6 +1114,7 @@ const addRow = async () => {
                           "Rate",
                           "Total",
                           "GST",
+                          "GST Check",
                           "Final",
                           "Mod.Wt",
                           "X",
@@ -814,9 +1132,16 @@ const addRow = async () => {
                           <Text style={styles.td}>{row.weight}</Text>
                           <Text style={styles.td}>{row.touch}</Text>
                           <Text style={styles.td}>{row.rate}</Text>
-                          <Text style={styles.td}>{row.total.toFixed(2)}</Text>
-                          <Text style={styles.td}>{row.gst.toFixed(2)}</Text>
-                          <Text style={styles.td}>{row.final.toFixed(2)}</Text>
+                          <Text style={styles.td}>{Number(row.total || 0).toFixed(2)}</Text>
+                          <Text style={styles.td}>{Number(row.gst || 0).toFixed(2)}</Text>
+                          <View style={styles.td}>
+                            <Icon
+                              name={row.gstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
+                              size={20}
+                              color={row.gstEnabled ? "#2E7D32" : "#ccc"}
+                            />
+                          </View>
+                          <Text style={styles.td}>{Number(row.final || 0).toFixed(2)}</Text>
                           <Text style={styles.td}>{row.modifiedWeight}</Text>
 
                           <TouchableOpacity onPress={() => deleteRow(index)}>
@@ -954,5 +1279,42 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 6,
     marginLeft: 4,
+  },
+
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+
+  inputWithButton: {
+    flex: 1,
+    backgroundColor: "#F1F3F6",
+    borderRadius: 10,
+    padding: 12,
+    marginRight: 10,
+  },
+
+  plusButton: {
+    backgroundColor: '#2E7D32',
+    padding: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  checkboxContainer: {
+    marginBottom: 12,
+  },
+
+  checkbox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  checkboxLabel: {
+    fontSize: 14,
+    color: '#555',
+    marginLeft: 8,
   },
 });
