@@ -36,6 +36,19 @@ export default function ViewOrder({ navigation, route }) {
 
         <Text style={styles.label}>Status</Text>
         <Text style={styles.value}>{order.status}</Text>
+
+        <TouchableOpacity
+          style={[styles.printButton]}
+          onPress={() => {
+            const orderNo = `A202601${(order.id || "").slice(-6).toUpperCase()}`;
+            navigation.navigate("BillPreview", {
+              order: { ...order, orderNo }
+            });
+          }}
+        >
+          <Ionicons name="printer" size={24} color="#fff" />
+          <Text style={styles.printButtonText}>Print Bill</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -72,5 +85,20 @@ const styles = StyleSheet.create({
   value: {
     fontSize: 15,
     color: "#444",
+  },
+  printButton: {
+    backgroundColor: "#007bff",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+    borderRadius: 10,
+    marginTop: 25,
+  },
+  printButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+    marginLeft: 10,
   },
 });

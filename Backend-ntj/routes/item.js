@@ -76,15 +76,15 @@ router.get('/:id', async (req, res) => {
 // UPDATE ITEM BY ID
 router.put('/:id', async (req, res) => {
   try {
-    const { 
-      stockName, 
-      itemDetails, 
-      buyingTouch, 
-      sellingTouch, 
-      percentage, 
+    const {
+      stockName,
+      itemDetails,
+      buyingTouch,
+      sellingTouch,
+      percentage,
       date,
       issue,
-      receipt 
+      receipt
     } = req.body;
 
     // Determine type based on checkboxes
@@ -99,13 +99,15 @@ router.put('/:id', async (req, res) => {
 
     const updatedItem = await Item.findByIdAndUpdate(
       req.params.id,
-      { 
-        stockName, 
-        itemDetails, 
-        buyingTouch, 
-        sellingTouch, 
-        percentage, 
+      {
+        stockName,
+        itemDetails,
+        buyingTouch,
+        sellingTouch,
+        percentage,
         date,
+        issue: issue || false,
+        receipt: receipt || false,
         type
       },
       { new: true, runValidators: true }

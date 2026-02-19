@@ -17,6 +17,7 @@ import { useNavigation } from "@react-navigation/native";
 import { FontAwesome } from "@expo/vector-icons";
 import { Ionicons } from "@expo/vector-icons";
 import { Foundation } from "@expo/vector-icons";
+import { AntDesign } from "@expo/vector-icons";
 import { base_url } from "./config"; // ← assuming config is in same folder
 
 export default function HomeScreen() {
@@ -43,12 +44,12 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("All");
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
-  const [customers, setCustomers] = useState([]); // ← will hold B2B + B2C
-  const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  // Fetch customers on mount
+  // Fetch data on mount
   useEffect(() => {
-    fetchCustomers();
+    fetchData();
     loadRates();
   }, []);
 
@@ -67,33 +68,49 @@ export default function HomeScreen() {
     }
   };
 
-  const fetchCustomers = async () => {
+  const fetchData = async () => {
+    setLoading(true);
     try {
-      const b2bResponse = await fetch(`${base_url}/customers`);
-      const b2bData = await b2bResponse.json();
+      // Fetch B2B transactions
+      const b2bResponse = await fetch(`${base_url}/transactions`);
+      const b2bData = b2bResponse.ok ? await b2bResponse.json() : [];
 
-      const b2cResponse = await fetch(`${base_url}/customersB2C`);
-      const b2cData = await b2cResponse.json();
+      // Fetch B2C transactions
+      const b2cResponse = await fetch(`${base_url}/retail`);
+      const b2cData = b2cResponse.ok ? await b2cResponse.json() : [];
 
-      const b2bCustomers = b2bData.map((customer) => ({
-        id: customer._id || customer.id, // fallback id
-        name: customer.customerName,
-        weight: `${customer.oldBalance || 0} g`, // map oldBalance → weight
-        type: "B2B",
-      }));
+      // Map, filter invalid names, and mark types
+      const b2bMapped = b2bData
+        .filter(t => t.customerName || t.name)
+        .map(t => ({ ...t, type: 'B2B' }));
+      const b2cMapped = b2cData
+        .filter(t => t.customerName || t.name)
+        .map(t => ({ ...t, type: 'B2C' }));
 
-      const b2cCustomers = b2cData.map((customer) => ({
-        id: customer._id || customer.id,
-        name: customer.customerName,
-        weight: `${customer.oldBalance || 0} g`,
-        type: "B2C",
-      }));
+      // Merge and sort by date
+      const merged = [...b2bMapped, ...b2cMapped].sort((a, b) => {
+        const dateA = new Date(a.createdAt || a.date || 0);
+        const dateB = new Date(b.createdAt || b.date || 0);
+        return dateB - dateA;
+      });
 
-      const allCustomers = [...b2bCustomers, ...b2cCustomers];
-      setCustomers(allCustomers);
+      // Filter to show only the LATEST transaction for each unique customer
+      const uniqueLatestTransactions = [];
+      const seenCustomers = new Set();
+
+      for (const txn of merged) {
+        const name = txn.customerName || txn.name;
+        if (!seenCustomers.has(name)) {
+          seenCustomers.add(name);
+          uniqueLatestTransactions.push(txn);
+        }
+      }
+
+      setTransactions(uniqueLatestTransactions);
     } catch (error) {
-      console.error("Error fetching customer data:", error);
-      // Optionally set dummy data or show error
+      console.error("Error fetching transactions:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -129,12 +146,12 @@ export default function HomeScreen() {
     setModalVisible(false);
   };
 
-  // Filter logic remains unchanged
-  const filteredTransactions = customers.filter((txn) => {
-    const matchesSearch = txn.name
+  const filteredTransactions = transactions.filter((txn) => {
+    const name = txn.customerName || txn.name || "";
+    const matchesSearch = name
       .toLowerCase()
       .includes(searchQuery.toLowerCase());
-    const matchesFilter = filterType === "All" || txn.type === filterType;
+    const matchesFilter = filterType === "All" || txn.type === filterType || txn.customerType === filterType;
     return matchesSearch && matchesFilter;
   });
 
@@ -189,13 +206,6 @@ export default function HomeScreen() {
           <Text style={styles.menuText}>Stock Master </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={() => handleMenuNavigation("Users")}
-        >
-          <Icon name="account-group-outline" size={25} color="#fff" />
-          <Text style={styles.menuText}>Users List</Text>
-        </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.menuItem}
@@ -216,10 +226,26 @@ export default function HomeScreen() {
 
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => handleMenuNavigation("B2Bt")}
+          onPress={() => handleMenuNavigation("Order")}
         >
           <Icon name="account-group-outline" size={25} color="#fff" />
-          <Text style={styles.menuText}>Issue and Receipt List</Text>
+          <Text style={styles.menuText}>Order</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => handleMenuNavigation("UPIControl")}
+        >
+          <Icon name="account-group-outline" size={25} color="#fff" />
+          <Text style={styles.menuText}>UPI Control</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => handleMenuNavigation("GSTPage")}
+        >
+          <Icon name="account-group-outline" size={25} color="#fff" />
+          <Text style={styles.menuText}>GST Page</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -229,21 +255,15 @@ export default function HomeScreen() {
           <Icon name="account-group-outline" size={25} color="#fff" />
           <Text style={styles.menuText}>Dealer List</Text>
         </TouchableOpacity>
-        
+
         <TouchableOpacity
-          style={{
-            backgroundColor: "red",
-            padding: 12,
-            margin: 20,
-            borderRadius: 10,
-            alignItems: "center",
-          }}
-          onPress={() => setConfirmDeleteVisible(true)}
+          style={styles.menuItem}
+          onPress={() => handleMenuNavigation("Settings")}
         >
-          <Text style={{ color: "white", fontWeight: "bold" }}>
-            DELETE ALL DATA
-          </Text>
+          <Icon name="account-group-outline" size={25} color="#fff" />
+          <Text style={styles.menuText}>Settings</Text>
         </TouchableOpacity>
+
       </Animated.View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -253,7 +273,12 @@ export default function HomeScreen() {
             <Icon name="menu" size={30} color="#fff" style={{ top: 25 }} />
           </TouchableOpacity>
 
-          <Text style={styles.headerText}>Hey! Super Admin</Text>
+          <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={styles.headerText}>Hey! Super Admin</Text>
+            <TouchableOpacity onPress={() => navigation.navigate("#")}>
+              <Icon name="logout" size={25} color="red" style={{ top: 25 }} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Gold + FT Card */}
@@ -279,100 +304,13 @@ export default function HomeScreen() {
         >
           <Text style={styles.editBtnText}>Edit Gold Rate</Text>
         </TouchableOpacity>
-        <Modal visible={confirmDeleteVisible} transparent animationType="fade">
-          <View
-            style={{
-              flex: 1,
-              backgroundColor: "rgba(0,0,0,0.5)",
-              justifyContent: "center",
-              alignItems: "center",
-            }}
-          >
-            <View
-              style={{
-                backgroundColor: "#fff",
-                padding: 25,
-                width: "80%",
-                borderRadius: 15,
-                alignItems: "center",
-              }}
-            >
-              <Text
-                style={{ fontSize: 18, fontWeight: "bold", marginBottom: 10 }}
-              >
-                Are you sure?
-              </Text>
-
-              <Text
-                style={{ fontSize: 14, textAlign: "center", marginBottom: 20 }}
-              >
-                This action will delete ALL DATA permanently and cannot be
-                undone.
-              </Text>
-
-              {/* YES button */}
-              <TouchableOpacity
-                style={{
-                  backgroundColor: "red",
-                  paddingVertical: 10,
-                  width: "100%",
-                  borderRadius: 10,
-                  marginBottom: 10,
-                }}
-                onPress={async () => {
-                  try {
-                    const response = await fetch(`${base_url}/deleteAll`, {
-                      method: "DELETE",
-                    });
-
-                    if (response.ok) {
-                      alert("All collections deleted successfully!");
-                    } else {
-                      alert("Failed to delete collections.");
-                    }
-                  } catch (error) {
-                    console.log(error);
-                    alert("Error connecting to server");
-                  }
-
-                  setConfirmDeleteVisible(false);
-                }}
-              >
-                <Text
-                  style={{
-                    color: "white",
-                    fontWeight: "bold",
-                    textAlign: "center",
-                  }}
-                >
-                  YES, DELETE EVERYTHING
-                </Text>
-              </TouchableOpacity>
-
-              {/* NO button */}
-              <TouchableOpacity
-                style={{
-                  backgroundColor: "#ddd",
-                  paddingVertical: 10,
-                  width: "100%",
-                  borderRadius: 10,
-                }}
-                onPress={() => setConfirmDeleteVisible(false)}
-              >
-                <Text style={{ fontWeight: "bold", textAlign: "center" }}>
-                  CANCEL
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
 
         <Text style={styles.sectionTitle}>Quick Access</Text>
 
         <View style={styles.quickAccessRow}>
           <TouchableOpacity
             style={styles.quickTile}
-            onPress={() => navigation.navigate("B2BCalculationPage", { ftRate})}
+            onPress={() => navigation.navigate("B2BCalculationPage", { ftRate })}
           >
             <Text style={styles.quickTileText}>B2B Transaction</Text>
           </TouchableOpacity>
@@ -419,86 +357,66 @@ export default function HomeScreen() {
 
         <Text style={styles.sectionTitle}>Recent Transactions</Text>
         {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search transactions..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          <TouchableOpacity
-            style={styles.filterBtn}
-            onPress={() => setFilterDropdownOpen(!filterDropdownOpen)}
-          >
-            <Text style={styles.filterBtnText}>{filterType}</Text>
-            <Icon name="chevron-down" size={20} color="#1B4D1B" />
-          </TouchableOpacity>
-        </View>
 
-        {/* Filter Dropdown */}
-        {filterDropdownOpen && (
-          <View style={styles.dropdown}>
-            <TouchableOpacity
-              style={styles.dropdownItem}
-              onPress={() => {
-                setFilterType("All");
-                setFilterDropdownOpen(false);
-              }}
-            >
-              <Text style={styles.dropdownText}>All</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.dropdownItem}
-              onPress={() => {
-                setFilterType("B2B");
-                setFilterDropdownOpen(false);
-              }}
-            >
-              <Text style={styles.dropdownText}>B2B</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.dropdownItem}
-              onPress={() => {
-                setFilterType("B2C");
-                setFilterDropdownOpen(false);
-              }}
-            >
-              <Text style={styles.dropdownText}>B2C</Text>
-            </TouchableOpacity>
-          </View>
-        )}
 
         <FlatList
-          data={filteredTransactions}
-          keyExtractor={(item) => item.id || item.name}
+          data={filteredTransactions.slice(0, 10)}
+          keyExtractor={(item) => item._id || item.id || Math.random().toString()}
           scrollEnabled={false}
+          ListEmptyComponent={
+            <Text style={{ textAlign: 'center', marginTop: 20, color: '#999' }}>
+              {loading ? "Loading transactions..." : "No transactions found"}
+            </Text>
+          }
           renderItem={({ item }) => {
-            // Calculate balances: if current balance (oldBalance) is negative, convert to advance balance
-            const oldBalance = parseFloat(item.weight.replace(' g', '')) || 0;
-            let currentBalance = oldBalance;
-            let advanceBalance = 0; // Assuming advance balance is not directly available, set to 0
+            const isB2C = item.type === 'B2C' || item.customerType === 'B2C';
+            const name = item.customerName || item.name;
 
-            if (currentBalance < 0) {
-              advanceBalance += Math.abs(currentBalance);
-              currentBalance = 0;
+            let balanceLabel = "Old Balance";
+            let balanceValue = 0;
+            let balanceColor = "#D32F2F";
+            let unit = isB2C ? "₹" : "g";
+
+            if (isB2C) {
+              // For B2C: newBalance reflects the state after transaction
+              const val = parseFloat(item.newBalance || item.balance || 0);
+              if (val < 0) {
+                balanceLabel = "Advance Balance";
+                balanceValue = Math.abs(val);
+                balanceColor = "#2E7D32"; // Green for Advance
+              } else {
+                balanceLabel = "Old Balance";
+                balanceValue = val;
+                balanceColor = "#D32F2F"; // Red for Due
+              }
+            } else {
+              // B2B Logic: check balance vs advBal
+              if (item.balance > 0) {
+                balanceLabel = "Old Balance";
+                balanceValue = item.balance;
+                balanceColor = "#D32F2F";
+              } else if (item.advBal > 0) {
+                balanceLabel = "Advance Balance";
+                balanceValue = item.advBal;
+                balanceColor = "#2E7D32";
+              } else {
+                balanceValue = 0;
+              }
             }
 
             return (
               <View style={styles.transactionCard}>
-                <View>
-                  <Text style={styles.txnName}>{item.name}</Text>
-                  <Text style={styles.txnWeight}>
-                    Current Balance: {currentBalance.toFixed(3)} g
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.txnName}>{name}</Text>
+                  <Text style={[styles.txnWeight, { color: balanceColor, fontWeight: '700', marginTop: 5 }]}>
+                    {balanceLabel}: {isB2C ? unit : ""}{Number(balanceValue).toFixed(isB2C ? 2 : 3)}{!isB2C ? unit : ""}
                   </Text>
-                  {advanceBalance > 0 && (
-                    <Text style={styles.txnWeight}>
-                      Advance Balance: {advanceBalance.toFixed(3)} g
-                    </Text>
-                  )}
                 </View>
 
-                <View style={styles.customerTag}>
-                  <Text style={styles.customerText}>{item.type}</Text>
+                <View style={[styles.customerTag, { backgroundColor: isB2C ? '#E3F2FD' : '#E2FBE8', marginLeft: 10 }]}>
+                  <Text style={[styles.customerText, { color: isB2C ? '#1565C0' : '#1B4D1B' }]}>
+                    {isB2C ? 'B2C' : 'B2B'}
+                  </Text>
                 </View>
               </View>
             );
@@ -513,17 +431,17 @@ export default function HomeScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => navigation.navigate("ReportScreen")}>
-             <Ionicons name="document-outline" color="#000" size={28} />
+          <Ionicons name="document-outline" color="#000" size={28} />
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.fab}
-          onPress={() => navigation.navigate("Order")}
+          onPress={() => navigation.navigate("B2BCalculationPage")}
         >
           <Icon name="plus" size={32} color="#fff" />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => navigation.navigate("StockMaster")}>
+        <TouchableOpacity onPress={() => navigation.navigate("Order")}>
           <FontAwesome
             name="money"
             color="#555"
@@ -532,8 +450,13 @@ export default function HomeScreen() {
           />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => navigation.navigate("PersonalUser")}>
-          <Icon name="account-outline" size={28} color="#555" />
+        <TouchableOpacity onPress={() => navigation.navigate("Settings")}>
+          <FontAwesome
+            name="cog"
+            color="#555"
+            size={28}
+            style={{ bottom: -1, marginLeft: 5 }}
+          />
         </TouchableOpacity>
       </View>
 

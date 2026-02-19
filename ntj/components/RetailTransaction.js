@@ -1,276 +1,304 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  Animated,
   ScrollView,
+  TextInput,
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 
-export default function RetailTransaction({ navigation, route }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+export default function AddRetailTransaction({ navigation }) {
+  const [weight, setWeight] = useState("");
+  const [wastagePercent, setWastagePercent] = useState("");
+  const [hallmark, setHallmark] = useState("");
+  const [less, setLess] = useState("");
+  const [rate, setRate] = useState("");
+  const [goldRate, setGoldRate] = useState("12260");
+  const [isEditingRate, setIsEditingRate] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [mobile, setMobile] = useState("");
 
-  // Side Menu Animation
-  const slideAnim = useRef(new Animated.Value(-250)).current;
-
-  const openMenu = () => {
-    setMenuOpen(true);
-    Animated.timing(slideAnim, {
-      toValue: 0,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
-  };
-
-  const closeMenu = () => {
-    Animated.timing(slideAnim, {
-      toValue: -250,
-      duration: 300,
-      useNativeDriver: false,
-    }).start(() => setMenuOpen(false));
-  };
-
-  const handleMenuNavigation = (screen) => {
-    closeMenu();
-    navigation.navigate(screen);
-  };
-
-  // DEFAULT SAMPLE DATA
-  const [transactions, setTransactions] = useState([
-    { id: "1", name: "Gold Sell", amount: "₹25,000", date: "2025-01-05" },
-    { id: "2", name: "Gold Buy", amount: "₹18,500", date: "2025-01-10" },
-    { id: "3", name: "Exchange", amount: "₹10,200", date: "2025-01-15" },
-  ]);
-
-  // RECEIVE NEW TRANSACTION FROM AddRetailTransaction
-  useEffect(() => {
-    if (route?.params?.newTransaction) {
-      setTransactions((prev) => [route.params.newTransaction, ...prev]);
-    }
-  }, [route?.params?.newTransaction]);
-
-  const renderItem = ({ item }) => (
-    <View style={styles.card}>
-      <View>
-        <Text style={styles.cardTitle}>{item.name}</Text>
-        <Text style={styles.cardDate}>{item.date}</Text>
-      </View>
-      <Text style={styles.cardAmount}>{item.amount}</Text>
-    </View>
-  );
+  // UPI ID states
+  const [upiIds, setUpiIds] = useState(["user1@upi", "user2@upi", "user3@upi"]);
+  const [showUpiModal, setShowUpiModal] = useState(false);
+  const [newUpiId, setNewUpiId] = useState("");
+  const [editingUpiId, setEditingUpiId] = useState(null);
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#fff" }}>
-      {/* Overlay when menu is open */}
-      {menuOpen && <TouchableOpacity style={styles.overlay} onPress={closeMenu} />}
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={90}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.page}>
 
-      {/* Side Menu */}
-      <Animated.View style={[styles.sideMenu, { left: slideAnim }]}>
-        <Text style={styles.menuTitle}>Menu</Text>
+          {/* HEADER */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.navigate("Home")}>
+              <Ionicons name="arrow-back" size={26} color="#fff" />
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={() => handleMenuNavigation("Home")}
-        >
-          <Icon name="view-dashboard-outline" size={25} color="#fff" />
-          <Text style={styles.menuText}>Dashboard</Text>
-        </TouchableOpacity>
+            <Text style={styles.headerTitle}>Retail Transaction</Text>
 
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={() => handleMenuNavigation("CustomerMasterList")}
-        >
-          <Icon name="cash-register" size={25} color="#fff" />
-          <Text style={styles.menuText}>Customer List</Text>
-        </TouchableOpacity>
+            <TouchableOpacity style={styles.historyBtn} onPress={() => navigation.navigate("RetailTransactionHistory")}>
+              <Text style={styles.historyText}>History</Text>
+            </TouchableOpacity>
+          </View>
 
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={() => handleMenuNavigation("RetailTransaction")}
-        >
-          <Icon name="cash-register" size={25} color="#fff" />
-          <Text style={styles.menuText}>Retail Transaction</Text>
-        </TouchableOpacity>
+          <ScrollView contentContainerStyle={{ paddingBottom: 140 }} showsVerticalScrollIndicator={false}>
 
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={() => handleMenuNavigation("SuspenseTransaction")}
-        >
-          <Icon name="alert-circle-outline" size={25} color="#fff" />
-          <Text style={styles.menuText}>Suspense Transaction</Text>
-        </TouchableOpacity>
+            {/* GOLD RATE */}
+            <View style={styles.card}>
+              <View style={styles.rateHeader}>
+                <Text style={styles.goldTitle}>💰 Gold Rate</Text>
 
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={() => handleMenuNavigation("Users")}
-        >
-          <Icon name="account-group-outline" size={25} color="#fff" />
-          <Text style={styles.menuText}>Users List</Text>
-        </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setIsEditingRate(!isEditingRate)}
+                  style={styles.editBtn}
+                >
+                  <Ionicons
+                    name={isEditingRate ? "checkmark" : "create-outline"}
+                    size={18}
+                    color="#2E7D32"
+                  />
+                  <Text style={styles.editText}>
+                    {isEditingRate ? "Done" : "Edit"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={() => handleMenuNavigation("WorkerList")}
-        >
-          <Icon name="account-group-outline" size={25} color="#fff" />
-          <Text style={styles.menuText}>Worker List</Text>
-        </TouchableOpacity>
+              {isEditingRate ? (
+                <TextInput
+                  style={styles.rateInput}
+                  value={goldRate}
+                  onChangeText={setGoldRate}
+                  keyboardType="numeric"
+                />
+              ) : (
+                <Text style={styles.goldValue}>₹ {goldRate} per gM</Text>
+              )}
+            </View>
 
-        <TouchableOpacity
-          style={styles.menuItem}
-          onPress={() => handleMenuNavigation("Settings")}
-        >
-          <Icon name="cog-outline" size={25} color="#fff" />
-          <Text style={styles.menuText}>Settings</Text>
-        </TouchableOpacity>
-      </Animated.View>
+            {/* CUSTOMER */}
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Customer Details</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter Customer Name"
+                value={customerName}
+                onChangeText={setCustomerName}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Enter Mobile Number"
+                value={mobile}
+                onChangeText={setMobile}
+                keyboardType="phone-pad"
+              />
+            </View>
 
-      {/* Main Content */}
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={openMenu}>
-            <Icon name="menu" size={30} color="#fff" style={{ top: 15 }} />
-          </TouchableOpacity>
-          <Text style={styles.headerText}>Retail Transaction</Text>
+            {/* ITEMS */}
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Items</Text>
+
+              <TextInput style={styles.input} placeholder="Weight (g)" value={weight} onChangeText={setWeight} keyboardType="numeric"/>
+              <TextInput style={styles.input} placeholder="Wastage %" value={wastagePercent} onChangeText={setWastagePercent} keyboardType="numeric"/>
+              <TextInput style={styles.input} placeholder="Hallmark ₹" value={hallmark} onChangeText={setHallmark} keyboardType="numeric"/>
+
+              <View style={styles.resultRow}>
+                <View style={styles.resultBox}><Text>Wastage (g)</Text><Text>0.000</Text></View>
+                <View style={styles.resultBox}><Text>Total Gold (g)</Text><Text>0.000</Text></View>
+              </View>
+
+              <TouchableOpacity style={styles.addBtn}><Text style={styles.addText}>+ Add</Text></TouchableOpacity>
+            </View>
+
+            {/* RECEIPT */}
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Receipt</Text>
+
+              <TextInput style={styles.input} placeholder="Weight (g)" keyboardType="numeric"/>
+              <TextInput style={styles.input} placeholder="Less (g)" value={less} onChangeText={setLess} keyboardType="numeric"/>
+              <TextInput style={styles.input} placeholder="Rate ₹" value={rate} onChangeText={setRate} keyboardType="numeric"/>
+
+              <View style={styles.resultRow}>
+                <View style={styles.resultBox}><Text>Net (g)</Text><Text>0.000</Text></View>
+                <View style={styles.resultBox}><Text>Value ₹</Text><Text>0.00</Text></View>
+              </View>
+
+              <TouchableOpacity style={styles.addBtn}><Text style={styles.addText}>+ Add</Text></TouchableOpacity>
+            </View>
+
+            {/* UPI ID LIST */}
+            <View style={styles.card}>
+              <View style={styles.upiHeader}>
+                <Text style={styles.sectionTitle}>UPI IDs</Text>
+                <TouchableOpacity
+                  style={styles.addUpiBtn}
+                  onPress={() => setShowUpiModal(true)}
+                >
+                  <Ionicons name="add" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              {upiIds.map((upiId, index) => (
+                <View key={index} style={styles.upiRow}>
+                  <Text style={styles.upiText}>{upiId}</Text>
+                  <View style={styles.upiActions}>
+                    <TouchableOpacity
+                      style={styles.qrBtn}
+                      onPress={() => {
+                        // Generate QR code for this UPI ID
+                        alert(`Generate QR for ${upiId}`);
+                      }}
+                    >
+                      <Ionicons name="qr-code" size={18} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.editUpiBtn}
+                      onPress={() => {
+                        setEditingUpiId(index);
+                        setNewUpiId(upiId);
+                        setShowUpiModal(true);
+                      }}
+                    >
+                      <Ionicons name="create-outline" size={18} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.deleteUpiBtn}
+                      onPress={() => {
+                        setUpiIds(upiIds.filter((_, i) => i !== index));
+                      }}
+                    >
+                      <Ionicons name="trash" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            {/* SUMMARY */}
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Transaction Summary</Text>
+
+              <View style={styles.summaryRow}>
+                <View style={styles.summaryBox}><Text>Issue Total</Text><Text>₹ 0.00</Text></View>
+                <View style={styles.summaryBox}><Text>Receipt Total</Text><Text>₹ 0.00</Text></View>
+              </View>
+
+              <View style={styles.summaryRow}>
+                <View style={styles.summaryBox}><Text>Owner Payable</Text><Text>₹ 0.00</Text></View>
+                <View style={styles.summaryBox}><Text>Customer Payable</Text><Text>₹ 0.00</Text></View>
+              </View>
+            </View>
+
+            {/* ACTIONS */}
+            <View style={styles.bottomRow}>
+              <TouchableOpacity style={styles.saveBtn}><Text>Save</Text></TouchableOpacity>
+              <TouchableOpacity style={styles.printBtn}><Text style={{color:"#fff"}}>Save & Print</Text></TouchableOpacity>
+            </View>
+
+          </ScrollView>
         </View>
-
-        <View style={styles.container}>
-          <Text style={styles.title}>Retail Transaction</Text>
-
-          {/* Transaction List */}
-          <FlatList
-            data={transactions}
-            keyExtractor={(item) => item.id}
-            renderItem={renderItem}
-            scrollEnabled={false}
-            contentContainerStyle={{ paddingBottom: 100 }}
-          />
-        </View>
-      </ScrollView>
-
-      {/* Floating Add Button */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => navigation.navigate("AddRetailTransaction")}
-      >
-        <Ionicons name="add" size={30} color="#fff" />
-      </TouchableOpacity>
-    </View>
+      </TouchableWithoutFeedback>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    paddingHorizontal: 15,
-    paddingTop: 20,
-  },
+  page: { flex: 1, backgroundColor: "transparent" },
+
   header: {
     backgroundColor: "#1B4D1B",
-    height: 120,
+    height: 100,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: 15,
+    justifyContent: "space-between",
+    paddingHorizontal: 15,
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
   },
-  headerText: {
-    color: "#fff",
-    fontSize: 20,
-    marginLeft: 20,
-    fontWeight: "600",
-    top: 15,
-  },
+  headerTitle: { color: "#fff", fontSize: 18, fontWeight: "700" },
+  historyBtn: { backgroundColor: "#2E7D32", padding: 6, borderRadius: 12 },
+  historyText: { color: "#fff" },
 
-  // Menu
-  sideMenu: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    width: 250,
-    backgroundColor: "#1B4D1B",
-    paddingTop: 40,
-    zIndex: 10,
-    paddingHorizontal: 15,
-  },
+  card: { backgroundColor: "#fff", borderRadius: 16, padding: 16, margin: 12, elevation: 3 },
+  goldTitle: { fontWeight: "700", fontSize: 16 },
+  goldValue: { fontSize: 22, fontWeight: "700", marginTop: 6 },
 
-  overlay: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "rgba(0,0,0,0.3)",
-    zIndex: 5,
-  },
+  rateHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
 
-  menuTitle: {
-    color: "#FFD700",
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 20,
-  },
-  menuItem: {
+  editBtn: {
     flexDirection: "row",
     alignItems: "center",
-    marginVertical: 12,
-  },
-  menuText: {
-    color: "#fff",
-    fontSize: 18,
-    marginLeft: 12,
-  },
-
-  title: {
-    fontSize: 26,
-    fontWeight: "bold",
-    color: "#1B4D1B",
-    marginBottom: 20,
-    alignSelf: "center",
-  },
-
-  card: {
-    backgroundColor: "#fff",
-    padding: 15,
+    backgroundColor: "#E8F5E9",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 12,
-    marginVertical: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    elevation: 4,
-    shadowColor: "#000",
   },
-  cardTitle: {
-    fontSize: 18,
+
+  editText: {
+    marginLeft: 6,
+    fontSize: 13,
     fontWeight: "600",
-    color: "#333",
+    color: "#2E7D32",
   },
-  cardDate: {
-    fontSize: 14,
-    color: "#666",
-    marginTop: 3,
-  },
-  cardAmount: {
+
+  rateInput: {
+    backgroundColor: "#F1F3F6",
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 8,
     fontSize: 18,
     fontWeight: "700",
-    color: "#1B4D1B",
-    alignSelf: "center",
   },
 
-  fab: {
-    position: "absolute",
-    bottom: "8%",
-    right: 25,
-    backgroundColor: "#1B4D1B",
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: "center",
-    alignItems: "center",
-    elevation: 8,
+  sectionTitle: { fontSize: 16, fontWeight: "700", marginBottom: 10 },
+
+  input: {
+    backgroundColor: "#F1F3F6",
+    borderRadius: 10,
+    padding: 12,
+    marginVertical: 6,
   },
+
+  resultRow: { flexDirection: "row", justifyContent: "space-between", marginVertical: 10 },
+  resultBox: { backgroundColor: "#E8F5E9", width: "48%", borderRadius: 10, padding: 12 },
+
+  addBtn: { backgroundColor: "#2E7D32", padding: 12, borderRadius: 18, alignItems: "center", marginTop: 10 },
+  addText: { color: "#fff", fontWeight: "700" },
+
+  summaryRow: { flexDirection: "row", justifyContent: "space-between", marginVertical: 8 },
+  summaryBox: { backgroundColor: "#F1F3F6", width: "48%", borderRadius: 10, padding: 12 },
+
+  bottomRow: { flexDirection: "row", justifyContent: "space-between", margin: 12 },
+  saveBtn: { backgroundColor: "#fff", borderRadius: 12, padding: 12, width: "45%", alignItems: "center", borderWidth: 1 },
+  printBtn: { backgroundColor: "#1B5E20", borderRadius: 12, padding: 12, width: "45%", alignItems: "center" },
+
+  // UPI styles
+  upiHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  addUpiBtn: { backgroundColor: "#1B4D1B", padding: 8, borderRadius: 20 },
+  upiRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#eee" },
+  upiText: { fontSize: 16, flex: 1 },
+  upiActions: { flexDirection: "row" },
+  qrBtn: { backgroundColor: "#1B4D1B", padding: 8, borderRadius: 6, marginHorizontal: 2 },
+  editUpiBtn: { backgroundColor: "#2E7D32", padding: 8, borderRadius: 6, marginHorizontal: 2 },
+  deleteUpiBtn: { backgroundColor: "#d32f2f", padding: 8, borderRadius: 6, marginHorizontal: 2 },
+
+  // Modal styles
+  modalOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
+  modalContent: { backgroundColor: "#fff", borderRadius: 12, padding: 20, width: "80%" },
+  modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 10 },
+  modalInput: { backgroundColor: "#F1F3F6", borderRadius: 10, padding: 12, marginVertical: 10 },
+  modalButtons: { flexDirection: "row", justifyContent: "space-between", marginTop: 20 },
+  modalCancelBtn: { backgroundColor: "#ccc", padding: 12, borderRadius: 8, flex: 1, marginRight: 10, alignItems: "center" },
+  modalCancelText: { color: "#333" },
+  modalSaveBtn: { backgroundColor: "#1B4D1B", padding: 12, borderRadius: 8, flex: 1, alignItems: "center" },
+  modalSaveText: { color: "#fff" },
 });

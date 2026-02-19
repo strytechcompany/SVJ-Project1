@@ -11,18 +11,27 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Feather } from "@expo/vector-icons";
+import { base_url } from "./config";
 
 export default function B2BTransactionList({ navigation }) {
   const [b2bList, setB2bList] = useState([]);
 
-  // ✅ SAMPLE DATA AUTO LOAD
+  // ✅ FETCH REAL DATA FROM DATABASE
   useEffect(() => {
-    const sampleData = [
-      { id: "1", customerName: "Ramesh Jewellers", amount: 125000 },
-      { id: "2", customerName: "Suresh Gold Works", amount: 89000 },
-      { id: "3", customerName: "Sri Lakshmi Traders", amount: 210500 },
-    ];
-    setB2bList(sampleData);
+    const fetchB2BTransactions = async () => {
+      try {
+        const response = await fetch(`${base_url}/transactions`); // Assuming this endpoint returns B2B transactions
+        if (response.ok) {
+          const data = await response.json();
+          // Filter out only B2B transactions if they are mixed
+          const filtered = data.filter(t => !t.type || t.type === 'B2B');
+          setB2bList(filtered);
+        }
+      } catch (error) {
+        console.error("Error fetching B2B transactions:", error);
+      }
+    };
+    fetchB2BTransactions();
   }, []);
 
   // --- animation for list items ---
@@ -66,16 +75,16 @@ export default function B2BTransactionList({ navigation }) {
         <View style={styles.row}>
           <View>
             <Text style={styles.rowText}>{item.customerName}</Text>
-            <Text style={styles.amount}>₹ {item.amount}</Text>
+            <Text style={styles.amount}>{Number(item.balance || 0).toFixed(3)}g</Text>
           </View>
 
           {/* ✅ PREVIEW → REDIRECT TO CreateTransaction WITH DATA */}
           <TouchableOpacity
             style={styles.previewBtn}
             onPress={() =>
-              navigation.navigate("CreateTransaction", {
-                previewData: item, 
-                type: "B2B",      
+              navigation.navigate("B2BCalculationPage", {
+                previewData: item,
+                type: "B2B",
               })
             }
           >
@@ -162,11 +171,11 @@ export default function B2BTransactionList({ navigation }) {
           <Ionicons name="arrow-back" size={28} color="#fff" style={{ top: 5 }} />
         </TouchableOpacity>
         <Text style={styles.headerText}>B2B Transactions</Text>
-        <TouchableOpacity  style={{ position: "absolute", right: 20, top: "105%" }} onPress={() =>
-            closeMenu(() =>
-              navigation.navigate("CreateCustomerMaster", { type: "B2B" })
-            )
-          }>
+        <TouchableOpacity style={{ position: "absolute", right: 20, top: "105%" }} onPress={() =>
+          closeMenu(() =>
+            navigation.navigate("CreateCustomerMaster", { type: "B2B" })
+          )
+        }>
           <Feather name="user-plus" color="#fff" size={25} />
         </TouchableOpacity>
       </View>
@@ -193,8 +202,8 @@ export default function B2BTransactionList({ navigation }) {
 
       {/* MAIN BUTTON */}
       <View style={styles.fabContainer}>
-        <TouchableOpacity style={styles.addBtn} onPress={()=>navigation.navigate('B2BCalculationPage')}>
-          <Text style={styles.addText}>+ Add B2C Transaction</Text>
+        <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('B2BCalculationPage')}>
+          <Text style={styles.addText}>+ Add B2B Transaction</Text>
         </TouchableOpacity>
       </View>
     </View>

@@ -6,7 +6,9 @@ const ItemSchema = new mongoose.Schema({
   buyingTouch: { type: Number, required: true },
   sellingTouch: { type: Number, required: true },
   percentage: { type: Number, required: true },
-  date: { type: String, required: true }, 
+  date: { type: String, required: true },
+  issue: { type: Boolean, default: false },
+  receipt: { type: Boolean, default: false },
   type: { type: String, enum: ['issue', 'receipt'], default: null }, // issue or receipt
 }, { timestamps: true });
 

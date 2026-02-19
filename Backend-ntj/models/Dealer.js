@@ -31,6 +31,10 @@ const dealerSchema = new mongoose.Schema({
     type: String,
     default: "Dealer",
   },
+  workerName: {
+    type: String,
+    default: "",
+  },
 }, {
   timestamps: true,
 });

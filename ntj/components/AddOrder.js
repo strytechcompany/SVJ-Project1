@@ -6,17 +6,59 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { base_url } from "./config"; 
+import * as ImagePicker from "expo-image-picker";
+import { base_url } from "./config";
 
 export default function AddOrder({ navigation }) {
   const [itemName, setItemName] = useState("");
   const [weight, setWeight] = useState("");
-  const [deliveryDate, setDeliveryDate] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [mobile, setMobile] = useState("");
   const [paymentType, setPaymentType] = useState("Cash");
+  const [amount, setAmount] = useState("");
+  const [balanceAmount, setBalanceAmount] = useState("");
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const pickImage = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+
+    if (!result.canceled) {
+      setSelectedImage(result.assets[0].uri);
+    }
+  };
+
+  const takePhoto = async () => {
+    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+
+    if (permissionResult.granted === false) {
+      Alert.alert("Permission to access camera is required!");
+      return;
+    }
+
+    let result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+
+    if (!result.canceled) {
+      setSelectedImage(result.assets[0].uri);
+    }
+  };
 
   const paymentOptions = ["UPI", "Cash", "Bank Transfer", "Card"];
 
@@ -32,14 +74,16 @@ export default function AddOrder({ navigation }) {
       customerName,
       mobileNumber: mobile,
       paymentType,
+      amount: parseFloat(amount) || 0,
+      balanceAmount: parseFloat(balanceAmount) || 0,
+      image: selectedImage,
+      deliveryDate: date, // Using deliveryDate to match backend/Order.js
     };
 
     try {
       const response = await fetch(`${base_url}/orders`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newOrder),
       });
 
@@ -58,87 +102,162 @@ export default function AddOrder({ navigation }) {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: "#fff" }}>
-      {/* HEADER */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={26} color="#fff" style={{ top: 25 }}/>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Add New Order</Text>
-      </View>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={100}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={{ flex: 1, backgroundColor: "#fff" }}>
 
-      {/* CONTENT */}
-      <View style={{ padding: 20 }}>
-        <Text style={styles.label}>Image (sample only)</Text>
-
-        {/* ITEM NAME */}
-        <Text style={styles.label}>Item Name</Text>
-        <TextInput
-          placeholder="Enter item name"
-          style={styles.input}
-          value={itemName}
-          onChangeText={setItemName}
-        />
-
-        {/* ITEM WEIGHT */}
-        <Text style={styles.label}>Item Weight (GMS)</Text>
-        <TextInput
-          placeholder="Enter item weight (e.g., 12.345)"
-          style={styles.input}
-          value={weight}
-          keyboardType="numeric"
-          onChangeText={setWeight}
-        />
-
-        {/* CUSTOMER NAME */}
-        <Text style={styles.label}>Customer Name</Text>
-        <TextInput
-          placeholder="Enter customer name"
-          style={styles.input}
-          value={customerName}
-          onChangeText={setCustomerName}
-        />
-
-        {/* MOBILE NUMBER */}
-        <Text style={styles.label}>Mobile Number</Text>
-        <TextInput
-          placeholder="Enter mobile number"
-          style={styles.input}
-          value={mobile}
-          keyboardType="phone-pad"
-          onChangeText={setMobile}
-        />
-
-        {/* PAYMENT TYPE */}
-        <Text style={styles.label}>Payment Type</Text>
-        <View style={styles.paymentRow}>
-          {paymentOptions.map((option) => (
-            <TouchableOpacity
-              key={option}
-              style={[
-                styles.payBtn,
-                paymentType === option && styles.payBtnActive,
-              ]}
-              onPress={() => setPaymentType(option)}
-            >
-              <Text
-                style={[
-                  styles.payText,
-                  paymentType === option && styles.payTextActive,
-                ]}
-              >
-                {option}
-              </Text>
+          {/* HEADER */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Ionicons name="arrow-back" size={26} color="#fff" style={{ top: 25 }} />
             </TouchableOpacity>
-          ))}
-        </View>
+            <Text style={styles.headerTitle}>Add New Order</Text>
+          </View>
 
-        {/* SAVE BUTTON */}
-        <TouchableOpacity style={styles.saveButton} onPress={saveOrder}>
-          <Text style={styles.saveText}>Save Order</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+          {/* SCROLL CONTENT */}
+          <ScrollView
+            contentContainerStyle={{ padding: 20, paddingBottom: 80 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+
+            <Text style={styles.label}>Image</Text>
+            <View style={{ flexDirection: 'row', gap: 15, marginTop: 10 }}>
+              <TouchableOpacity style={styles.imageButton} onPress={pickImage}>
+                <Ionicons name="images" size={24} color="#fff" />
+                <Text style={{ color: '#fff', fontSize: 10 }}>Gallery</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.imageButton} onPress={takePhoto}>
+                <Ionicons name="camera" size={24} color="#fff" />
+                <Text style={{ color: '#fff', fontSize: 10 }}>Camera</Text>
+              </TouchableOpacity>
+            </View>
+            {selectedImage && (
+              <Image source={{ uri: selectedImage }} style={styles.selectedImage} />
+            )}
+
+            <Text style={styles.label}>Order Date</Text>
+            <TextInput
+              placeholder="YYYY-MM-DD"
+              style={styles.input}
+              value={date}
+              onChangeText={setDate}
+            />
+
+            <Text style={styles.label}>Item Name</Text>
+            <TextInput
+              placeholder="Enter item name"
+              style={styles.input}
+              value={itemName}
+              onChangeText={setItemName}
+            />
+
+            <Text style={styles.label}>Item Weight (GMS)</Text>
+            <TextInput
+              placeholder="Enter item weight"
+              style={styles.input}
+              value={weight}
+              keyboardType="numeric"
+              onChangeText={setWeight}
+            />
+
+            <Text style={styles.label}>Customer Name</Text>
+            <TextInput
+              placeholder="Enter customer name"
+              style={styles.input}
+              value={customerName}
+              onChangeText={setCustomerName}
+            />
+
+            <Text style={styles.label}>Mobile Number</Text>
+            <TextInput
+              placeholder="Enter mobile number"
+              style={styles.input}
+              value={mobile}
+              keyboardType="phone-pad"
+              onChangeText={setMobile}
+            />
+
+            <Text style={styles.label}>Amount</Text>
+            <TextInput
+              placeholder="Enter amount"
+              style={styles.input}
+              value={amount}
+              keyboardType="numeric"
+              onChangeText={setAmount}
+            />
+
+            <Text style={styles.label}>Balance Amount</Text>
+            <TextInput
+              placeholder="Enter balance amount"
+              style={styles.input}
+              value={balanceAmount}
+              keyboardType="numeric"
+              onChangeText={setBalanceAmount}
+            />
+
+            <Text style={styles.label}>Payment Type</Text>
+            <View style={styles.paymentRow}>
+              {paymentOptions.map((option) => (
+                <TouchableOpacity
+                  key={option}
+                  style={[
+                    styles.payBtn,
+                    paymentType === option && styles.payBtnActive,
+                  ]}
+                  onPress={() => setPaymentType(option)}
+                >
+                  <Text
+                    style={[
+                      styles.payText,
+                      paymentType === option && styles.payTextActive,
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <TouchableOpacity style={styles.saveButton} onPress={saveOrder}>
+              <Text style={styles.saveText}>Save Order</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.saveButton, { backgroundColor: '#007bff', marginTop: 15 }]}
+              onPress={() => {
+                if (!itemName || !weight || !customerName || !mobile) {
+                  Alert.alert("Missing Fields", "Please fill all fields before printing.");
+                  return;
+                }
+                const orderNo = `A202601${Math.floor(1000 + Math.random() * 9000)}`; // Temporary order no for preview
+                navigation.navigate("BillPreview", {
+                  order: {
+                    orderNo: orderNo,
+                    customer: customerName,
+                    phone: mobile,
+                    type: itemName,
+                    weight: weight,
+                    payment: paymentType,
+                    date: date,
+                    balance: balanceAmount || "0",
+                    image: selectedImage
+                  }
+                });
+              }}
+            >
+              <Text style={styles.saveText}>Print Bill</Text>
+            </TouchableOpacity>
+
+          </ScrollView>
+
+        </View>
+      </TouchableWithoutFeedback>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -209,5 +328,21 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 17,
     fontWeight: "700",
+  },
+  imageButton: {
+    backgroundColor: "#1B4D1B",
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 0,
+  },
+  selectedImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 10,
+    marginTop: 10,
+    alignSelf: 'center',
   },
 });

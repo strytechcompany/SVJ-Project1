@@ -29,6 +29,19 @@ export default function Users({ navigation }) {
     role: "Admin",
   });
 
+  // Additional states for roles, edit, delete
+  const [roleOptions] = useState(["Admin", "Super Admin", "Worker"]);
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [currentRoleSetter, setCurrentRoleSetter] = useState(() => {});
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editUser, setEditUser] = useState({
+    id: "",
+    name: "",
+    email: "",
+    phone: "",
+    role: "Admin",
+  });
+
   // Fetch users from backend
   useEffect(() => {
     const fetchUsers = async () => {
@@ -88,6 +101,64 @@ export default function Users({ navigation }) {
     }
   };
 
+  // Handle edit user
+  const handleEdit = (user) => {
+    setEditUser(user);
+    setEditModalVisible(true);
+  };
+
+  // Handle delete user
+  const handleDelete = (userId) => {
+    Alert.alert(
+      "Delete User",
+      "Are you sure you want to delete this user?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const response = await fetch(`${base_url}/users/${userId}`, {
+                method: "DELETE",
+              });
+              if (!response.ok) throw new Error("Failed to delete user");
+              setUsers((prev) => prev.filter((u) => u.id !== userId));
+            } catch (err) {
+              Alert.alert("Error", err.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Update user to backend
+  const handleEditUser = async () => {
+    if (!editUser.name || !editUser.email || !editUser.phone) {
+      Alert.alert("Error", "Please fill all fields");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${base_url}/users/${editUser.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editUser),
+      });
+
+      if (!response.ok) throw new Error("Failed to update user");
+
+      // Update local state
+      setUsers((prev) =>
+        prev.map((u) => (u.id === editUser.id ? editUser : u))
+      );
+      setEditModalVisible(false);
+    } catch (err) {
+      Alert.alert("Error", err.message);
+    }
+  };
+
   const renderUser = ({ item }) => (
     <View style={styles.card}>
       <Text style={styles.userName}>{item.name}</Text>
@@ -101,6 +172,20 @@ export default function Users({ navigation }) {
       <View style={styles.row}>
         <Icon name="phone-outline" size={18} />
         <Text style={styles.infoText}> {item.phone}</Text>
+      </View>
+      <View style={styles.buttonRow}>
+        <TouchableOpacity
+          style={styles.editBtn}
+          onPress={() => handleEdit(item)}
+        >
+          <Icon name="pencil" size={20} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.deleteBtn}
+          onPress={() => handleDelete(item.id)}
+        >
+          <Icon name="delete" size={20} color="#fff" />
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -144,7 +229,7 @@ export default function Users({ navigation }) {
 
       {/* Filter Buttons */}
       <View style={styles.filterRow}>
-        {["All User", "Super Admin", "Admin"].map((label) => (
+        {["All User", "Super Admin", "Admin", "Worker"].map((label) => (
           <TouchableOpacity
             key={label}
             style={[
@@ -200,12 +285,15 @@ export default function Users({ navigation }) {
               onChangeText={(text) => setNewUser({ ...newUser, phone: text })}
               style={styles.input}
             />
-            <TextInput
-              placeholder="Role (Admin / Super Admin)"
-              value={newUser.role}
-              onChangeText={(text) => setNewUser({ ...newUser, role: text })}
+            <TouchableOpacity
               style={styles.input}
-            />
+              onPress={() => {
+                setCurrentRoleSetter(() => (role) => setNewUser({ ...newUser, role }));
+                setShowRoleModal(true);
+              }}
+            >
+              <Text>{newUser.role || "Select Role"}</Text>
+            </TouchableOpacity>
 
             <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 10 }}>
               <TouchableOpacity onPress={handleAddUser} style={styles.modalBtn}>
@@ -213,6 +301,88 @@ export default function Users({ navigation }) {
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => setModalVisible(false)}
+                style={[styles.modalBtn, { backgroundColor: "gray" }]}
+              >
+                <Text style={{ color: "#fff" }}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Role Selection Modal */}
+      <Modal visible={showRoleModal} animationType="slide" transparent>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={{ fontSize: 18, fontWeight: "bold", marginBottom: 10 }}>
+              Select Role
+            </Text>
+            <FlatList
+              data={roleOptions}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.roleOption}
+                  onPress={() => {
+                    currentRoleSetter(item);
+                    setShowRoleModal(false);
+                  }}
+                >
+                  <Text>{item}</Text>
+                </TouchableOpacity>
+              )}
+              keyExtractor={(item) => item}
+            />
+            <TouchableOpacity
+              onPress={() => setShowRoleModal(false)}
+              style={[styles.modalBtn, { backgroundColor: "gray" }]}
+            >
+              <Text style={{ color: "#fff" }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Edit User Modal */}
+      <Modal visible={editModalVisible} animationType="slide" transparent>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={{ fontSize: 18, fontWeight: "bold", marginBottom: 10 }}>
+              Edit User
+            </Text>
+            <TextInput
+              placeholder="Name"
+              value={editUser.name}
+              onChangeText={(text) => setEditUser({ ...editUser, name: text })}
+              style={styles.input}
+            />
+            <TextInput
+              placeholder="Email"
+              value={editUser.email}
+              onChangeText={(text) => setEditUser({ ...editUser, email: text })}
+              style={styles.input}
+            />
+            <TextInput
+              placeholder="Phone"
+              value={editUser.phone}
+              onChangeText={(text) => setEditUser({ ...editUser, phone: text })}
+              style={styles.input}
+            />
+            <TouchableOpacity
+              style={styles.input}
+              onPress={() => {
+                setCurrentRoleSetter(() => (role) => setEditUser({ ...editUser, role }));
+                setShowRoleModal(true);
+              }}
+            >
+              <Text>{editUser.role || "Select Role"}</Text>
+            </TouchableOpacity>
+
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 10 }}>
+              <TouchableOpacity onPress={handleEditUser} style={styles.modalBtn}>
+                <Text style={{ color: "#fff" }}>Update</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setEditModalVisible(false)}
                 style={[styles.modalBtn, { backgroundColor: "gray" }]}
               >
                 <Text style={{ color: "#fff" }}>Cancel</Text>
@@ -334,5 +504,31 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flex: 1,
     marginHorizontal: 5,
+  },
+  buttonRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 10,
+  },
+  editBtn: {
+    backgroundColor: "#1B4D1B",
+    padding: 10,
+    borderRadius: 8,
+    alignItems: "center",
+    flex: 1,
+    marginHorizontal: 5,
+  },
+  deleteBtn: {
+    backgroundColor: "red",
+    padding: 10,
+    borderRadius: 8,
+    alignItems: "center",
+    flex: 1,
+    marginHorizontal: 5,
+  },
+  roleOption: {
+    padding: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#ccc",
   },
 });

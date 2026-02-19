@@ -1,12 +1,33 @@
 // screens/SettingsScreen.js
-import React from "react";
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import React, { useState } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal, Alert } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
+import { base_url } from "./config";
 
 export default function SettingsScreen({ navigation }) {
+  const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
+
+  const handleDeleteAll = async () => {
+    try {
+      const response = await fetch(`${base_url}/deleteAll`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        Alert.alert("Success", "All collections deleted successfully!");
+      } else {
+        Alert.alert("Error", "Failed to delete collections.");
+      }
+    } catch (error) {
+      console.log(error);
+      Alert.alert("Error", "Error connecting to server");
+    }
+    setConfirmDeleteVisible(false);
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: "#fff" }}>
-      
+
       {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -16,27 +37,27 @@ export default function SettingsScreen({ navigation }) {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20 }}>
-        
+
         {/* General */}
         <Text style={styles.sectionTitle}>General</Text>
 
-        <TouchableOpacity style={styles.item}>
+        <TouchableOpacity style={styles.item} onPress={() => navigation.navigate('PersonalUser')}>
           <Icon name="account-circle-outline" size={24} color="#1B4D1B" />
           <Text style={styles.itemText}>Profile</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.item}>
-          <Icon name="bell-outline" size={24} color="#1B4D1B" />
-          <Text style={styles.itemText}>Notifications</Text>
+        <TouchableOpacity style={styles.item} onPress={() => navigation.navigate('ThirukkuralSettings')}>
+          <Icon name="file-document-edit-outline" size={24} color="#1B4D1B" />
+          <Text style={styles.itemText}>Bill Customization For Thirukkural</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.item} onPress={() => navigation.navigate('UPIControl')}>
+          <Icon name="cash" size={24} color="#1B4D1B" />
+          <Text style={styles.itemText}>UPI Control</Text>
         </TouchableOpacity>
 
         {/* Security */}
         <Text style={styles.sectionTitle}>Security</Text>
-
-        <TouchableOpacity style={styles.item}>
-          <Icon name="lock-outline" size={24} color="#1B4D1B" />
-          <Text style={styles.itemText}>Change Password</Text>
-        </TouchableOpacity>
 
         <TouchableOpacity style={styles.item}>
           <Icon name="shield-check-outline" size={24} color="#1B4D1B" />
@@ -51,7 +72,39 @@ export default function SettingsScreen({ navigation }) {
           <Text style={styles.itemText}>App Version</Text>
         </TouchableOpacity>
 
+        {/* Danger Zone */}
+        <Text style={[styles.sectionTitle, { color: "red" }]}>Danger Zone</Text>
+
+        <TouchableOpacity
+          style={[styles.item, { borderColor: "red", borderWidth: 1 }]}
+          onPress={() => setConfirmDeleteVisible(true)}
+        >
+          <Icon name="delete-forever-outline" size={24} color="red" />
+          <Text style={[styles.itemText, { color: "red", fontWeight: "bold" }]}>DELETE ALL DATA</Text>
+        </TouchableOpacity>
+
       </ScrollView>
+
+      {/* Delete Confirmation Modal */}
+      <Modal visible={confirmDeleteVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Icon name="alert-circle-outline" size={50} color="red" />
+            <Text style={styles.modalTitle}>Are you sure?</Text>
+            <Text style={styles.modalText}>
+              This action will delete ALL DATA permanently and cannot be undone.
+            </Text>
+
+            <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteAll}>
+              <Text style={styles.deleteBtnText}>YES, DELETE EVERYTHING</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmDeleteVisible(false)}>
+              <Text style={styles.cancelBtnText}>CANCEL</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -94,5 +147,56 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 15,
     color: "#333",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalBox: {
+    backgroundColor: "#fff",
+    padding: 25,
+    width: "80%",
+    borderRadius: 15,
+    alignItems: "center",
+    elevation: 5,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginVertical: 10,
+    color: "#333",
+  },
+  modalText: {
+    fontSize: 14,
+    textAlign: "center",
+    marginBottom: 25,
+    color: "#666",
+  },
+  deleteBtn: {
+    backgroundColor: "red",
+    paddingVertical: 12,
+    width: "100%",
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  deleteBtnText: {
+    color: "white",
+    fontWeight: "bold",
+    textAlign: "center",
+    fontSize: 16,
+  },
+  cancelBtn: {
+    backgroundColor: "#eee",
+    paddingVertical: 12,
+    width: "100%",
+    borderRadius: 10,
+  },
+  cancelBtnText: {
+    fontWeight: "bold",
+    textAlign: "center",
+    color: "#333",
+    fontSize: 16,
   },
 });

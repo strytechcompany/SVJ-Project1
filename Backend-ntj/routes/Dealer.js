@@ -15,6 +15,7 @@ router.post("/", async (req, res) => {
       oldBalance,
       advanceBalance,
       customerType,
+      workerName,
     } = req.body;
 
     // Validate required fields
@@ -30,6 +31,7 @@ router.post("/", async (req, res) => {
       oldBalance: oldBalance || 0,
       advanceBalance: advanceBalance || 0,
       customerType: customerType || "Dealer",
+      workerName: workerName || "",
     });
 
     const savedDealer = await newDealer.save();

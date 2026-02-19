@@ -11,6 +11,8 @@ const OrderSchema = new mongoose.Schema({
         default: "Cash",
         required: true,
     },
+    amount: { type: Number, default: 0 },
+    balanceAmount: { type: Number, default: 0 },
     deliveryDate: { type: Date }, // optional if needed later
 }, { timestamps: true });
 

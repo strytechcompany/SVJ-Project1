@@ -37,6 +37,16 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// ➤ Delete Transaction by ID
+router.delete("/:id", async (req, res) => {
+  try {
+    const transaction = await RetailTransaction.findByIdAndDelete(req.params.id);
+    if (!transaction) return res.status(404).json({ message: "Transaction not found" });
 
+    res.json({ message: "Transaction deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = router;

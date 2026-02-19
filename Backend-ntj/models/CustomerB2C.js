@@ -31,6 +31,10 @@ const customerB2CSchema = new mongoose.Schema({
   advanceBalance: { 
     type: Number, 
     default: 0 
+  },
+  gstin: { 
+    type: String, 
+    default: "" 
   }
 }, { timestamps: true });
 

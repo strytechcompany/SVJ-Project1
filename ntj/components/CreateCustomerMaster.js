@@ -23,10 +23,11 @@ export default function CreateCustomerMaster({ navigation, route }) {
   const [customerNumber, setCustomerNumber] = useState("");
   const [email, setEmail] = useState("");
   const [shopName, setShopName] = useState("");
-  const [gstin, setGstin] = useState(""); // Dealer/B2B specific
+  const [gstin, setGstin] = useState(""); // B2B/B2C specific
   const [address, setAddress] = useState(""); // Dealer specific
   const [oldBalance, setOldBalance] = useState("");
   const [advanceBalance, setAdvanceBalance] = useState("");
+
 
   // Save customer function
   const saveCustomer = async () => {
@@ -52,11 +53,12 @@ export default function CreateCustomerMaster({ navigation, route }) {
       phoneNumber: customerNumber,
       emailId: customerType !== "Dealer" ? email : undefined,
       shopName,
-      gstin: undefined,
+      gstin: customerType !== "Dealer" ? gstin : undefined,
       address: customerType !== "Dealer" ? address : undefined,
       oldBalance: parseFloat(oldBalance) || 0,
       advanceBalance: parseFloat(advanceBalance) || 0,
       customerType,
+
     };
 
     try {
@@ -95,13 +97,10 @@ export default function CreateCustomerMaster({ navigation, route }) {
         setAddress("");
         setOldBalance("");
         setAdvanceBalance("");
+        
 
-        // Navigate to type-specific list
-        const listScreen = getListScreenName(customerType);
-        navigation.navigate(listScreen, {
-          customers: [...customers, data],
-          type: customerType,
-        });
+        // Go back to previous screen
+        navigation.goBack();
       } else {
         Alert.alert("Error ❌", data.message || "Failed to save customer");
       }
@@ -114,9 +113,9 @@ export default function CreateCustomerMaster({ navigation, route }) {
   // Helper to get list screen name based on type
   const getListScreenName = (type) => {
     switch (type) {
-      case "B2B": return "CustomerMasterListB2B";
-      case "Dealer": return "CustomerMasterListDealer";
-      default: return "CustomerMasterListB2C"; // B2C default
+      case "B2B": return "B2BCalculationPage";
+      case "Dealer": return "Dealer";
+      default: return "B2CCalculationPage"; // B2C default
     }
   };
 
@@ -197,6 +196,7 @@ export default function CreateCustomerMaster({ navigation, route }) {
           {customerType === "B2B" && (
             <>
               {renderInput("Shop Name", shopName, setShopName)}
+              {renderInput("GST Number", gstin, setGstin)}
               {renderInput("Address", address, setAddress, "default")}
             </>
           )}
@@ -205,6 +205,7 @@ export default function CreateCustomerMaster({ navigation, route }) {
           {customerType === "B2C" && (
             <>
               {renderInput("Address", address, setAddress, "default")}
+              {renderInput("GST Number", gstin, setGstin)}
             </>
           )}
 

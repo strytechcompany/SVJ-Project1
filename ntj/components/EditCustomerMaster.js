@@ -11,6 +11,8 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { base_url } from "./config";
@@ -31,10 +33,12 @@ export default function EditCustomerMaster({ navigation, route }) {
   const [customerType, setCustomerType] = useState(customer.customerType);
   const [customerName, setCustomerName] = useState(customer.customerName || "");
   const [customerNumber, setCustomerNumber] = useState(customer.customerNumber || customer.phoneNumber || "");
-  const [email, setEmail] = useState(customer.emailId || customer.email || "");
   const [shopName, setShopName] = useState(customer.shopName || "");
+  const [gstin, setGstin] = useState(customer.gstin || "");
+  const [address, setAddress] = useState(customer.address || "");
   const [oldBalance, setOldBalance] = useState(customer.oldBalance?.toString() || "0.000");
   const [advanceBalance, setAdvanceBalance] = useState(customer.advanceBalance?.toString() || "0.000");
+  const [workerName, setWorkerName] = useState(customer.workerName || "");
   const [loading, setLoading] = useState(false);
 
   const handleUpdate = async () => {
@@ -53,17 +57,24 @@ export default function EditCustomerMaster({ navigation, route }) {
 
     try {
       // Determine the correct endpoint based on customer type
-      const endpoint = customerType === "B2B" 
-        ? `${base_url}/customers/${customer._id || customer.id}`
-        : `${base_url}/customersB2C/${customer._id || customer.id}`;
+      let endpoint;
+      if (customerType === "B2B") {
+        endpoint = `${base_url}/customers/${customer._id || customer.id}`;
+      } else if (customerType === "Dealer") {
+        endpoint = `${base_url}/customersDealer/${customer._id || customer.id}`;
+      } else {
+        endpoint = `${base_url}/customersB2C/${customer._id || customer.id}`;
+      }
 
       // Prepare the update data
       const updateData = {
         customerName: customerName.trim(),
         phoneNumber: customerNumber.trim(),
-        emailId: email.trim(),
+        gstin: gstin.trim(),
+        address: address.trim(),
         oldBalance: parseFloat(oldBalance) || 0,
         advanceBalance: parseFloat(advanceBalance) || 0,
+        workerName: workerName.trim(),
       };
 
       // Add shopName only for B2B customers
@@ -113,44 +124,50 @@ export default function EditCustomerMaster({ navigation, route }) {
       </View>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ padding: 15, paddingBottom: 50 }}
-        >
-          {/* Customer Type Display */}
-          <View>
-            <Text style={styles.label}>Customer Type</Text>
-            <View style={styles.typeContainer}>
-              <Text style={styles.typeText}>{customerType}</Text>
-            </View>
-          </View>
-
-          {/* Input Fields */}
-          {renderInput("Customer Name *", customerName, setCustomerName)}
-          {renderInput("Phone Number *", customerNumber, setCustomerNumber, "phone-pad")}
-          {renderInput("Email ID", email, setEmail, "email-address")}
-          
-          {/* Show Shop Name only for B2B customers */}
-          {customerType === "B2B" && renderInput("Shop Name", shopName, setShopName)}
-          
-          {renderInput("Old Balance", oldBalance, setOldBalance, "numeric")}
-          {renderInput("Advance Balance", advanceBalance, setAdvanceBalance, "numeric")}
-
-          <TouchableOpacity 
-            style={[styles.saveBtn, loading && styles.saveBtnDisabled]}
-            onPress={handleUpdate}
-            disabled={loading}
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ padding: 15, paddingBottom: 50 }}
           >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.saveText}>Update Customer</Text>
-            )}
-          </TouchableOpacity>
-        </ScrollView>
+            {/* Customer Type Display */}
+            <View>
+              <Text style={styles.label}>Customer Type</Text>
+              <View style={styles.typeContainer}>
+                <Text style={styles.typeText}>{customerType}</Text>
+              </View>
+            </View>
+
+            {/* Input Fields */}
+            {renderInput("Customer Name *", customerName, setCustomerName)}
+            {renderInput("Phone Number *", customerNumber, setCustomerNumber, "phone-pad")}
+            {renderInput("GSTIN", gstin, setGstin)}
+
+            {/* Show Shop Name only for B2B customers */}
+            {customerType === "B2B" && renderInput("Shop Name", shopName, setShopName)}
+
+            {/* Show Worker Name for Dealers */}
+            {customerType === "Dealer" && renderInput("Worker Name", workerName, setWorkerName)}
+
+            {renderInput("Address", address, setAddress)}
+            {renderInput("Old Balance", oldBalance, setOldBalance, "numeric")}
+            {renderInput("Advance Balance", advanceBalance, setAdvanceBalance, "numeric")}
+
+            <TouchableOpacity
+              style={[styles.saveBtn, loading && styles.saveBtnDisabled]}
+              onPress={handleUpdate}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.saveText}>Update Customer</Text>
+              )}
+            </TouchableOpacity>
+          </ScrollView>
+        </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
     </View>
   );

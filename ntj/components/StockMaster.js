@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
 import { base_url } from "./config";
 
 export default function StockMaster({ navigation }) {
@@ -27,6 +28,8 @@ export default function StockMaster({ navigation }) {
   const [pure, setPure] = useState("");
   const [workerName, setWorkerName] = useState("");
   const [description, setDescription] = useState("");
+
+  const [addedItems, setAddedItems] = useState([]);
 
   const [isEdit, setIsEdit] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -43,10 +46,22 @@ export default function StockMaster({ navigation }) {
   const [searchSuggestions, setSearchSuggestions] = useState([]);
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
 
+  const [dealers, setDealers] = useState([]);
+  const [workerSuggestions, setWorkerSuggestions] = useState([]);
+  const [showWorkerSuggestions, setShowWorkerSuggestions] = useState(false);
+
   useEffect(() => {
     loadAllItems();
     loadStocks();
+    loadDealers();
   }, []);
+
+  // Reload stocks when component comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadStocks();
+    }, [])
+  );
 
   const loadStocks = async () => {
     try {
@@ -81,26 +96,27 @@ export default function StockMaster({ navigation }) {
     await AsyncStorage.setItem("STOCK_LIST", JSON.stringify(updatedStocks));
   };
 
+  // Update calculations for current item
   useEffect(() => {
-  const wt = parseFloat(weight);
-  const less = parseFloat(buyTouch);
-  const calc = parseFloat(calculation);
+    const wt = parseFloat(weight);
+    const less = parseFloat(buyTouch);
+    const calc = parseFloat(calculation);
 
-  if (!isNaN(wt) && !isNaN(less)) {
-    const netWt = wt - less;
-    setSellTouch(Math.round(netWt).toString());
+    if (!isNaN(wt) && !isNaN(less)) {
+      const netWt = wt - less;
+      setSellTouch(netWt.toFixed(3));
 
-    if (!isNaN(calc)) {
-      const pureValue = ((calc * netWt) / 100);
-      setPure(pureValue.toFixed(3));
+      if (!isNaN(calc)) {
+        const pureValue = ((calc * netWt) / 100);
+        setPure(pureValue.toFixed(3));
+      } else {
+        setPure("");
+      }
     } else {
+      setSellTouch("");
       setPure("");
     }
-  } else {
-    setSellTouch("");
-    setPure("");
-  }
-}, [weight, buyTouch, calculation]);
+  }, [weight, buyTouch, calculation]);
 
   // Load all items from backend
   const loadAllItems = async () => {
@@ -129,10 +145,23 @@ export default function StockMaster({ navigation }) {
     }
   };
 
+  // Load dealers for worker name suggestions
+  const loadDealers = async () => {
+    try {
+      const response = await fetch(`${base_url}/customersDealer`);
+      if (response.ok) {
+        const dealerData = await response.json();
+        setDealers(dealerData);
+      }
+    } catch (error) {
+      console.error("Error loading dealers:", error);
+    }
+  };
+
   const handleStockNameChange = (text) => {
     setStockName(text);
+
     if (text.length > 0) {
-      // Fixed: Use stockName instead of itemName to match Items collection
       const filtered = [
         ...new Set(allItems.map((item) => item.stockName)),
       ].filter(
@@ -153,26 +182,98 @@ export default function StockMaster({ navigation }) {
 
     // Fixed: Use stockName to find the item
     const selectedItem = allItems.find((item) => item.stockName === name);
-    if (selectedItem) {
-      // Set buying touch in calculation field
-      if (selectedItem.buyingTouch) {
-        setCalculation(selectedItem.buyingTouch.toString());
-      }
+    if (selectedItem && selectedItem.buyingTouch) {
+      setCalculation(selectedItem.buyingTouch.toString());
     }
   };
 
+  const handleWorkerNameChange = (text) => {
+    setWorkerName(text);
+
+    if (text.length > 0) {
+      const filtered = dealers
+        .map((dealer) => dealer.customerName)
+        .filter((name) => name && name.toLowerCase().includes(text.toLowerCase()));
+      setWorkerSuggestions([...new Set(filtered)]);
+      setShowWorkerSuggestions(true);
+    } else {
+      setWorkerSuggestions([]);
+      setShowWorkerSuggestions(false);
+    }
+  };
+
+  const selectWorkerSuggestion = (name) => {
+    setWorkerName(name);
+    setShowWorkerSuggestions(false);
+  };
+
+  const addItem = () => {
+    if (!stockName || !weight || !buyTouch || !sellTouch || !calculation) {
+      Alert.alert("Error", "Please fill all required fields");
+      return;
+    }
+
+    // Check for unique item name
+    if (
+      stocks.some(
+        (stock) => stock.name.toLowerCase() === stockName.toLowerCase()
+      ) ||
+      addedItems.some(
+        (item) => item.stockName.toLowerCase() === stockName.toLowerCase()
+      )
+    ) {
+      Alert.alert(
+        "Error",
+        `Item name "${stockName}" already exists. Please choose a different name.`
+      );
+      return;
+    }
+
+    const newItem = {
+      id: Date.now() + Math.random(),
+      stockName,
+      weight,
+      buyTouch,
+      sellTouch,
+      calculation,
+      pure,
+      workerName,
+      description,
+    };
+
+    setAddedItems((prev) => [...prev, newItem]);
+
+    // Clear form
+    setStockName("");
+    setWeight("");
+    setBuyTouch("0");
+    setSellTouch("");
+    setCalculation("");
+    setPure("");
+    setWorkerName("");
+    setDescription("");
+  };
+
+  const removeAddedItem = (id) => {
+    setAddedItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
   const calculatePurity = (item) => {
-    // Fixed: Use stockName to match
     const selectedItem = allItems.find((i) => i.stockName === item.name);
+
     if (selectedItem) {
       const calc = parseFloat(selectedItem.buyingTouch);
       const netWt = parseFloat(item.sell);
+
       if (!isNaN(calc) && !isNaN(netWt)) {
-        return (calc * netWt).toFixed(3);
+        const pureValue = (calc * netWt) / 100;
+        return pureValue.toFixed(3);
       }
     }
+
     return item.pure || "";
   };
+
 
   // Handle main search box input
   const handleSearchChange = (text) => {
@@ -270,24 +371,9 @@ export default function StockMaster({ navigation }) {
     ]);
   };
 
-  const handleSubmit = async () => {
-    // Validation
+  const handleUpdate = async () => {
     if (!stockName || !weight || !buyTouch || !sellTouch || !calculation) {
       Alert.alert("Error", "Please fill all required fields");
-      return;
-    }
-
-    // Check for unique item name when adding new item
-    if (
-      !isEdit &&
-      stocks.some(
-        (stock) => stock.name.toLowerCase() === stockName.toLowerCase()
-      )
-    ) {
-      Alert.alert(
-        "Error",
-        "Item name already exists. Please choose a different name."
-      );
       return;
     }
 
@@ -303,50 +389,116 @@ export default function StockMaster({ navigation }) {
         description: description,
       };
 
-      console.log("Submitting stock data:", stockData);
+      console.log("Updating stock data:", stockData);
 
-      if (isEdit) {
-        // Update existing stock - FIXED: Added parentheses around template literal
-        const response = await fetch(`${base_url}/stockMaster/${editId}`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(stockData),
-        });
+      const response = await fetch(`${base_url}/stockMaster/${editId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(stockData),
+      });
 
-        if (response.ok) {
-          const updatedStock = await response.json();
-          console.log("Updated stock from server:", updatedStock);
+      if (response.ok) {
+        const updatedStock = await response.json();
+        console.log("Updated stock from server:", updatedStock);
 
-          const updatedStocks = stocks.map((item) =>
-            item.id === editId
-              ? {
-                  id: updatedStock._id,
-                  name: updatedStock.itemName,
-                  weight: `${updatedStock.weight} g`,
-                  buy: updatedStock.less.toString(),
-                  sell: updatedStock.netWeight.toString(),
-                  pure: updatedStock.pure.toString(),
-                  calculation: updatedStock.calculation,
-                  workerName: updatedStock.workerName || "",
-                  description: updatedStock.description || "",
-                }
-              : item
-          );
+        // START: Add to Dealer Bill (Transfer History) if workerName is present
+        if (workerName) {
+          try {
+            const transferData = {
+              date: new Date().toISOString().split('T')[0],
+              selectedDealer: workerName,
+              selectedItems: [stockName],
+              totalSelectedWeight: parseFloat(weight),
+              weightSubtraction: 0,
+              transferWeight: parseFloat(weight)
+            };
 
-          setStocks(updatedStocks);
-          await AsyncStorage.setItem(
-            "STOCK_LIST",
-            JSON.stringify(updatedStocks)
-          );
-          Alert.alert("Success", "Stock updated successfully");
-        } else {
-          Alert.alert("Error", "Failed to update stock");
-          return;
+            const billResponse = await fetch(`${base_url}/payments/dealerTransferHistory`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(transferData)
+            });
+
+            if (billResponse.ok) {
+              console.log("✅ Automatically added to Dealer Bill History");
+            }
+          } catch (error) {
+            console.error("❌ Error adding to Dealer Bill:", error);
+          }
         }
+        // END: Add to Dealer Bill
+
+        // Update local state
+        const updatedStocks = stocks.map((stock) =>
+          stock.id === editId
+            ? {
+              id: updatedStock._id,
+              name: updatedStock.itemName,
+              weight: `${updatedStock.weight} g`,
+              buy: updatedStock.less.toString(),
+              sell: updatedStock.netWeight.toString(),
+              pure: updatedStock.pure.toString(),
+              calculation: updatedStock.calculation,
+              workerName: updatedStock.workerName || "",
+              description: updatedStock.description || "",
+            }
+            : stock
+        );
+
+        setStocks(updatedStocks);
+        await AsyncStorage.setItem(
+          "STOCK_LIST",
+          JSON.stringify(updatedStocks)
+        );
+
+        Alert.alert("Success", "Item updated successfully");
+
+        // Reset form and close modal
+        setIsEdit(false);
+        setEditId(null);
+        setStockName("");
+        setWeight("");
+        setBuyTouch("");
+        setSellTouch("");
+        setCalculation("");
+        setPure("");
+        setWorkerName("");
+        setDescription("");
+        setModalVisible(false);
       } else {
-        // Create new stock - FIXED: Added parentheses around template literal
+        Alert.alert("Error", "Failed to update item on server");
+      }
+    } catch (error) {
+      console.error("Error updating stock:", error);
+      Alert.alert("Error", "Failed to update item");
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (addedItems.length === 0) {
+      Alert.alert("Error", "No items to submit");
+      return;
+    }
+
+    try {
+      const newStocks = [];
+
+      for (const item of addedItems) {
+        const stockData = {
+          itemName: item.stockName,
+          weight: parseFloat(item.weight),
+          less: parseFloat(item.buyTouch),
+          netWeight: parseFloat(item.sellTouch),
+          calculation: item.calculation,
+          pure: parseFloat(item.pure) || 0,
+          workerName: item.workerName,
+          description: item.description,
+        };
+
+        console.log("Submitting stock data:", stockData);
+
         const response = await fetch(`${base_url}/stockMaster`, {
           method: "POST",
           headers: {
@@ -371,34 +523,29 @@ export default function StockMaster({ navigation }) {
             description: savedStock.description || "",
           };
 
-          const updatedStocks = [...stocks, newStock];
-          setStocks(updatedStocks);
-          await AsyncStorage.setItem(
-            "STOCK_LIST",
-            JSON.stringify(updatedStocks)
-          );
-          Alert.alert("Success", "Stock added successfully");
+          newStocks.push(newStock);
         } else {
-          Alert.alert("Error", "Failed to save stock");
+          Alert.alert("Error", `Failed to save Item: ${item.stockName}`);
           return;
         }
       }
 
+      // Update stocks list
+      const updatedStocks = [...stocks, ...newStocks];
+      setStocks(updatedStocks);
+      await AsyncStorage.setItem(
+        "STOCK_LIST",
+        JSON.stringify(updatedStocks)
+      );
+
+      Alert.alert("Success", `${addedItems.length} items added successfully`);
+
       // Reset form
-      setIsEdit(false);
-      setEditId(null);
-      setStockName("");
-      setWeight("");
-      setBuyTouch("");
-      setSellTouch("");
-      setCalculation("");
-      setPure("");
-      setWorkerName("");
-      setDescription("");
+      setAddedItems([]);
       setModalVisible(false);
     } catch (error) {
-      console.error("Error saving stock:", error);
-      Alert.alert("Error", "Failed to save stock to server");
+      console.error("Error saving stocks:", error);
+      Alert.alert("Error", "Failed to save stocks to server");
     }
   };
 
@@ -408,12 +555,13 @@ export default function StockMaster({ navigation }) {
     setEditId(null);
     setStockName("");
     setWeight("");
-    setBuyTouch("");
+    setBuyTouch("0");
     setSellTouch("");
     setCalculation("");
     setPure("");
     setWorkerName("");
     setDescription("");
+    setAddedItems([]);
     setModalVisible(true);
   };
 
@@ -433,7 +581,7 @@ export default function StockMaster({ navigation }) {
         <TextInput
           placeholder="Search Items "
           value={search}
-          onChangeText={handleSearchChange}
+          onChangeText={setSearch}
           style={styles.searchInput}
         />
       </View>
@@ -528,9 +676,7 @@ export default function StockMaster({ navigation }) {
             <Text style={styles.weight}>Purity : {calculatePurity(item)}</Text>
 
             {/* ADD THIS BLOCK */}
-            {item.workerName ? (
-              <Text style={styles.weight}>Worker : {item.workerName}</Text>
-            ) : null}
+            <Text style={styles.weight}>Worker : {item.workerName || "N/A"}</Text>
 
             <View style={styles.touchRow}>
               <View style={styles.touchBox}>
@@ -564,6 +710,11 @@ export default function StockMaster({ navigation }) {
                 {isEdit ? "Edit Item" : "Add Item"}
               </Text>
 
+              <Text style={styles.totalPureText}>
+                Total Pure ({addedItems.length} items):
+                <Text style={styles.totalPureValue}>{addedItems.reduce((sum, item) => sum + parseFloat(item.pure || 0), 0).toFixed(3)} g</Text>
+              </Text>
+
               <TouchableOpacity onPress={() => setModalVisible(false)}>
                 <Icon name="close" size={24} />
               </TouchableOpacity>
@@ -582,13 +733,13 @@ export default function StockMaster({ navigation }) {
                   style={styles.suggestionsContainer}
                   nestedScrollEnabled={true}
                 >
-                  {suggestions.map((item, index) => (
+                  {suggestions.map((suggestion, idx) => (
                     <TouchableOpacity
-                      key={index}
+                      key={idx}
                       style={styles.suggestionItem}
-                      onPress={() => selectSuggestion(item)}
+                      onPress={() => selectSuggestion(suggestion)}
                     >
-                      <Text>{item}</Text>
+                      <Text>{suggestion}</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -599,8 +750,24 @@ export default function StockMaster({ navigation }) {
                 style={styles.input}
                 placeholder="Enter Worker Name"
                 value={workerName}
-                onChangeText={setWorkerName}
+                onChangeText={handleWorkerNameChange}
               />
+              {showWorkerSuggestions && workerSuggestions.length > 0 && (
+                <ScrollView
+                  style={styles.suggestionsContainer}
+                  nestedScrollEnabled={true}
+                >
+                  {workerSuggestions.map((suggestion, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={styles.suggestionItem}
+                      onPress={() => selectWorkerSuggestion(suggestion)}
+                    >
+                      <Text>{suggestion}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
 
               <Text style={styles.label}>Weight (g) *</Text>
               <TextInput
@@ -647,32 +814,71 @@ export default function StockMaster({ navigation }) {
                 value={pure}
                 editable={false}
               />
+
               <Text style={styles.label}>Description</Text>
               <TextInput
-                style={[styles.input, { height: 80 }]}
+                style={[styles.input, { height: 60 }]}
                 placeholder="Enter Description"
                 value={description}
                 onChangeText={setDescription}
                 multiline={true}
               />
-              <View style={styles.modalBtnRow}>
-                <TouchableOpacity
-                  style={styles.cancelBtn}
-                  onPress={() => setModalVisible(false)}
-                >
-                  <Text style={styles.cancelText}>Cancel</Text>
-                </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.submitBtn}
-                  onPress={handleSubmit}
-                >
-                  <Text style={styles.submitText}>
-                    {isEdit ? "Update" : "Submit"}
-                  </Text>
+              {!isEdit && (
+                <TouchableOpacity style={styles.addBtn} onPress={addItem}>
+                  <View style={styles.addBtnContent}>
+                    <Icon name="plus-circle" size={20} color="#fff" />
+                    <Text style={styles.addBtnText}>Add Item</Text>
+                  </View>
                 </TouchableOpacity>
-              </View>
+              )}
+
+              {/* ADDED ITEMS TABLE */}
+              {!isEdit && addedItems.length > 0 && (
+                <View style={styles.card1}>
+                  <Text style={styles.sectionTitle}>Added Items</Text>
+                  <View style={styles.secondTableHeader}>
+                    <Text style={styles.secondTableHeaderText}>Item Name</Text>
+                    <Text style={styles.secondTableHeaderText}>Weight</Text>
+                    <Text style={styles.secondTableHeaderText}>Pure</Text>
+                    <Text style={styles.secondTableHeaderText}>Action</Text>
+                  </View>
+
+                  {addedItems.map((item, idx) => (
+                    <View key={item.id} style={styles.secondTableRow}>
+                      <Text style={styles.secondTableCell}>{item.stockName}</Text>
+                      <Text style={styles.secondTableCell}>{item.weight} g</Text>
+                      <Text style={styles.secondTableCell}>{item.pure} g</Text>
+                      <TouchableOpacity onPress={() => removeAddedItem(item.id)}>
+                        <Text style={[styles.actionText, { color: "#d9534f" }]}>
+                          Remove
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+
+              )}
+
             </ScrollView>
+
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setModalVisible(false)}
+              >
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.submitBtn}
+                onPress={isEdit ? handleUpdate : handleSubmit}
+              >
+                <Text style={styles.submitText}>
+                  {isEdit ? "Update Item" : "Submit All"}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -747,6 +953,14 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: "#fff",
     marginHorizontal: 20,
+    marginVertical: 10,
+    borderRadius: 15,
+    padding: 15,
+    elevation: 4,
+  },
+  card1: {
+    backgroundColor: "#fff",
+    marginHorizontal: 5,
     marginVertical: 10,
     borderRadius: 15,
     padding: 15,
@@ -879,4 +1093,112 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     fontSize: 16,
   },
+  itemRow: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
+    backgroundColor: "#f9f9f9",
+  },
+  itemHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  itemTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#2E7D32",
+  },
+  addMoreBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E8F5E9",
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    marginTop: 15,
+    marginBottom: 15,
+  },
+  addMoreText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#2E7D32",
+    marginLeft: 8,
+  },
+  addBtn: {
+    backgroundColor: "#2E7D32",
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    marginTop: 15,
+    marginBottom: 15,
+  },
+  addBtnContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  addBtnText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 10,
+    color: "#2E7D32",
+  },
+  secondTableHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: "#FFF0B3",
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginTop: 10,
+  },
+  secondTableHeaderText: {
+    width: "25%",
+    textAlign: "center",
+    fontWeight: "700",
+    fontSize: 14,
+    color: "#333",
+    left: 2,
+  },
+  secondTableRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderColor: "#E5E5E5",
+    left: -5,
+  },
+  secondTableCell: {
+    width: "25%",
+    textAlign: "center",
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#000",
+  },
+  actionText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  totalPureText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#000",
+    marginBottom: 5,
+    top: 2,
+    right: -15,
+  },
+  totalPureValue: {
+    color: "gray",
+  },
+
 });
