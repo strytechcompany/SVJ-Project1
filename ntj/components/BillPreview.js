@@ -159,36 +159,32 @@ export default function BillPreview({ route, navigation }) {
           </head>
           <body>
             <h1>ORDER RECEIPT</h1>
-            <div class="order-details" style="display: flex; justify-content: space-between;">
+            <div class="order-details" style="display: flex; justify-content: space-between; border: 1px solid #000; padding: 10px;">
               <div style="flex: 1;">
                 <p><strong>Order No:</strong> ${order.orderNo}</p>
-                <p><strong>Date:</strong> ${order.date}</p>
-                <p><strong>Customer:</strong> ${order.customer}</p>
+                <p><strong>Name:</strong> ${order.customer}</p>
                 <p><strong>Phone:</strong> ${order.phone}</p>
+                <p><strong>Address:</strong> ${order.address || 'N/A'}</p>
+                <p><strong>GST No:</strong> ${order.gstin || 'N/A'}</p>
               </div>
-              ${order.image ? `
-                <div style="width: 120px; height: 120px; border: 1px solid #ddd; border-radius: 5px; overflow: hidden; margin-left: 20px;">
-                  <img src="${order.image.startsWith('http') ? order.image : `${base_url}/${order.image}`}" style="width: 100%; height: 100%; object-fit: cover;" />
-                </div>
-              ` : ''}
+              <div style="text-align: right; width: 100px;">
+                <p><strong>Type:</strong> Order</p>
+                <p><strong>Date:</strong> ${order.date || '-'}</p>
+              </div>
             </div>
 
-            <table>
-              <tr>
-                <th>Item Type</th>
-                <th>Requested Weight</th>
-                <th>Payment Status</th>
-                <th>Pending Balance</th>
-              </tr>
-              <tr>
-                <td>${order.type}</td>
-                <td>${order.weight} GMS</td>
-                <td>${order.payment}</td>
-                <td>₹${order.balance}</td>
-              </tr>
-            </table>
+            <div style="border: 1px solid #000; margin-top: 10px; padding: 10px;">
+               <p><strong>ORDER DETAILS :</strong></p>
+               <div style="margin-top: 5px;">
+                  <p><strong>Order No:</strong> ${order.orderNo}</p>
+                  <p><strong>Item:</strong> ${order.type}</p>
+                  <p><strong>Weight:</strong> ${order.weight} GMS</p>
+                  <p><strong>Payment:</strong> ${order.payment}</p>
+                  <p><strong>Pending Balance:</strong> ₹${order.balance}</p>
+               </div>
+            </div>
 
-            <div class="footer">
+            <div class="footer" style="text-align: center; margin-top: 20px;">
               <p>${thirukkural}</p>
               <p>Thank you for choosing NJT Jewellery!</p>
             </div>
@@ -511,12 +507,12 @@ export default function BillPreview({ route, navigation }) {
                   <td>${customer.advanceBalance && parseFloat(customer.advanceBalance) !== 0 ? customer.advanceBalance : '0.000'}</td>
                   <td>${summary ? summary.receipt : 'N/A'}</td>
                   <td>${summary ? summary.cash : 'N/A'}</td>
-                  <td>${summary && customer.advanceBalance ? (parseFloat(summary.issue) - parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash)).toFixed(3) : (summary?.current || 'N/A')}</td>
+                  <td>${summary && customer.advanceBalance ? (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - parseFloat(summary.issue)).toFixed(3) : (summary?.current || 'N/A')}</td>
                 </tr>
                 <tr>
-                  <td colspan="3" style="text-align: right; padding-right: 10px;">${summary?.issue || '0.000'} - ${customer.advanceBalance || '0.000'} + ${summary?.receipt || '0.000'} + ${summary?.cash || '0.000'}</td>
+                  <td colspan="3" style="text-align: right; padding-right: 10px;">${customer.advanceBalance || '0.000'} + ${summary?.receipt || '0.000'} + ${summary?.cash || '0.000'} - ${summary?.issue || '0.000'}</td>
                   <td>=</td>
-                  <td>${summary && customer.advanceBalance ? (parseFloat(summary.issue) - parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash)).toFixed(3) : (summary?.current || 'N/A')}</td>
+                  <td>${summary && customer.advanceBalance ? (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - parseFloat(summary.issue)).toFixed(3) : (summary?.current || 'N/A')}</td>
                 </tr>
               `}
             </table>
@@ -529,12 +525,11 @@ export default function BillPreview({ route, navigation }) {
 
   const handleDownload = async () => {
     try {
-      setIsPrinting(true);
       const html = generateHTML();
       const { uri } = await Print.printToFileAsync({
         html,
         width: 204, // 72mm in points
-        height: 595, // 210mm in points
+        height: 842,
       });
       setIsPrinting(false);
       Alert.alert('Download Successful', `PDF saved to: ${uri} `);
@@ -547,12 +542,11 @@ export default function BillPreview({ route, navigation }) {
 
   const handleShare = async () => {
     try {
-      setIsPrinting(true);
       const html = generateHTML();
       const { uri } = await Print.printToFileAsync({
         html,
         width: 204, // 72mm in points
-        height: 595, // 210mm in points
+        height: 842,
       });
       await Sharing.shareAsync(uri);
       setIsPrinting(false);
@@ -565,12 +559,11 @@ export default function BillPreview({ route, navigation }) {
 
   const handleWhatsAppShare = async () => {
     try {
-      setIsPrinting(true);
       const html = generateHTML();
       const { uri } = await Print.printToFileAsync({
         html,
         width: 204, // 72mm in points
-        height: 595, // 210mm in points
+        height: 842,
       });
 
       // Share the file directly without opening a specific chat thread/message
@@ -595,7 +588,7 @@ export default function BillPreview({ route, navigation }) {
       const { uri } = await Print.printToFileAsync({
         html,
         width: 204, // 72mm in points
-        height: 595, // 210mm in points
+        height: 842, // A4 height equivalent for continuous roll
       });
 
       // Action 1: Print the generated PDF
@@ -603,7 +596,7 @@ export default function BillPreview({ route, navigation }) {
         await Print.printAsync({
           uri,
           width: 204,
-          height: 595,
+          height: 842,
         });
       } catch (printError) {
         console.log("Print cancelled or failed:", printError.message);
@@ -655,7 +648,7 @@ export default function BillPreview({ route, navigation }) {
           await Print.printAsync({
             html,
             width: 204,
-            height: 595,
+            height: 842,
           });
           setIsPrinting(false);
         });
@@ -691,8 +684,8 @@ export default function BillPreview({ route, navigation }) {
                   <Icon name="arrow-left" size={22} color="#1E88E5" />
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate("Home")}>
-                  <Icon name="home" size={22} color="#1E88E5" />
+                <TouchableOpacity style={styles.headerBtn} onPress={handlePrint}>
+                  <Icon name="printer" size={22} color="#1E88E5" />
                 </TouchableOpacity>
               </View>
 
@@ -1250,19 +1243,19 @@ export default function BillPreview({ route, navigation }) {
                         <Text style={styles.sumCell}>{summary ? summary.cash : 'N/A'}</Text>
                         <Text style={styles.sumCell}>
                           {summary && customer?.advanceBalance ? (
-                            (parseFloat(summary.issue) - parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash)).toFixed(3)
+                            (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - parseFloat(summary.issue)).toFixed(3)
                           ) : finalBalance}
                         </Text>
                       </View>
 
                       <View style={styles.finalSummaryRow}>
                         <Text style={[styles.sumCell, { flex: 2.5 }]}>
-                          {summary?.issue} - {customer?.advanceBalance || '0.000'} + {summary?.receipt} + {summary?.cash}
+                          {customer?.advanceBalance || '0.000'} + {summary?.receipt || '0.000'} + {summary?.cash || '0.000'} - {summary?.issue || '0.000'}
                         </Text>
                         <Text style={[styles.sumCell, { flex: 0.5 }]}>=</Text>
                         <Text style={[styles.sumCell, { flex: 1 }]}>
                           {summary && customer?.advanceBalance ? (
-                            (parseFloat(summary.issue) - parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash)).toFixed(3)
+                            (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - parseFloat(summary.issue)).toFixed(3)
                           ) : finalBalance}
                         </Text>
                       </View>
@@ -1272,12 +1265,7 @@ export default function BillPreview({ route, navigation }) {
               </>
             )}
 
-            {!isPrinting && (
-              <TouchableOpacity style={styles.button} onPress={() => navigation.navigate("Home")}>
-                <Icon name="arrow-left" size={20} color="#fff" />
-                <Text style={styles.buttonText}>Home</Text>
-              </TouchableOpacity>
-            )}
+            {/* Bottom Home Button Removed */}
 
           </ScrollView >
         </View >
