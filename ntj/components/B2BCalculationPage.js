@@ -1368,6 +1368,7 @@ export default function CreateTransaction({ navigation }) {
                         // Filter by required type
                         it.type === "issue"
                     )
+                    .slice(0, 3)
                     .map((it, idx) => (
                       <TouchableOpacity
                         key={idx}
@@ -1536,6 +1537,7 @@ export default function CreateTransaction({ navigation }) {
                         // Filter by required type
                         it.type === "receipt"
                     )
+                    .slice(0, 3)
                     .map((it, idx) => (
                       <TouchableOpacity
                         key={idx}
@@ -2082,22 +2084,34 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: "#fff",
     margin: 12,
-    padding: 16,
-    borderRadius: 18,
-    elevation: 2,
+    padding: 18,
+    borderRadius: 20,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    borderWidth: 1,
+    borderColor: "#F0F0F0",
   },
 
   dropdownFloating: {
     position: "absolute",
-    top: 100,        // directly below the search box
-    left: 0,
-    right: 0,
+    top: 130,
+    left: 18,
+    right: 18,
     backgroundColor: "#fff",
     borderRadius: 12,
-    elevation: 12,
-    zIndex: 9999,
-    maxHeight: 220,
-    padding: 2,
+    elevation: 10,
+    zIndex: 10000,
+    maxHeight: 200,
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    overflow: "hidden",
   },
   sectionHeader: {
     flexDirection: "row",
@@ -2121,9 +2135,10 @@ const styles = StyleSheet.create({
   },
 
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 2,
+    fontSize: 19,
+    fontWeight: "700",
+    color: "#2C3E50",
+    marginBottom: 4,
   },
 
   infoText: {
@@ -2217,12 +2232,15 @@ const styles = StyleSheet.create({
   },
 
   searchBox: {
-    backgroundColor: "#F4F4F4",
-    padding: 12,
-    borderRadius: 10,
+    backgroundColor: "#fff",
+    padding: 14,
+    borderRadius: 12,
     fontSize: 16,
     flex: 1,
     marginRight: 10,
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+    color: "#000",
   },
 
   searchBtn: {
@@ -2234,47 +2252,68 @@ const styles = StyleSheet.create({
   },
 
   listItem: {
-    paddingVertical: 14,
-    paddingHorizontal: 10,
-    borderBottomWidth: 0.3,
-    borderColor: "#ccc",
+    paddingVertical: 15,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderColor: "#F5F5F5",
+    backgroundColor: "#fff",
   },
 
   listItemText: {
-    fontSize: 17,
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#34495E",
   },
 
   dropdownItemContentIssue: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    paddingVertical: 15,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+    backgroundColor: "#fff",
   },
   dropdownItemTextIssue: {
     fontSize: 16,
-    fontWeight: "700",
-    color: "#000",
+    fontWeight: "600",
+    color: "#2C3E50",
     flex: 1,
   },
   dropdownItemWeightIssue: {
-    fontSize: 14,
-    color: "#333",
-    fontWeight: "600",
+    fontSize: 13,
+    color: "#1B5E20",
+    fontWeight: "700",
+    backgroundColor: "#E8F5E9",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
   dropdownItemContentReceipt: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    paddingVertical: 15,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+    backgroundColor: "#fff",
   },
   dropdownItemTextReceipt: {
     fontSize: 16,
-    fontWeight: "700",
-    color: "#000",
+    fontWeight: "600",
+    color: "#2C3E50",
     flex: 1,
   },
   dropdownItemWeightReceipt: {
-    fontSize: 14,
-    color: "#333",
-    fontWeight: "600",
+    fontSize: 13,
+    color: "#004D40",
+    fontWeight: "700",
+    backgroundColor: "#E0F2F1",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
 
   secondTableHeader: {
@@ -2322,17 +2361,19 @@ const styles = StyleSheet.create({
 
   productTableHeader: {
     flexDirection: "row",
-    backgroundColor: "#f1f1f1",
-    paddingVertical: 12,
-    borderRadius: 6,
+    backgroundColor: "#F8F9FA",
+    paddingVertical: 14,
+    borderRadius: 8,
     alignItems: "center",
+    borderBottomWidth: 2,
+    borderBottomColor: "#E9ECEF",
   },
-
   productHeaderCell: {
     width: 140,
     textAlign: "center",
-    fontWeight: "800",
-    fontSize: 13,
+    fontWeight: "700",
+    fontSize: 14,
+    color: "#495057",
   },
 
   productTableRow: {
@@ -2402,9 +2443,10 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
   },
   balanceText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
-    color: "#333",
+    color: "#7F8C8D",
+    marginTop: 4,
   },
   cartContainer: {
     position: "relative",
