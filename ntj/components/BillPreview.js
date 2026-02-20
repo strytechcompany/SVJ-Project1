@@ -330,7 +330,7 @@ export default function BillPreview({ route, navigation }) {
               </tr>
               ${items && items.length > 0 ? items.map(item => `
                 <tr>
-                  <td>${item.itemName}</td>
+                  <td>${item.displayItemName || item.itemName}</td>
                   <td>${item.weight}</td>
                   <td>${item.touch}</td>
                   <td>${item.wastage}</td>
@@ -909,7 +909,7 @@ export default function BillPreview({ route, navigation }) {
                   {items && items.length > 0 ? (
                     items.map((item, i) => (
                       <View key={i} style={styles.tableRow}>
-                        <Text style={styles.cell}>{item.itemName}</Text>
+                        <Text style={styles.cell}>{item.displayItemName || item.itemName}</Text>
                         <Text style={styles.cell}>{item.weight}</Text>
                         <Text style={styles.cell}>{item.touch}</Text>
                         <Text style={styles.cell}>{item.wastage}</Text>
