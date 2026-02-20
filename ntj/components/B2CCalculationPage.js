@@ -105,8 +105,8 @@ export default function CreateTransaction({ navigation, route }) {
   const [receiptPure, setReceiptPure] = useState("");
   const [receiptEntries, setReceiptEntries] = useState([]);
 
-  // ---------------- ITEM INPUT STATES ----------------
   const [itemName, setItemName] = useState("");
+  const [displayItemName, setDisplayItemName] = useState("");
   const [weight, setWeight] = useState("");
   const [touch, setTouch] = useState("");
   const [wastage, setWastage] = useState("");
@@ -731,9 +731,9 @@ export default function CreateTransaction({ navigation, route }) {
       const updatedStock = await stockResponse.json();
       console.log("✅ ADD ITEM - Stock updated in DB:", updatedStock);
 
-      // 3️⃣ UPDATE LOCAL STATE
       const newItem = {
         itemName,
+        displayItemName: displayItemName || itemName,
         weight: wt,
         touch: t,
         wastage: w,
@@ -768,6 +768,7 @@ export default function CreateTransaction({ navigation, route }) {
       // 4️⃣ CLEAR FORM - ✅ FIX 3: Keep previous rate
       console.log("🧹 ADD ITEM - Clearing form fields");
       setItemName("");
+      setDisplayItemName("");
       setWeight("");
       setTouch("");
       setWastage("");
@@ -997,7 +998,10 @@ export default function CreateTransaction({ navigation, route }) {
       ? matchingItemEntry.percentage.toString()
       : item.pure.toString();
 
+    const detailValue = matchingItemEntry ? matchingItemEntry.itemDetails : item.itemName;
+
     setTouch(touchValue);
+    setDisplayItemName(detailValue);
     setModifiedWeight("");
     setShowItemDropdown(false);
   };
@@ -1406,6 +1410,8 @@ export default function CreateTransaction({ navigation, route }) {
                   </View>
                 )}
 
+              
+
               {/* WEIGHT WITH INLINE MODIFIED WEIGHT */}
               <Text style={styles.label}>Weight (g)</Text>
               <View style={styles.weightInputContainer}>
@@ -1448,6 +1454,9 @@ export default function CreateTransaction({ navigation, route }) {
                 onChangeText={setRate}
                 keyboardType="decimal-pad"
               />
+
+              {/* ITEM NAME (FOR BILL) */}
+              
 
               {/* GST CHECKBOX */}
               <View style={styles.checkboxContainer}>
@@ -1648,7 +1657,7 @@ export default function CreateTransaction({ navigation, route }) {
                       {/* TABLE ROWS */}
                       {items.map((row, index) => (
                         <View key={index} style={styles.tableRow}>
-                          <Text style={styles.td}>{row.itemName}</Text>
+                          <Text style={styles.td}>{row.displayItemName || row.itemName}</Text>
                           <Text style={styles.td}>{row.weight}</Text>
                           <Text style={styles.td}>{row.touch}</Text>
                           <Text style={styles.td}>{row.rate}</Text>
