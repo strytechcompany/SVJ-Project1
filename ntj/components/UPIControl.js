@@ -10,59 +10,94 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import QRCode from 'react-native-qrcode-svg';
+import { base_url } from './config';
 
 export default function UPIControl({ navigation }) {
-  const [upiIds, setUpiIds] = useState(["user1@upi", "user2@upi", "user3@upi"]);
-  const [selectedUpiId, setSelectedUpiId] = useState("user1@upi");
+  const [upiIds, setUpiIds] = useState([]);
+  const [selectedUpiId, setSelectedUpiId] = useState(null);
   const [showUpiModal, setShowUpiModal] = useState(false);
   const [newUpiId, setNewUpiId] = useState("");
   const [editingUpiId, setEditingUpiId] = useState(null);
+  const [editingIndex, setEditingIndex] = useState(null);
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrUpiId, setQrUpiId] = useState("");
   const commonHandles = ["@oksbi", "@okicici", "@okaxis", "@okhdfcbank", "@ybl", "@paytm"];
 
   useEffect(() => {
-    const loadSelectedUpiId = async () => {
-      try {
-        const stored = await AsyncStorage.getItem('selectedUpiId');
-        if (stored) {
-          setSelectedUpiId(stored);
-        }
-      } catch (error) {
-        console.error('Error loading selected UPI ID:', error);
-      }
-    };
-    loadSelectedUpiId();
+    fetchUpiIds();
   }, []);
 
-  const saveSelectedUpiId = async (upiId) => {
+  const fetchUpiIds = async () => {
     try {
-      await AsyncStorage.setItem('selectedUpiId', upiId);
-      setSelectedUpiId(upiId);
-      Alert.alert("Success", `${upiId} selected as default UPI ID`);
+      const response = await fetch(`${base_url}/upi`);
+      const data = await response.json();
+      if (data && data.upiIds) {
+        setUpiIds(data.upiIds);
+        const primary = data.upiIds.find(u => u.isPrimary);
+        if (primary) setSelectedUpiId(primary.upiId);
+      }
     } catch (error) {
-      console.error('Error saving selected UPI ID:', error);
+      Alert.alert("Error", "Failed to load UPI IDs");
+      console.error(error);
     }
   };
 
-  const handleAddUpiId = () => {
+  const saveSelectedUpiId = async (upiId) => {
+    try {
+      const response = await fetch(`${base_url}/upi/select`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upiId }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setSelectedUpiId(upiId);
+        Alert.alert("Success", `${upiId} selected as default UPI ID`);
+        fetchUpiIds();
+      } else {
+        Alert.alert("Error", data.message || "Failed to select UPI ID");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to select UPI ID");
+      console.error(error);
+    }
+  };
+
+  const handleAddUpiId = async () => {
     if (!newUpiId.trim()) {
       Alert.alert("Error", "Please enter a UPI ID");
       return;
     }
-    if (editingUpiId !== null) {
-      // Edit existing
-      const updated = [...upiIds];
-      updated[editingUpiId] = newUpiId.trim();
-      setUpiIds(updated);
-    } else {
-      // Add new
-      setUpiIds([...upiIds, newUpiId.trim()]);
+    try {
+      let response;
+      if (editingUpiId !== null) {
+        response = await fetch(`${base_url}/upi/${editingUpiId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upiId: newUpiId.trim() }),
+        });
+      } else {
+        response = await fetch(`${base_url}/upi`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upiId: newUpiId.trim() }),
+        });
+      }
+      const data = await response.json();
+      if (response.ok) {
+        Alert.alert("Success", editingUpiId !== null ? "UPI ID updated" : "UPI ID added");
+        fetchUpiIds();
+      } else {
+        Alert.alert("Error", data.message || "Operation failed");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to save UPI ID");
+      console.error(error);
     }
     setNewUpiId("");
     setEditingUpiId(null);
+    setEditingIndex(null);
     setShowUpiModal(false);
   };
 
@@ -74,13 +109,14 @@ export default function UPIControl({ navigation }) {
     setNewUpiId(current + handle);
   };
 
-  const handleEdit = (index) => {
-    setEditingUpiId(index);
-    setNewUpiId(upiIds[index]);
+  const handleEdit = (item, index) => {
+    setEditingUpiId(item._id);
+    setEditingIndex(index);
+    setNewUpiId(item.upiId);
     setShowUpiModal(true);
   };
 
-  const handleDelete = (index) => {
+  const handleDelete = (item) => {
     Alert.alert(
       "Delete UPI ID",
       "Are you sure you want to delete this UPI ID?",
@@ -89,8 +125,21 @@ export default function UPIControl({ navigation }) {
         {
           text: "Delete",
           style: "destructive",
-          onPress: () => {
-            setUpiIds(upiIds.filter((_, i) => i !== index));
+          onPress: async () => {
+            try {
+              const response = await fetch(`${base_url}/upi/${item._id}`, {
+                method: 'DELETE',
+              });
+              const data = await response.json();
+              if (response.ok) {
+                fetchUpiIds();
+              } else {
+                Alert.alert("Error", data.message || "Failed to delete");
+              }
+            } catch (error) {
+              Alert.alert("Error", "Failed to delete UPI ID");
+              console.error(error);
+            }
           },
         },
       ]
@@ -109,7 +158,7 @@ export default function UPIControl({ navigation }) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={28} color="#fff" style={{ top: 20 }}/>
+          <Ionicons name="arrow-back" size={28} color="#fff" style={{ top: 20 }} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>UPI ID Control</Text>
       </View>
@@ -123,6 +172,7 @@ export default function UPIControl({ navigation }) {
               style={styles.addUpiBtn}
               onPress={() => {
                 setEditingUpiId(null);
+                setEditingIndex(null);
                 setNewUpiId("");
                 setShowUpiModal(true);
               }}
@@ -130,43 +180,43 @@ export default function UPIControl({ navigation }) {
               <Ionicons name="add" size={20} color="#fff" />
             </TouchableOpacity>
           </View>
-          {upiIds.map((upiId, index) => (
-            <View key={index} style={styles.upiRow}>
+          {upiIds.map((item, index) => (
+            <View key={item._id || index} style={styles.upiRow}>
               <View style={styles.upiInfo}>
-                <Text style={styles.upiText}>{upiId}</Text>
+                <Text style={styles.upiText}>{item.upiId}</Text>
                 <View style={styles.upiTypeContainer}>
                   <Ionicons
-                    name={selectedUpiId === upiId ? "star" : "star-outline"}
+                    name={selectedUpiId === item.upiId ? "star" : "star-outline"}
                     size={16}
-                    color={selectedUpiId === upiId ? "#FFD700" : "#ccc"}
+                    color={selectedUpiId === item.upiId ? "#FFD700" : "#ccc"}
                   />
-                  <Text style={selectedUpiId === upiId ? styles.primaryText : styles.secondaryText}>
-                    {selectedUpiId === upiId ? "Primary" : "Secondary"}
+                  <Text style={selectedUpiId === item.upiId ? styles.primaryText : styles.secondaryText}>
+                    {selectedUpiId === item.upiId ? "Primary" : "Secondary"}
                   </Text>
                 </View>
               </View>
               <View style={styles.upiActions}>
                 <TouchableOpacity
-                  style={selectedUpiId === upiId ? styles.selectedBtn : styles.selectBtn}
-                  onPress={() => saveSelectedUpiId(upiId)}
+                  style={selectedUpiId === item.upiId ? styles.selectedBtn : styles.selectBtn}
+                  onPress={() => saveSelectedUpiId(item.upiId)}
                 >
                   <Ionicons name="checkmark" size={18} color="#fff" />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.qrBtn}
-                  onPress={() => generateQR(upiId)}
+                  onPress={() => generateQR(item.upiId)}
                 >
                   <Ionicons name="qr-code" size={18} color="#fff" />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.editUpiBtn}
-                  onPress={() => handleEdit(index)}
+                  onPress={() => handleEdit(item, index)}
                 >
                   <Ionicons name="create-outline" size={18} color="#fff" />
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.deleteUpiBtn}
-                  onPress={() => handleDelete(index)}
+                  onPress={() => handleDelete(item)}
                 >
                   <Ionicons name="trash" size={18} color="#fff" />
                 </TouchableOpacity>
@@ -189,7 +239,6 @@ export default function UPIControl({ navigation }) {
               value={newUpiId}
               onChangeText={setNewUpiId}
             />
-
             <Text style={styles.handleLabel}>Quick Select Handles:</Text>
             <View style={styles.handleContainer}>
               {commonHandles.map((handle, idx) => (
@@ -228,7 +277,6 @@ export default function UPIControl({ navigation }) {
           <View style={[styles.modalContent, { alignItems: 'center' }]}>
             <Text style={styles.modalTitle}>Scan to Pay</Text>
             <Text style={styles.qrUpiText}>{qrUpiId}</Text>
-
             <View style={styles.qrContainer}>
               {qrUpiId ? (
                 <QRCode
@@ -239,7 +287,6 @@ export default function UPIControl({ navigation }) {
                 />
               ) : null}
             </View>
-
             <TouchableOpacity
               style={styles.closeQrBtn}
               onPress={() => setShowQrModal(false)}
