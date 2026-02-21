@@ -20,6 +20,8 @@ const PurchaseRoutes = require("./routes/Purchase");
 const deleteAllRoutes = require('./routes/deleteAll');
 const paymentRoutes = require('./routes/payment');
 const estimateRoutes = require("./routes/Estimate");
+const gstRoutes = require('./routes/gst');
+const upiRoutes = require('./routes/UPI');
 
 const app = express();
 const PORT = 3000;
@@ -51,6 +53,8 @@ app.use("/api/purchases", PurchaseRoutes);
 app.use('/api/deleteAll', deleteAllRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use("/api/estimates", estimateRoutes);
+app.use('/api/gst', gstRoutes);
+app.use('/api/upi', upiRoutes);
 
 // Test route
 app.get('/', (req, res) => {
