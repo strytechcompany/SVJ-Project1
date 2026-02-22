@@ -5,7 +5,11 @@ const Order = require('../models/Order');
 // CREATE NEW ORDER
 router.post('/', async (req, res) => {
   try {
-    const { itemName, itemWeight, customerName, mobileNumber, paymentType, amount, balanceAmount } = req.body;
+    const {
+      itemName, itemWeight, customerName, mobileNumber,
+      paymentType, amount, balanceAmount, deliveryDate,
+      status, assignedDealer, assignedDealerName, image,
+    } = req.body;
 
     if (!itemName || itemWeight == null || !customerName || !mobileNumber) {
       return res.status(400).json({ message: "All fields are required" });
@@ -17,8 +21,13 @@ router.post('/', async (req, res) => {
       customerName,
       mobileNumber,
       paymentType,
-      amount,
-      balanceAmount,
+      amount: amount || 0,
+      balanceAmount: balanceAmount || 0,
+      deliveryDate: deliveryDate || null,
+      status: status || 'Pending',
+      assignedDealer: assignedDealer || null,
+      assignedDealerName: assignedDealerName || null,
+      image: image || null,
     });
 
     const savedOrder = await newOrder.save();
@@ -35,7 +44,6 @@ router.get('/', async (req, res) => {
     const orders = await Order.find().sort({ createdAt: -1 });
     res.status(200).json(orders);
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -47,7 +55,6 @@ router.get('/:id', async (req, res) => {
     if (!order) return res.status(404).json({ message: 'Order not found' });
     res.status(200).json(order);
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -55,19 +62,36 @@ router.get('/:id', async (req, res) => {
 // UPDATE ORDER BY ID
 router.put('/:id', async (req, res) => {
   try {
-    const { itemName, itemWeight, customerName, mobileNumber, paymentType, amount, balanceAmount } = req.body;
+    const existing = await Order.findById(req.params.id);
+    if (!existing) return res.status(404).json({ message: 'Order not found' });
+
+    const {
+      itemName, itemWeight, customerName, mobileNumber,
+      paymentType, amount, balanceAmount, deliveryDate,
+      status, assignedDealer, assignedDealerName, image,
+    } = req.body;
+
+    const updateData = {
+      ...(itemName && { itemName }),
+      ...(itemWeight != null && { itemWeight }),
+      ...(customerName && { customerName }),
+      ...(mobileNumber && { mobileNumber }),
+      ...(paymentType && { paymentType }),
+      ...(amount != null && { amount }),
+      ...(balanceAmount != null && { balanceAmount }),
+      ...(deliveryDate && { deliveryDate }),
+      ...(status && { status }),
+      ...(assignedDealer !== undefined && { assignedDealer }),
+      ...(assignedDealerName !== undefined && { assignedDealerName }),
+      ...(image !== undefined && { image }),
+    };
 
     const updatedOrder = await Order.findByIdAndUpdate(
-      req.params.id,
-      { itemName, itemWeight, customerName, mobileNumber, paymentType, amount, balanceAmount },
-      { new: true, runValidators: true }
+      req.params.id, updateData, { new: true, runValidators: true }
     );
-
-    if (!updatedOrder) return res.status(404).json({ message: 'Order not found' });
 
     res.status(200).json({ message: 'Order updated successfully', order: updatedOrder });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -75,11 +99,12 @@ router.put('/:id', async (req, res) => {
 // DELETE ORDER BY ID
 router.delete('/:id', async (req, res) => {
   try {
-    const deletedOrder = await Order.findByIdAndDelete(req.params.id);
-    if (!deletedOrder) return res.status(404).json({ message: 'Order not found' });
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    await Order.findByIdAndDelete(req.params.id);
     res.status(200).json({ message: 'Order deleted successfully' });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
