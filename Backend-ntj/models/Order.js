@@ -13,7 +13,11 @@ const OrderSchema = new mongoose.Schema({
     },
     amount: { type: Number, default: 0 },
     balanceAmount: { type: Number, default: 0 },
-    deliveryDate: { type: Date }, // optional if needed later
+    deliveryDate: { type: Date },
+    image: { type: String, default: null },
+    status: { type: String, default: "Pending" },
+    assignedDealer: { type: String, default: null },
+    assignedDealerName: { type: String, default: null },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Order', OrderSchema);
