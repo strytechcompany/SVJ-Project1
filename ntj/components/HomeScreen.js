@@ -1,4 +1,3 @@
-// HomeScreen.js
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -10,6 +9,7 @@ import {
   Modal,
   TextInput,
   Animated,
+  Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
@@ -18,7 +18,7 @@ import { FontAwesome } from "@expo/vector-icons";
 import { Ionicons } from "@expo/vector-icons";
 import { Foundation } from "@expo/vector-icons";
 import { AntDesign } from "@expo/vector-icons";
-import { base_url } from "./config"; // ← assuming config is in same folder
+import { base_url } from "./config";
 
 export default function HomeScreen() {
   const navigation = useNavigation();
@@ -32,22 +32,17 @@ export default function HomeScreen() {
 
   const [goldRate, setGoldRate] = useState("11500");
   const [goldDate, setGoldDate] = useState(getCurrentDate());
-
   const [ftRate, setFtRate] = useState("150");
   const [ftDate, setFtDate] = useState(getCurrentDate());
-
   const [modalVisible, setModalVisible] = useState(false);
-
   const [menuOpen, setMenuOpen] = useState(false);
   const slideAnim = useState(new Animated.Value(-250))[0];
-
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("All");
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Fetch data on mount
   useEffect(() => {
     fetchData();
     loadRates();
@@ -55,46 +50,58 @@ export default function HomeScreen() {
 
   const loadRates = async () => {
     try {
-      const savedGoldRate = await AsyncStorage.getItem("goldRate");
-      if (savedGoldRate) {
-        setGoldRate(savedGoldRate);
-      }
-      const savedFtRate = await AsyncStorage.getItem("ftRate");
-      if (savedFtRate) {
-        setFtRate(savedFtRate);
+      console.log("Fetching rates from:", `${base_url}/rates`);
+      const response = await fetch(`${base_url}/rates`);
+      console.log("Rates response status:", response.status);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log("Rates loaded from DB:", data);
+        setGoldRate(data.goldRate);
+        setGoldDate(data.goldDate);
+        setFtRate(data.ftRate);
+        setFtDate(data.ftDate);
+        return;
+      } else {
+        console.log("No rates in DB yet, using defaults/AsyncStorage");
       }
     } catch (error) {
-      console.error("Error loading rates:", error);
+      console.log("DB fetch failed, falling back to AsyncStorage. Error:", error.message);
+    }
+
+    // Fallback to AsyncStorage
+    try {
+      const savedGoldRate = await AsyncStorage.getItem("goldRate");
+      if (savedGoldRate) setGoldRate(savedGoldRate);
+      const savedFtRate = await AsyncStorage.getItem("ftRate");
+      if (savedFtRate) setFtRate(savedFtRate);
+    } catch (error) {
+      console.error("AsyncStorage error:", error);
     }
   };
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Fetch B2B transactions
       const b2bResponse = await fetch(`${base_url}/transactions`);
       const b2bData = b2bResponse.ok ? await b2bResponse.json() : [];
 
-      // Fetch B2C transactions
       const b2cResponse = await fetch(`${base_url}/retail`);
       const b2cData = b2cResponse.ok ? await b2cResponse.json() : [];
 
-      // Map, filter invalid names, and mark types
       const b2bMapped = b2bData
-        .filter(t => t.customerName || t.name)
-        .map(t => ({ ...t, type: 'B2B' }));
+        .filter((t) => t.customerName || t.name)
+        .map((t) => ({ ...t, type: "B2B" }));
       const b2cMapped = b2cData
-        .filter(t => t.customerName || t.name)
-        .map(t => ({ ...t, type: 'B2C' }));
+        .filter((t) => t.customerName || t.name)
+        .map((t) => ({ ...t, type: "B2C" }));
 
-      // Merge and sort by date
       const merged = [...b2bMapped, ...b2cMapped].sort((a, b) => {
         const dateA = new Date(a.createdAt || a.date || 0);
         const dateB = new Date(b.createdAt || b.date || 0);
         return dateB - dateA;
       });
 
-      // Filter to show only the LATEST transaction for each unique customer
       const uniqueLatestTransactions = [];
       const seenCustomers = new Set();
 
@@ -137,27 +144,48 @@ export default function HomeScreen() {
   };
 
   const handleSave = async () => {
+    const payload = { goldRate, goldDate, ftRate, ftDate };
+    console.log("Save pressed. Payload:", payload);
+    console.log("Saving to:", `${base_url}/rates`);
+
     try {
-      await AsyncStorage.setItem("goldRate", goldRate);
-      await AsyncStorage.setItem("ftRate", ftRate);
+      const response = await fetch(`${base_url}/rates`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      console.log("Save response status:", response.status);
+      const result = await response.json();
+      console.log("Save result:", result);
+
+      if (response.ok) {
+        await AsyncStorage.setItem("goldRate", goldRate);
+        await AsyncStorage.setItem("ftRate", ftRate);
+        Alert.alert("Success", "Rates saved successfully!");
+      } else {
+        Alert.alert("Error", `Failed to save: ${result.message}`);
+      }
     } catch (error) {
-      console.error("Error saving rates:", error);
+      console.error("Save error:", error.message);
+      Alert.alert("Error", `Network error: ${error.message}`);
     }
+
     setModalVisible(false);
   };
 
   const filteredTransactions = transactions.filter((txn) => {
     const name = txn.customerName || txn.name || "";
-    const matchesSearch = name
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase());
-    const matchesFilter = filterType === "All" || txn.type === filterType || txn.customerType === filterType;
+    const matchesSearch = name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesFilter =
+      filterType === "All" ||
+      txn.type === filterType ||
+      txn.customerType === filterType;
     return matchesSearch && matchesFilter;
   });
 
   return (
     <View style={{ flex: 1, backgroundColor: "#fff" }}>
-      {/* Background overlay */}
       {menuOpen && (
         <TouchableOpacity style={styles.overlay} onPress={closeMenu} />
       )}
@@ -179,7 +207,7 @@ export default function HomeScreen() {
           onPress={() => handleMenuNavigation("CustomerDataList")}
         >
           <Foundation name="database" color="#fff" size={24} />
-          <Text style={styles.menuText}>Customer Data List </Text>
+          <Text style={styles.menuText}>Customer Data List</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -203,9 +231,8 @@ export default function HomeScreen() {
           onPress={() => handleMenuNavigation("StockMaster")}
         >
           <Icon name="alert-circle-outline" size={25} color="#fff" />
-          <Text style={styles.menuText}>Stock Master </Text>
+          <Text style={styles.menuText}>Stock Master</Text>
         </TouchableOpacity>
-
 
         <TouchableOpacity
           style={styles.menuItem}
@@ -214,7 +241,6 @@ export default function HomeScreen() {
           <Icon name="account-group-outline" size={25} color="#fff" />
           <Text style={styles.menuText}>Purchase</Text>
         </TouchableOpacity>
-
 
         <TouchableOpacity
           style={styles.menuItem}
@@ -263,7 +289,6 @@ export default function HomeScreen() {
           <Icon name="account-group-outline" size={25} color="#fff" />
           <Text style={styles.menuText}>Settings</Text>
         </TouchableOpacity>
-
       </Animated.View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -273,10 +298,22 @@ export default function HomeScreen() {
             <Icon name="menu" size={30} color="#fff" style={{ top: 25 }} />
           </TouchableOpacity>
 
-          <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <View
+            style={{
+              flex: 1,
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
             <Text style={styles.headerText}>Hey! Super Admin</Text>
             <TouchableOpacity onPress={() => navigation.navigate("#")}>
-              <Icon name="logout" size={25} color="red" style={{ top: 25 }} />
+              <Icon
+                name="logout"
+                size={25}
+                color="red"
+                style={{ top: 25 }}
+              />
             </TouchableOpacity>
           </View>
         </View>
@@ -310,16 +347,20 @@ export default function HomeScreen() {
         <View style={styles.quickAccessRow}>
           <TouchableOpacity
             style={styles.quickTile}
-            onPress={() => navigation.navigate("B2BCalculationPage", { ftRate })}
+            onPress={() =>
+              navigation.navigate("B2BCalculationPage", { ftRate })
+            }
           >
             <Text style={styles.quickTileText}>B2B Transaction</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.quickTile}
-            onPress={() => navigation.navigate("B2CCalculationPage", { goldRate })}
+            onPress={() =>
+              navigation.navigate("B2CCalculationPage", { goldRate })
+            }
           >
-            <Text style={styles.quickTileText}> B2C Transaction</Text>
+            <Text style={styles.quickTileText}>B2C Transaction</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -329,6 +370,7 @@ export default function HomeScreen() {
             <Text style={styles.quickTileText}>Payments</Text>
           </TouchableOpacity>
         </View>
+
         <View style={styles.quickAccessRow}>
           <TouchableOpacity
             style={styles.quickTile}
@@ -343,33 +385,34 @@ export default function HomeScreen() {
           >
             <Text style={styles.quickTileText}>Estimate</Text>
           </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.quickTile}
             onPress={() => navigation.navigate("CustomerDataList")}
           >
-            <Text style={styles.quickTileText}>Customer </Text>
+            <Text style={styles.quickTileText}>Customer</Text>
             <Text style={styles.quickTileText}>Data List</Text>
           </TouchableOpacity>
         </View>
-        <View style={styles.quickAccessRow}>
-
-        </View>
 
         <Text style={styles.sectionTitle}>Recent Transactions</Text>
-        {/* Search Bar */}
-
 
         <FlatList
           data={filteredTransactions.slice(0, 10)}
-          keyExtractor={(item) => item._id || item.id || Math.random().toString()}
+          keyExtractor={(item) =>
+            item._id || item.id || Math.random().toString()
+          }
           scrollEnabled={false}
           ListEmptyComponent={
-            <Text style={{ textAlign: 'center', marginTop: 20, color: '#999' }}>
+            <Text
+              style={{ textAlign: "center", marginTop: 20, color: "#999" }}
+            >
               {loading ? "Loading transactions..." : "No transactions found"}
             </Text>
           }
           renderItem={({ item }) => {
-            const isB2C = item.type === 'B2C' || item.customerType === 'B2C';
+            const isB2C =
+              item.type === "B2C" || item.customerType === "B2C";
             const name = item.customerName || item.name;
 
             let balanceLabel = "Old Balance";
@@ -378,19 +421,17 @@ export default function HomeScreen() {
             let unit = isB2C ? "₹" : "g";
 
             if (isB2C) {
-              // For B2C: newBalance reflects the state after transaction
               const val = parseFloat(item.newBalance || item.balance || 0);
               if (val < 0) {
                 balanceLabel = "Advance Balance";
                 balanceValue = Math.abs(val);
-                balanceColor = "#2E7D32"; // Green for Advance
+                balanceColor = "#2E7D32";
               } else {
                 balanceLabel = "Old Balance";
                 balanceValue = val;
-                balanceColor = "#D32F2F"; // Red for Due
+                balanceColor = "#D32F2F";
               }
             } else {
-              // B2B Logic: check balance vs advBal
               if (item.balance > 0) {
                 balanceLabel = "Old Balance";
                 balanceValue = item.balance;
@@ -408,14 +449,34 @@ export default function HomeScreen() {
               <View style={styles.transactionCard}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.txnName}>{name}</Text>
-                  <Text style={[styles.txnWeight, { color: balanceColor, fontWeight: '700', marginTop: 5 }]}>
-                    {balanceLabel}: {isB2C ? unit : ""}{Number(balanceValue).toFixed(isB2C ? 2 : 3)}{!isB2C ? unit : ""}
+                  <Text
+                    style={[
+                      styles.txnWeight,
+                      { color: balanceColor, fontWeight: "700", marginTop: 5 },
+                    ]}
+                  >
+                    {balanceLabel}: {isB2C ? unit : ""}
+                    {Number(balanceValue).toFixed(isB2C ? 2 : 3)}
+                    {!isB2C ? unit : ""}
                   </Text>
                 </View>
 
-                <View style={[styles.customerTag, { backgroundColor: isB2C ? '#E3F2FD' : '#E2FBE8', marginLeft: 10 }]}>
-                  <Text style={[styles.customerText, { color: isB2C ? '#1565C0' : '#1B4D1B' }]}>
-                    {isB2C ? 'B2C' : 'B2B'}
+                <View
+                  style={[
+                    styles.customerTag,
+                    {
+                      backgroundColor: isB2C ? "#E3F2FD" : "#E2FBE8",
+                      marginLeft: 10,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.customerText,
+                      { color: isB2C ? "#1565C0" : "#1B4D1B" },
+                    ]}
+                  >
+                    {isB2C ? "B2C" : "B2B"}
                   </Text>
                 </View>
               </View>
@@ -466,30 +527,38 @@ export default function HomeScreen() {
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Edit Rates & Dates</Text>
 
+            <Text style={{ color: "#666", marginBottom: 4 }}>Gold Rate</Text>
             <TextInput
               style={styles.input}
               value={goldRate}
               onChangeText={setGoldRate}
               keyboardType="numeric"
+              placeholder="Enter Gold Rate"
             />
 
+            <Text style={{ color: "#666", marginBottom: 4 }}>Gold Date</Text>
             <TextInput
               style={styles.input}
               value={goldDate}
               onChangeText={setGoldDate}
+              placeholder="DD-MM-YYYY"
             />
 
+            <Text style={{ color: "#666", marginBottom: 4 }}>FT Rate</Text>
             <TextInput
               style={styles.input}
               value={ftRate}
               onChangeText={setFtRate}
               keyboardType="numeric"
+              placeholder="Enter FT Rate"
             />
 
+            <Text style={{ color: "#666", marginBottom: 4 }}>FT Date</Text>
             <TextInput
               style={styles.input}
               value={ftDate}
               onChangeText={setFtDate}
+              placeholder="DD-MM-YYYY"
             />
 
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
@@ -509,7 +578,6 @@ export default function HomeScreen() {
   );
 }
 
-// --- STYLES (unchanged) ---
 const styles = StyleSheet.create({
   overlay: {
     position: "absolute",
@@ -518,7 +586,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.4)",
     zIndex: 1,
   },
-
   sideMenu: {
     position: "absolute",
     width: 250,
@@ -544,7 +611,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 15,
   },
-
   header: {
     backgroundColor: "#1B4D1B",
     paddingVertical: 45,
@@ -563,7 +629,6 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     top: 25,
   },
-
   goldCard: {
     backgroundColor: "#1B4D1B",
     margin: 20,
@@ -589,7 +654,6 @@ const styles = StyleSheet.create({
   liveDate: {
     color: "#ffffff",
   },
-
   editBtn: {
     backgroundColor: "#FFD700",
     marginHorizontal: 20,
@@ -601,7 +665,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 16,
   },
-
   sectionTitle: {
     marginLeft: 20,
     marginTop: 20,
@@ -610,13 +673,11 @@ const styles = StyleSheet.create({
     color: "#1B4D1B",
     bottom: 5,
   },
-
   quickAccessRow: {
     flexDirection: "row",
     justifyContent: "space-evenly",
     marginVertical: 15,
   },
-
   quickTile: {
     backgroundColor: "#F4F4F4",
     width: 110,
@@ -625,14 +686,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   quickTileText: {
     textAlign: "center",
     fontSize: 14,
     fontWeight: "bold",
     color: "#333",
   },
-
   transactionCard: {
     backgroundColor: "#fff",
     marginHorizontal: 20,
@@ -643,17 +702,14 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     elevation: 3,
   },
-
   txnName: {
     fontSize: 16,
     fontWeight: "bold",
   },
-
   txnWeight: {
     color: "#444",
     marginTop: 3,
   },
-
   customerTag: {
     backgroundColor: "#E2FBE8",
     paddingHorizontal: 12,
@@ -661,12 +717,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignSelf: "center",
   },
-
   customerText: {
     color: "#1B4D1B",
     fontWeight: "bold",
   },
-
   fab: {
     position: "absolute",
     bottom: 70,
@@ -679,7 +733,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     elevation: 6,
   },
-
   bottomNav: {
     height: 100,
     backgroundColor: "#fff",
@@ -690,7 +743,6 @@ const styles = StyleSheet.create({
     borderColor: "#ddd",
     paddingBottom: 30,
   },
-
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -709,7 +761,6 @@ const styles = StyleSheet.create({
     color: "#1B4D1B",
     marginBottom: 15,
   },
-
   input: {
     borderWidth: 1,
     borderColor: "#ccc",
@@ -717,7 +768,6 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 12,
   },
-
   saveBtn: {
     backgroundColor: "#1B4D1B",
     paddingVertical: 12,
@@ -739,7 +789,6 @@ const styles = StyleSheet.create({
     color: "#000",
     fontWeight: "bold",
   },
-
   searchContainer: {
     flexDirection: "row",
     marginHorizontal: 20,
