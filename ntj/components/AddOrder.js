@@ -17,6 +17,18 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { base_url } from "./config";
 
+// Convert local image URI to base64
+const uriToBase64 = async (uri) => {
+  const response = await fetch(uri);
+  const blob = await response.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
 export default function AddOrder({ navigation }) {
   const [itemName, setItemName] = useState("");
   const [weight, setWeight] = useState("");
@@ -27,15 +39,15 @@ export default function AddOrder({ navigation }) {
   const [balanceAmount, setBalanceAmount] = useState("");
   const [selectedImage, setSelectedImage] = useState(null);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [loading, setLoading] = useState(false);
 
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 1,
+      quality: 0.5,
     });
-
     if (!result.canceled) {
       setSelectedImage(result.assets[0].uri);
     }
@@ -43,18 +55,15 @@ export default function AddOrder({ navigation }) {
 
   const takePhoto = async () => {
     const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-
     if (permissionResult.granted === false) {
       Alert.alert("Permission to access camera is required!");
       return;
     }
-
     let result = await ImagePicker.launchCameraAsync({
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 1,
+      quality: 0.5,
     });
-
     if (!result.canceled) {
       setSelectedImage(result.assets[0].uri);
     }
@@ -68,23 +77,28 @@ export default function AddOrder({ navigation }) {
       return;
     }
 
-    const newOrder = {
-      itemName,
-      itemWeight: parseFloat(weight),
-      customerName,
-      mobileNumber: mobile,
-      paymentType,
-      amount: parseFloat(amount) || 0,
-      balanceAmount: parseFloat(balanceAmount) || 0,
-      image: selectedImage,
-      deliveryDate: date, // Using deliveryDate to match backend/Order.js
-    };
-
     try {
+      setLoading(true);
+
+      let base64Image = null;
+      if (selectedImage) {
+        base64Image = await uriToBase64(selectedImage);
+      }
+
       const response = await fetch(`${base_url}/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newOrder),
+        body: JSON.stringify({
+          itemName,
+          itemWeight: parseFloat(weight),
+          customerName,
+          mobileNumber: mobile,
+          paymentType,
+          amount: parseFloat(amount) || 0,
+          balanceAmount: parseFloat(balanceAmount) || 0,
+          deliveryDate: date,
+          image: base64Image,
+        }),
       });
 
       const data = await response.json();
@@ -98,6 +112,8 @@ export default function AddOrder({ navigation }) {
     } catch (error) {
       console.error(error);
       Alert.alert("Error", "Server not reachable");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -124,7 +140,6 @@ export default function AddOrder({ navigation }) {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-
             <Text style={styles.label}>Image</Text>
             <View style={{ flexDirection: 'row', gap: 15, marginTop: 10 }}>
               <TouchableOpacity style={styles.imageButton} onPress={pickImage}>
@@ -205,26 +220,22 @@ export default function AddOrder({ navigation }) {
               {paymentOptions.map((option) => (
                 <TouchableOpacity
                   key={option}
-                  style={[
-                    styles.payBtn,
-                    paymentType === option && styles.payBtnActive,
-                  ]}
+                  style={[styles.payBtn, paymentType === option && styles.payBtnActive]}
                   onPress={() => setPaymentType(option)}
                 >
-                  <Text
-                    style={[
-                      styles.payText,
-                      paymentType === option && styles.payTextActive,
-                    ]}
-                  >
+                  <Text style={[styles.payText, paymentType === option && styles.payTextActive]}>
                     {option}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <TouchableOpacity style={styles.saveButton} onPress={saveOrder}>
-              <Text style={styles.saveText}>Save Order</Text>
+            <TouchableOpacity
+              style={[styles.saveButton, loading && { opacity: 0.6 }]}
+              onPress={saveOrder}
+              disabled={loading}
+            >
+              <Text style={styles.saveText}>{loading ? "Saving..." : "Save Order"}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -234,18 +245,18 @@ export default function AddOrder({ navigation }) {
                   Alert.alert("Missing Fields", "Please fill all fields before printing.");
                   return;
                 }
-                const orderNo = `A202601${Math.floor(1000 + Math.random() * 9000)}`; // Temporary order no for preview
+                const orderNo = `A202601${Math.floor(1000 + Math.random() * 9000)}`;
                 navigation.navigate("BillPreview", {
                   order: {
-                    orderNo: orderNo,
+                    orderNo,
                     customer: customerName,
                     phone: mobile,
                     type: itemName,
-                    weight: weight,
+                    weight,
                     payment: paymentType,
-                    date: date,
+                    date,
                     balance: balanceAmount || "0",
-                    image: selectedImage
+                    image: selectedImage,
                   }
                 });
               }}
@@ -254,7 +265,6 @@ export default function AddOrder({ navigation }) {
             </TouchableOpacity>
 
           </ScrollView>
-
         </View>
       </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
@@ -307,16 +317,9 @@ const styles = StyleSheet.create({
     marginRight: 10,
     marginBottom: 10,
   },
-  payBtnActive: {
-    backgroundColor: "#1B4D1B",
-  },
-  payText: {
-    color: "#1B4D1B",
-    fontWeight: "700",
-  },
-  payTextActive: {
-    color: "#fff",
-  },
+  payBtnActive: { backgroundColor: "#1B4D1B" },
+  payText: { color: "#1B4D1B", fontWeight: "700" },
+  payTextActive: { color: "#fff" },
   saveButton: {
     backgroundColor: "#1B4D1B",
     padding: 16,
@@ -336,7 +339,6 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 0,
   },
   selectedImage: {
     width: 200,
