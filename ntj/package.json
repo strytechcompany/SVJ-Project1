@@ -7,7 +7,11 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:testing": "eas build --platform android --profile testing",
+    "build:release": "eas build --platform android --profile release",
+    "build:production": "eas build --platform android --profile production",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -40,6 +44,8 @@
   },
   "private": true,
   "devDependencies": {
-    "@react-native-community/cli": "^14.0.1"
+    "@react-native-community/cli": "^14.0.1",
+    "eas-cli": "^16.0.0",
+    "patch-package": "^8.0.1"
   }
 }

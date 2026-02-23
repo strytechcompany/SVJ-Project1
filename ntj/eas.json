@@ -1,0 +1,53 @@
+{
+  "cli": {
+    "version": ">= 16.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "testing": {
+      "distribution": "internal",
+      "channel": "testing",
+      "env": {
+        "APP_ENV": "testing"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "release": {
+      "distribution": "internal",
+      "channel": "release",
+      "env": {
+        "APP_ENV": "release"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "channel": "production",
+      "env": {
+        "APP_ENV": "production"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-service-account.json",
+        "track": "internal"
+      }
+    }
+  }
+}
+
