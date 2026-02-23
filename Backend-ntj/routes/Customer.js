@@ -25,7 +25,7 @@ router.get('/:id', async (req, res) => {
 
 // Create new customer
 router.post('/', async (req, res) => {
-  const { customerName, phoneNumber, shopName, address, oldBalance, advanceBalance } = req.body;
+  const { customerName, phoneNumber, shopName, address, oldBalance, advanceBalance, gstin} = req.body;
 
   try {
     // Check duplicate
@@ -39,6 +39,7 @@ router.post('/', async (req, res) => {
       address,
       oldBalance: oldBalance || 0,
       advanceBalance: advanceBalance || 0,
+      gstin: gstin || '',
     });
 
     const newCustomer = await customer.save();
@@ -62,6 +63,7 @@ router.put('/:id', async (req, res) => {
     if (address) customer.address = address;
     if (oldBalance !== undefined) customer.oldBalance = oldBalance;
     if (advanceBalance !== undefined) customer.advanceBalance = advanceBalance;
+    if (gstin !== undefined) customer.gstin = gstin;
 
     const updatedCustomer = await customer.save();
     res.json(updatedCustomer);
