@@ -14,6 +14,8 @@ import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { Feather } from "@expo/vector-icons";
 import { useRoute, useFocusEffect } from "@react-navigation/native";
 import { base_url } from "./config";
+import * as Print from "expo-print";
+import * as FileSystem from "expo-file-system";
 
 /**
  * CreateTransaction (Full)
@@ -1068,6 +1070,7 @@ export default function CreateTransaction({ navigation }) {
           date,
           oldBalance: fmt(oldBalance),
           advanceBalance: fmt(advBalance),
+          transactionId: savedTransaction._id, 
         },
 
         issueItems: issueItems.map((item) => ({
