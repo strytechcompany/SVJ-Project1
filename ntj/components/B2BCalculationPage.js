@@ -28,29 +28,79 @@ import { base_url } from "./config";
 export default function CreateTransaction({ navigation }) {
   const route = useRoute();
 
-  // Basic inputs
+  // ── ALL useState FIRST ──────────────────────────────────────
   const [weight, setWeight] = useState("");
-  const [stone, setStone] = useState("0"); // Updated from "" to "0"
+  const [stone, setStone] = useState("0");
   const [touch, setTouch] = useState("");
   const [receiptWeight, setReceiptWeight] = useState("");
   const [receiptStone, setReceiptStone] = useState("0");
   const [receiptTouch, setReceiptTouch] = useState("");
   const [date, setDate] = useState(new Date().toLocaleDateString("en-GB"));
-
   const [itemsStock, setItemsStock] = useState({});
 
-  // Save stock to AsyncStorage whenever itemsStock changes
-  useEffect(() => {
-    saveStock();
-  }, [itemsStock]);
+  const [issueItems, setIssueItems] = useState([]);
+  const [receiptItems, setReceiptItems] = useState([]);
+  const [cashTable, setCashTable] = useState([]);
 
-  // Search
+  const [rupees, setRupees] = useState("");
+  const [goldRate, setGoldRate] = useState("");
+  const [cashPureInput, setCashPureInput] = useState("0.000");
+
+  const [gstEnabled, setGstEnabled] = useState(false);
+  const [sgst, setSgst] = useState("");
+  const [cgst, setCgst] = useState("");
+  const [igst, setIgst] = useState("");
+  const [gstPercentage, setGstPercentage] = useState("");
+  const [gstAmount, setGstAmount] = useState("");
+  const [showGstInBill, setShowGstInBill] = useState(true);
+  const [isSgstEnabled, setIsSgstEnabled] = useState(false);
+  const [isCgstEnabled, setIsCgstEnabled] = useState(false);
+  const [isIgstEnabled, setIsIgstEnabled] = useState(false);
+  const [savedGstList, setSavedGstList] = useState([]);
+  const [showSavedGstModal, setShowSavedGstModal] = useState(false);
+
+  const [itemsList, setItemsList] = useState([]);
+  const [loadingItems, setLoadingItems] = useState(true);
+  const [selectedIssueItem, setSelectedIssueItem] = useState(null);
+  const [issueItemDropdownOpen, setIssueItemDropdownOpen] = useState(false);
+  const [customIssueItem, setCustomIssueItem] = useState("");
+  const [selectedReceiptItem, setSelectedReceiptItem] = useState(null);
+  const [receiptItemDropdownOpen, setReceiptItemDropdownOpen] = useState(false);
+  const [customReceiptItem, setCustomReceiptItem] = useState("");
+  const [issueItemSearch, setIssueItemSearch] = useState("");
+  const [receiptItemSearch, setReceiptItemSearch] = useState("");
+  const [issueDetails, setIssueDetails] = useState("");
+  const [previousReceiptWeight, setPreviousReceiptWeight] = useState(0);
+
   const [search, setSearch] = useState("");
   const [cartSearch, setCartSearch] = useState("");
   const [filteredCustomers, setFilteredCustomers] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [recentNames, setRecentNames] = useState([]);
 
+  const [customers, setCustomers] = useState([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(true);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [phone, setPhone] = useState("");
+
+  // ── TOTALS (after useState, before useEffect) ───────────────
+  const totalIssuePure = issueItems.reduce((acc, it) => acc + Number(it.purity || 0), 0);
+  const totalIssueWeight = issueItems.reduce((acc, it) => acc + Number(it.weight || 0), 0);
+  const totalIssueStone = issueItems.reduce((acc, it) => acc + Number(it.stone || 0), 0);
+  const totalIssueTouch = issueItems.reduce((acc, it) => acc + Number(it.touch || 0), 0);
+  const totalReceiptPure = receiptItems.reduce((acc, it) => acc + Number(it.purity || 0), 0);
+  const totalReceiptWeight = receiptItems.reduce((acc, it) => acc + Number(it.weight || 0), 0);
+  const totalReceiptStone = receiptItems.reduce((acc, it) => acc + Number(it.stone || 0), 0);
+  const totalReceiptTouch = receiptItems.reduce((acc, it) => acc + Number(it.touch || 0), 0);
+  const totalCashPure = cashTable.reduce((acc, it) => acc + Number(it.pure || 0), 0);
+
+  // ── useEffects AFTER totals ──────────────────────────────────
+  useEffect(() => {
+    saveStock();
+  }, [itemsStock]);
+  
+
+ 
   // Handle customer name change for searchable dropdown
   const handleCustomerNameChange = (text) => {
     setSearch(text);
@@ -75,33 +125,7 @@ export default function CreateTransaction({ navigation }) {
     setShowDropdown(false);
   };
 
-  // Issue / Receipt state arrays
-  const [issueItems, setIssueItems] = useState([]);
-  const [receiptItems, setReceiptItems] = useState([]);
-
-  // Combined product table will be derived from these arrays
-  // Cash table
-  const [cashTable, setCashTable] = useState([]);
-  const [rupees, setRupees] = useState("");
-  const [goldRate, setGoldRate] = useState("");
-  const [cashPureInput, setCashPureInput] = useState("0.000");
-
-  // GST states
-  const [gstEnabled, setGstEnabled] = useState(false);
-  const [sgst, setSgst] = useState("");
-  const [cgst, setCgst] = useState("");
-  const [igst, setIgst] = useState("");
-  const [gstPercentage, setGstPercentage] = useState("");
-  const [gstAmount, setGstAmount] = useState("");
-  const [showGstInBill, setShowGstInBill] = useState(true);
-
-  // Individual GST component toggles
-  const [isSgstEnabled, setIsSgstEnabled] = useState(false);
-  const [isCgstEnabled, setIsCgstEnabled] = useState(false);
-  const [isIgstEnabled, setIsIgstEnabled] = useState(false);
-
-  const [savedGstList, setSavedGstList] = useState([]);
-  const [showSavedGstModal, setShowSavedGstModal] = useState(false);
+ 
 
   useEffect(() => {
     const loadSavedGstList = async () => {
@@ -144,24 +168,9 @@ export default function CreateTransaction({ navigation }) {
     }
   }, [gstEnabled, gstPercentage, goldRate, totalIssuePure]);
 
-  const [itemsList, setItemsList] = useState([]);
-  const [loadingItems, setLoadingItems] = useState(true);
-  const [selectedIssueItem, setSelectedIssueItem] = useState(null);
-  const [issueItemDropdownOpen, setIssueItemDropdownOpen] = useState(false);
-  const [customIssueItem, setCustomIssueItem] = useState("");
-  const [selectedReceiptItem, setSelectedReceiptItem] = useState(null);
-  const [receiptItemDropdownOpen, setReceiptItemDropdownOpen] = useState(false);
-  const [customReceiptItem, setCustomReceiptItem] = useState("");
+  
 
-  // Search states for dropdowns
-  const [issueItemSearch, setIssueItemSearch] = useState("");
-  const [receiptItemSearch, setReceiptItemSearch] = useState("");
-
-  // Manual details
-  const [issueDetails, setIssueDetails] = useState("");
-
-  // For real-time stock update on typing
-  const [previousReceiptWeight, setPreviousReceiptWeight] = useState(0);
+  
 
   // Handler for stock update on receipt weight blur
   const updateReceiptStock = async (newWeight) => {
@@ -212,12 +221,6 @@ export default function CreateTransaction({ navigation }) {
 
     setPreviousReceiptWeight(newWeight);
   };
-
-  const [customers, setCustomers] = useState([]);
-  const [loadingCustomers, setLoadingCustomers] = useState(true);
-
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [phone, setPhone] = useState("");
 
   const filteredCartCustomers = customers.filter(
     (c) =>
@@ -861,48 +864,7 @@ export default function CreateTransaction({ navigation }) {
     setCashTable((prev) => prev.filter((p) => p.id !== id));
   };
 
-  // -----------------------
-  // Totals & Summary
-  // -----------------------
-  const totalIssuePure = issueItems.reduce(
-    (acc, it) => acc + Number(it.purity || 0),
-    0
-  );
-  const totalIssueWeight = issueItems.reduce(
-    (acc, it) => acc + Number(it.weight || 0),
-    0
-  );
-  const totalIssueStone = issueItems.reduce(
-    (acc, it) => acc + Number(it.stone || 0),
-    0
-  );
-  const totalIssueTouch = issueItems.reduce(
-    (acc, it) => acc + Number(it.touch || 0),
-    0
-  );
-
-  const totalReceiptPure = receiptItems.reduce(
-    (acc, it) => acc + Number(it.purity || 0),
-    0
-  );
-  const totalReceiptWeight = receiptItems.reduce(
-    (acc, it) => acc + Number(it.weight || 0),
-    0
-  );
-  const totalReceiptStone = receiptItems.reduce(
-    (acc, it) => acc + Number(it.stone || 0),
-    0
-  );
-  const totalReceiptTouch = receiptItems.reduce(
-    (acc, it) => acc + Number(it.touch || 0),
-    0
-  );
-
-  const totalCashPure = cashTable.reduce(
-    (acc, it) => acc + Number(it.pure || 0),
-    0
-  );
-
+  
   let oldBalance = selectedCustomer
     ? Number(parseNum(selectedCustomer.ob))
     : 0;
@@ -1101,6 +1063,8 @@ export default function CreateTransaction({ navigation }) {
           name: selectedCustomer.name,
           phone: selectedCustomer.phone || "",
           type: "B2B",
+          address: selectedCustomer.address || "",
+          gstin: selectedCustomer.gst || "", 
           date,
           oldBalance: fmt(oldBalance),
           advanceBalance: fmt(advBalance),
@@ -1154,6 +1118,7 @@ export default function CreateTransaction({ navigation }) {
     }
   };
 
+  
   // -----------------------
   // UI rendering
   // -----------------------
