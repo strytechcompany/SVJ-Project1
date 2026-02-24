@@ -30,10 +30,7 @@ const Login = require('./models/Login'); // <-- ADD THIS
 const app = express();
 const PORT = 3000;
 
-// Connect to MongoDB
-connectDB();
-
-// ✅ AUTO SEED DEFAULT LOGIN USER
+// ✅ AUTO SEED DEFAULT LOGIN USER (run only after DB is connected)
 const seedDefaultUser = async () => {
   try {
     const existing = await Login.findOne({ email: 'AkshayaGold@gmail.com' });
@@ -87,7 +84,12 @@ app.get('/', (req, res) => {
   res.send('Hello from Node.js backend!');
 });
 
-app.listen(PORT, async () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  await seedDefaultUser(); // ✅ Auto-seed runs every time server starts
-});
+// Start only after MongoDB is connected (avoids "buffering timed out" on seed)
+const start = async () => {
+  await connectDB();
+  app.listen(PORT, async () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    await seedDefaultUser();
+  });
+};
+start();
