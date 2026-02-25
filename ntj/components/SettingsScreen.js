@@ -72,6 +72,13 @@ export default function SettingsScreen({ navigation }) {
           <Text style={styles.itemText}>App Version</Text>
         </TouchableOpacity>
 
+        <Text style={styles.sectionTitle}>Logout</Text>
+
+        <TouchableOpacity style={styles.item}>
+          <Icon name="logout" size={24} color="#1B4D1B" />
+          <Text style={styles.itemText}>Logout</Text>
+        </TouchableOpacity>
+
         {/* Danger Zone */}
         <Text style={[styles.sectionTitle, { color: "red" }]}>Danger Zone</Text>
 
