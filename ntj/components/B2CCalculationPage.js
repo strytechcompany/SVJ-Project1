@@ -193,43 +193,63 @@ export default function CreateTransaction({ navigation, route }) {
       if (estimate) {
         console.log("📥 Received estimate:", estimate);
 
-        // Calculate values
-        const wt = parseFloat(estimate.weight) || 0;
-        const touch = parseFloat(estimate.wastagePercent) || 0;
-        const rate = parseFloat(estimate.goldRate) || 0;
-        const wastage = (wt * touch) / 100;
-        const total = (wt + wastage) * rate;
-        const gst = total * 0.03;
-        const final = total + gst;
+        if (estimate.items && Array.isArray(estimate.items) && estimate.items.length > 0) {
+          // Handle multiple items
+          const mappedItems = estimate.items.map(item => ({
+            itemName: item.itemName,
+            displayItemName: item.itemName,
+            weight: parseFloat(item.weight) || 0,
+            touch: parseFloat(item.wastagePercent) || 0,
+            wastage: ((parseFloat(item.weight) * parseFloat(item.wastagePercent)) / 100).toFixed(3),
+            rate: item.goldRate,
+            total: item.totalAmount,
+            gst: item.gst || 0,
+            final: item.totalAmount,
+            modifiedWeight: 0,
+            gstEnabled: item.enableGST || false,
+          }));
+          setItems(mappedItems);
 
-        // Create item object
-        const estimateItem = {
-          itemName: estimate.itemName,
-          weight: wt,
-          touch: touch,
-          wastage: wastage.toFixed(3),
-          rate: estimate.goldRate,
-          total: total,
-          gst: gst,
-          final: final,
-          modifiedWeight: 0, // No stock deduction for estimate
-          gstEnabled: true, // Assuming GST enabled for estimate
-        };
+          // Populate inputs with the first item's data
+          const first = estimate.items[0];
+          setItemName(first.itemName);
+          setWeight(first.weight.toString());
+          setTouch(first.wastagePercent.toString());
+          setWastage(((first.weight * first.wastagePercent) / 100).toFixed(3));
+          setRate(first.goldRate.toString());
+        } else {
+          // Handle single item
+          const wt = parseFloat(estimate.weight) || 0;
+          const touch = parseFloat(estimate.wastagePercent) || 0;
+          const rate = parseFloat(estimate.goldRate) || 0;
+          const wastage = (wt * touch) / 100;
+          const total = (wt + wastage) * rate;
+          const gst = total * 0.03;
+          const final = total + gst;
 
-        // Add to items array
-        setItems([estimateItem]);
+          const estimateItem = {
+            itemName: estimate.itemName,
+            weight: wt,
+            touch: touch,
+            wastage: wastage.toFixed(3),
+            rate: estimate.goldRate,
+            total: total,
+            gst: gst,
+            final: final,
+            modifiedWeight: 0,
+            gstEnabled: true,
+          };
 
-        // Populate input fields
-        setItemName(estimate.itemName);
-        setWeight(wt.toString());
-        setTouch(touch.toString());
-        setWastage(wastage.toFixed(3));
-        setRate(estimate.goldRate.toString());
+          setItems([estimateItem]);
+          setItemName(estimate.itemName);
+          setWeight(wt.toString());
+          setTouch(touch.toString());
+          setWastage(wastage.toFixed(3));
+          setRate(estimate.goldRate.toString());
+        }
 
-        // Show items section
         setShowItems(true);
-
-        console.log("✅ Estimate item added to table:", estimateItem);
+        console.log("✅ Estimate items handled");
       }
     });
     return unsubscribe;
@@ -1099,12 +1119,34 @@ export default function CreateTransaction({ navigation, route }) {
     console.log("FINAL REPORT 👉", reportData);
     console.log("FINAL TXNS 👉", transactionData);
 
-    // Update customer's advance balance
+    // Update customer's balance (OB/AB)
     try {
-      const customer = b2cCustomers.find(c => c.customerName === customerName && c.phone === phone);
+      const customer = b2cCustomers.find(c => (c.customerName === customerName || c.name === customerName) && (c.phone === phone || c.customerNumber === phone));
       if (customer) {
-        const totalAmount = parseFloat(reportData.cash);
-        const newAdvanceBalance = Math.max(0, customer.advanceBalance - totalAmount);
+        const ob = parseFloat(customer.oldBalance || 0);
+        const ab = parseFloat(customer.advanceBalance || 0);
+        const currentNet = ob - ab;
+        const issueWeight = parseFloat(reportData.totalReceiptPure); // Issue pure weight
+
+        // Receipt pure weight from Old Gold items
+        const receiptPure = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
+
+        // Convert cash amount to gold equivalent using gold rate
+        const goldRateValue = parseFloat(passedGoldRate || 0) || 1;
+        const cashPure = parseFloat(reportData.cash) / goldRateValue;
+
+        const newNet = currentNet + issueWeight - receiptPure - cashPure;
+
+        let newCustomerOB = 0;
+        let newCustomerAB = 0;
+
+        if (newNet >= 0) {
+          newCustomerOB = newNet;
+          newCustomerAB = 0;
+        } else {
+          newCustomerOB = 0;
+          newCustomerAB = Math.abs(newNet);
+        }
 
         const updateResponse = await fetch(`${base_url}/customersB2C/${customer.id}`, {
           method: "PUT",
@@ -1112,18 +1154,19 @@ export default function CreateTransaction({ navigation, route }) {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            advanceBalance: newAdvanceBalance.toFixed(3),
+            oldBalance: newCustomerOB.toFixed(3),
+            advanceBalance: newCustomerAB.toFixed(3),
           }),
         });
 
         if (!updateResponse.ok) {
-          console.error("Failed to update customer advance balance");
+          console.error("Failed to update customer balance");
         } else {
-          console.log("✅ Customer advance balance updated successfully");
+          console.log("✅ Customer balance updated successfully:", { newCustomerOB, newCustomerAB });
         }
       }
     } catch (error) {
-      console.error("Error updating customer advance balance:", error);
+      console.error("Error updating customer balance:", error);
     }
 
     // Save transaction to unified transactions endpoint
@@ -1200,6 +1243,24 @@ export default function CreateTransaction({ navigation, route }) {
         igst: isIgstEnabled ? igst : "0",
         showInBill: true,
       } : null,
+      summary: (() => {
+        const customer = b2cCustomers.find(c => c.customerName === customerName && c.phone === phone);
+        const ob = parseFloat(customer?.oldBalance || 0);
+        const ab = parseFloat(customer?.advanceBalance || 0);
+        const issue = parseFloat(reportData.totalReceiptPure);
+        const receipt = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
+        const cashPure = parseFloat(reportData.cash) / (parseFloat(passedGoldRate || 0) || 1);
+        const current = (ob - ab) + issue - receipt - cashPure;
+
+        return {
+          ob: ob.toFixed(3),
+          ab: ab.toFixed(3),
+          issue: issue.toFixed(3),
+          receipt: receipt.toFixed(3),
+          cash: cashPure.toFixed(3),
+          current: current.toFixed(3)
+        };
+      })()
     });
   };
 
@@ -1410,7 +1471,7 @@ export default function CreateTransaction({ navigation, route }) {
                   </View>
                 )}
 
-              
+
 
               {/* WEIGHT WITH INLINE MODIFIED WEIGHT */}
               <Text style={styles.label}>Weight (g)</Text>
@@ -1456,7 +1517,7 @@ export default function CreateTransaction({ navigation, route }) {
               />
 
               {/* ITEM NAME (FOR BILL) */}
-              
+
 
               {/* GST CHECKBOX */}
               <View style={styles.checkboxContainer}>
