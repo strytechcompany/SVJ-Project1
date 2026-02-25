@@ -208,23 +208,8 @@ export default function ItemsEntry({ navigation }) {
     setSelectedDate(item.date);
     setEditingItemId(item._id || item.id);
 
-    const issue = Boolean(item.issue);
-    const receipt = Boolean(item.receipt);
-
-    if (issue && !receipt) {
-      setIssueChecked(true);
-      setReceiptChecked(false);
-    } else if (!issue && receipt) {
-      setIssueChecked(false);
-      setReceiptChecked(true);
-    } else if (issue && receipt) {
-      // Both true, prefer issue
-      setIssueChecked(true);
-      setReceiptChecked(false);
-    } else {
-      setIssueChecked(false);
-      setReceiptChecked(false);
-    }
+    setIssueChecked(Boolean(item.issue));
+    setReceiptChecked(Boolean(item.receipt));
   };
 
   // -------- Delete item ----------
@@ -269,13 +254,17 @@ export default function ItemsEntry({ navigation }) {
   const recentTransactions = items.slice(-10).reverse();
 
   // 🔍 Filtered transactions
-  const filteredTransactions = recentTransactions.filter(
+  const filteredTransactions = (items || []).filter(
     (item) =>
       (item.stockName?.toLowerCase().includes(search.toLowerCase()) ||
         item.itemDetails?.toLowerCase().includes(search.toLowerCase()) ||
         item.date?.includes(search)) &&
-      ((issueChecked ? item.issue : false) || (receiptChecked ? item.receipt : false) || (!issueChecked && !receiptChecked))
-  );
+      (
+        ((issueChecked && !receiptChecked) ? (item.issue || item.type === 'issue') : true) &&
+        ((receiptChecked && !issueChecked) ? (item.receipt || item.type === 'receipt') : true) &&
+        ((issueChecked && receiptChecked) ? (item.issue || item.receipt || item.type === 'issue' || item.type === 'receipt') : true)
+      )
+  ).slice(-15).reverse();
 
   return (
     <KeyboardAvoidingView
@@ -504,64 +493,105 @@ export default function ItemsEntry({ navigation }) {
                 : "No transactions found"}
             </Text>
           ) : (
-            filteredTransactions.map((item, index) => (
-              <View key={item._id || index} style={styles.transactionCard}>
-                <View style={styles.cardHeader}>
-                  <Text style={styles.txName}>{item.stockName || "N/A"}</Text>
-                  <View style={styles.cardActions}>
-                    <TouchableOpacity onPress={() => handleEdit(item)} style={styles.actionButton}>
-                      <Icon name="pencil" size={18} color="#1B5E20" />
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleDelete(item._id || item.id)} style={styles.actionButton}>
-                      <Icon name="delete" size={18} color="#D32F2F" />
-                    </TouchableOpacity>
-                  </View>
+            <>
+              {(issueChecked || receiptChecked) ? (
+                /* TABLE VIEW FOR FILTERED RESULTS */
+                <View style={styles.tableCard}>
+                  <Text style={styles.tableTitle}>{receiptChecked ? "Receipt Entry Table" : "Issue Entry Table"}</Text>
+                  <ScrollView horizontal={true}>
+                    <View>
+                      <View style={styles.tableHeader}>
+                        <Text style={[styles.tableHeaderCell, { width: 50 }]}>#</Text>
+                        <Text style={[styles.tableHeaderCell, { width: 120 }]}>Stock Name</Text>
+                        <Text style={[styles.tableHeaderCell, { width: 150 }]}>Details</Text>
+                        <Text style={[styles.tableHeaderCell, { width: 80 }]}>Buy %</Text>
+                        <Text style={[styles.tableHeaderCell, { width: 80 }]}>Sell %</Text>
+                        <Text style={[styles.tableHeaderCell, { width: 80 }]}>P %</Text>
+                        <Text style={[styles.tableHeaderCell, { width: 80 }]}>Action</Text>
+                      </View>
+                      {filteredTransactions.map((item, index) => (
+                        <View key={item._id || index} style={styles.tableRow}>
+                          <Text style={[styles.tableCell, { width: 50 }]}>{index + 1}</Text>
+                          <Text style={[styles.tableCell, { width: 120 }]}>{item.stockName}</Text>
+                          <Text style={[styles.tableCell, { width: 150 }]}>{item.itemDetails}</Text>
+                          <Text style={[styles.tableCell, { width: 80 }]}>{item.buyingTouch}%</Text>
+                          <Text style={[styles.tableCell, { width: 80 }]}>{item.sellingTouch}%</Text>
+                          <Text style={[styles.tableCell, { width: 80 }]}>{item.percentage}%</Text>
+                          <View style={[styles.tableCell, { width: 80, flexDirection: 'row', gap: 10 }]}>
+                            <TouchableOpacity onPress={() => handleEdit(item)}>
+                              <Icon name="pencil" size={18} color="#1B5E20" />
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => handleDelete(item._id || item.id)}>
+                              <Icon name="delete" size={18} color="#D32F2F" />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </ScrollView>
                 </View>
+              ) : (
+                /* CARD VIEW FOR ALL */
+                filteredTransactions.map((item, index) => (
+                  <View key={item._id || index} style={styles.transactionCard}>
+                    <View style={styles.cardHeader}>
+                      <Text style={styles.txName}>{item.stockName || "N/A"}</Text>
+                      <View style={styles.cardActions}>
+                        <TouchableOpacity onPress={() => handleEdit(item)} style={styles.actionButton}>
+                          <Icon name="pencil" size={18} color="#1B5E20" />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => handleDelete(item._id || item.id)} style={styles.actionButton}>
+                          <Icon name="delete" size={18} color="#D32F2F" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
 
-                <View style={styles.cardDivider} />
+                    <View style={styles.cardDivider} />
 
-                <View style={styles.detailRow}>
-                  <Icon name="text-box-outline" size={16} color="#666" />
-                  <Text style={styles.txDetail}>
-                    {item.itemDetails || "N/A"}
-                  </Text>
-                </View>
+                    <View style={styles.detailRow}>
+                      <Icon name="text-box-outline" size={16} color="#666" />
+                      <Text style={styles.txDetail}>
+                        {item.itemDetails || "N/A"}
+                      </Text>
+                    </View>
 
-                <View style={styles.statsContainer}>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Buying Touch</Text>
-                    <Text style={styles.statValue}>
-                      {item.buyingTouch != null
-                        ? `${item.buyingTouch}%`
-                        : "N/A"}
-                    </Text>
+                    <View style={styles.statsContainer}>
+                      <View style={styles.statItem}>
+                        <Text style={styles.statLabel}>Buying Touch</Text>
+                        <Text style={styles.statValue}>
+                          {item.buyingTouch != null
+                            ? `${item.buyingTouch}%`
+                            : "N/A"}
+                        </Text>
+                      </View>
+                      <View style={styles.statDivider} />
+                      <View style={styles.statItem}>
+                        <Text style={styles.statLabel}>Selling Touch</Text>
+                        <Text style={styles.statValue}>
+                          {item.sellingTouch != null
+                            ? `${item.sellingTouch}%`
+                            : "N/A"}
+                        </Text>
+                      </View>
+                      <View style={styles.statDivider} />
+                      <View style={styles.statItem}>
+                        <Text style={styles.statLabel}>Percentage</Text>
+                        <Text style={styles.statValue}>
+                          {item.percentage != null
+                            ? `${item.percentage}%`
+                            : "N/A"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.cardFooter}>
+                      <Icon name="calendar" size={14} color="#999" />
+                      <Text style={styles.txDate}>{item.date || "N/A"}</Text>
+                    </View>
                   </View>
-                  <View style={styles.statDivider} />
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Selling Touch</Text>
-                    <Text style={styles.statValue}>
-                      {item.sellingTouch != null
-                        ? `${item.sellingTouch}%`
-                        : "N/A"}
-                    </Text>
-                  </View>
-                  <View style={styles.statDivider} />
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Percentage</Text>
-                    <Text style={styles.statValue}>
-                      {item.percentage != null
-                        ? `${item.percentage}%`
-                        : "N/A"}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.cardFooter}>
-                  <Icon name="calendar" size={14} color="#999" />
-                  <Text style={styles.txDate}>{item.date || "N/A"}</Text>
-                </View>
-              </View>
-            ))
+                ))
+              )}
+            </>
           )}
         </ScrollView>
       </View>
@@ -821,5 +851,43 @@ const styles = StyleSheet.create({
     marginTop: 12,
     borderWidth: 1,
     borderColor: "#ccc",
+  },
+  tableCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    marginVertical: 15,
+    padding: 10,
+    elevation: 3,
+  },
+  tableTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#1B5E20",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  tableHeader: {
+    flexDirection: "row",
+    backgroundColor: "#E8F5E9",
+    paddingVertical: 10,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+  },
+  tableHeaderCell: {
+    fontWeight: "bold",
+    fontSize: 12,
+    color: "#2E7D32",
+    textAlign: "center",
+  },
+  tableRow: {
+    flexDirection: "row",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  tableCell: {
+    fontSize: 12,
+    color: "#333",
+    textAlign: "center",
   },
 });
