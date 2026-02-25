@@ -596,6 +596,34 @@ export default function BillPreview({ route, navigation }) {
     }
   };
 
+  const openDirectWhatsApp = () => {
+    const phone = order ? order.phone : customer.phone;
+    if (phone) {
+      // Clean the phone number (remove non-digits, ensuring it starts with 91 for India if not already)
+      let cleanedPhone = phone.toString().replace(/\D/g, "");
+      if (cleanedPhone.length === 10) {
+        cleanedPhone = "91" + cleanedPhone;
+      }
+      const url = `whatsapp://send?phone=${cleanedPhone}`;
+      Linking.canOpenURL(url)
+        .then((supported) => {
+          if (supported) {
+            Linking.openURL(url);
+          } else {
+            // Fallback to web link if app scheme fails
+            const webUrl = `https://wa.me/${cleanedPhone}`;
+            Linking.openURL(webUrl);
+          }
+        })
+        .catch((err) => {
+          console.error("An error occurred", err);
+          Alert.alert("Error", "Could not open WhatsApp");
+        });
+    } else {
+      Alert.alert("Info", "No phone number available for this customer");
+    }
+  };
+
   const handleWhatsAppShare = async () => {
     try {
       const html = generateHTML();
@@ -723,26 +751,26 @@ export default function BillPreview({ route, navigation }) {
                   <Icon name="arrow-left" size={22} color="#1E88E5" />
                 </TouchableOpacity>
 
+                <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate("Home")}>
+                  <Icon name="home" size={22} color="#1E88E5" />
+                </TouchableOpacity>
+
                 <TouchableOpacity style={styles.headerBtn} onPress={handlePrint}>
                   <Icon name="printer" size={22} color="#1E88E5" />
                 </TouchableOpacity>
               </View>
 
               <View style={styles.headerActions}>
-                <TouchableOpacity style={styles.actionIcon} onPress={handleWhatsAppShare}>
+                <TouchableOpacity style={styles.actionIcon} onPress={openDirectWhatsApp}>
                   <Icon name="whatsapp" size={24} color="#25D366" />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionIcon} onPress={handleWhatsAppShare}>
+                  <Icon name="share-variant" size={24} color="#1E88E5" />
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.actionIcon} onPress={handleDownload}>
                   <Icon name="download" size={24} color="#1E88E5" />
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.actionIcon} onPress={handleShare}>
-                  <Icon name="share-variant" size={24} color="#1E88E5" />
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.actionIcon} onPress={handlePrint}>
-                  <Icon name="printer" size={24} color="#1E88E5" />
                 </TouchableOpacity>
               </View>
             </View>
