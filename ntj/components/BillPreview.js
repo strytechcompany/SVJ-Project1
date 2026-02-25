@@ -596,6 +596,34 @@ export default function BillPreview({ route, navigation }) {
     }
   };
 
+  const handleTransferToB2B = () => {
+    if (estimate) {
+      navigation.navigate("B2BCalculationPage", {
+        previewData: {
+          itemName: estimate.itemName,
+          weight: estimate.weight,
+          touch: estimate.wastagePercent,
+          ftRate: estimate.goldRate,
+          items: estimate.items // Pass if it's a multi-item estimate
+        }
+      });
+    }
+  };
+
+  const handleTransferToB2C = () => {
+    if (estimate) {
+      navigation.navigate("B2CCalculationPage", {
+        estimate: {
+          itemName: estimate.itemName,
+          weight: estimate.weight,
+          wastagePercent: estimate.wastagePercent,
+          goldRate: estimate.goldRate,
+          items: estimate.items // Pass if it's a multi-item estimate
+        }
+      });
+    }
+  };
+
   const openDirectWhatsApp = () => {
     const phone = order ? order.phone : customer.phone;
     if (phone) {
@@ -784,6 +812,19 @@ export default function BillPreview({ route, navigation }) {
             nestedScrollEnabled={true}
             bounces={true}
           >
+            {/* TRANSFER BUTTONS FOR ESTIMATE */}
+            {estimate && (
+              <View style={styles.transferContainer}>
+                <TouchableOpacity style={styles.transferBtnB2B} onPress={handleTransferToB2B}>
+                  <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 5 }} />
+                  <Text style={styles.transferBtnText}>Transfer to B2B</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.transferBtnB2C} onPress={handleTransferToB2C}>
+                  <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 5 }} />
+                  <Text style={styles.transferBtnText}>Transfer to B2C</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             <View style={styles.headerBox}>
               <Text style={styles.billTitle}>{estimate ? 'ESTIMATE BILL' : suspense ? 'SUSPENSE BILL' : order ? 'ORDER RECEIPT' : 'BILL'}</Text>
@@ -1589,5 +1630,46 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     letterSpacing: 0.5,
+  },
+  transferContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 10,
+    gap: 10,
+    marginTop: 5,
+    marginBottom: 5,
+  },
+  transferBtnB2B: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#1e3d59',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  transferBtnB2C: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#135F25',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  transferBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 13,
   },
 });
