@@ -11,6 +11,7 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Switch,
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { base_url } from "./config";
@@ -28,6 +29,8 @@ export default function EstimateScreen({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
+  const [enableGST, setEnableGST] = useState(false);
+
   const weightNum = parseFloat(weight) || 0;
   const wastageNum = parseFloat(wastagePercent) || 0;
   const rateNum = parseFloat(goldRate) || 0;
@@ -35,7 +38,7 @@ export default function EstimateScreen({ navigation, route }) {
   const wastageWeight = (weightNum * wastageNum) / 100;
   const grossWeight = weightNum + wastageWeight;
   const netAmount = grossWeight * rateNum;
-  const gst = netAmount * 0.03;
+  const gst = enableGST ? netAmount * 0.03 : 0;
   const totalAmount = netAmount + gst;
 
   useEffect(() => {
@@ -119,6 +122,7 @@ export default function EstimateScreen({ navigation, route }) {
         netAmount,
         gst,
         totalAmount,
+        enableGST,
       },
     });
   };
@@ -234,10 +238,23 @@ export default function EstimateScreen({ navigation, route }) {
             <Text style={styles.result}>₹ {netAmount.toFixed(2)}</Text>
           </View>
 
-          <View style={styles.row}>
-            <Text style={styles.label}>GST (3%)</Text>
-            <Text style={styles.result}>₹ {gst.toFixed(2)}</Text>
+          {/* GST Toggle */}
+          <View style={[styles.row, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#ddd' }]}>
+            <Text style={styles.label}>Enable GST (3%)</Text>
+            <Switch
+              value={enableGST}
+              onValueChange={setEnableGST}
+              trackColor={{ false: '#ccc', true: '#4CAF50' }}
+              thumbColor={enableGST ? '#2E7D32' : '#f4f3f4'}
+            />
           </View>
+
+          {enableGST && (
+            <View style={styles.row}>
+              <Text style={styles.label}>GST (3%)</Text>
+              <Text style={styles.result}>₹ {gst.toFixed(2)}</Text>
+            </View>
+          )}
 
           <View style={styles.totalBox}>
             <Text style={styles.totalText}>Current Item Total</Text>
@@ -259,6 +276,7 @@ export default function EstimateScreen({ navigation, route }) {
               netAmount: parseFloat(netAmount.toFixed(2)),
               gst: parseFloat(gst.toFixed(2)),
               totalAmount: parseFloat(totalAmount.toFixed(2)),
+              enableGST,
             };
             setEstimateList(prev => [...prev, newItem]);
             // Clear inputs except gold rate
@@ -335,6 +353,7 @@ export default function EstimateScreen({ navigation, route }) {
                 netAmount: estimateList.reduce((sum, i) => sum + i.netAmount, 0).toFixed(2),
                 gst: estimateList.reduce((sum, i) => sum + i.gst, 0).toFixed(2),
                 goldRate: rateNum,
+                enableGST,
               }
             });
           }}>
@@ -414,6 +433,7 @@ export default function EstimateScreen({ navigation, route }) {
                   netAmount,
                   gst,
                   totalAmount,
+                  enableGST,
                 },
               });
             }}
