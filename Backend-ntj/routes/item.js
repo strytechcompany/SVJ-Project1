@@ -5,15 +5,15 @@ const Item = require('../models/Item');
 // CREATE NEW ITEM
 router.post('/', async (req, res) => {
   try {
-    const { 
-      stockName, 
-      itemDetails, 
-      buyingTouch, 
-      sellingTouch, 
-      percentage, 
+    const {
+      stockName,
+      itemDetails,
+      buyingTouch,
+      sellingTouch,
+      percentage,
       date,
       issue,
-      receipt 
+      receipt
     } = req.body;
 
     if (!stockName || !itemDetails || buyingTouch == null || sellingTouch == null || percentage == null || !date) {
@@ -31,16 +31,18 @@ router.post('/', async (req, res) => {
       type = 'receipt';
     }
 
-    const newItem = new Item({ 
-      stockName, 
-      itemDetails, 
-      buyingTouch, 
-      sellingTouch, 
-      percentage, 
+    const newItem = new Item({
+      stockName,
+      itemDetails,
+      buyingTouch,
+      sellingTouch,
+      percentage,
       date,
+      issue: issue || false,
+      receipt: receipt || false,
       type
     });
-    
+
     const savedItem = await newItem.save();
 
     res.status(201).json({ message: 'Item created successfully', item: savedItem });
