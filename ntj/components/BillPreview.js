@@ -9,6 +9,22 @@ import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { base_url } from "./config";
 
+// Format numbers in Indian comma style: 1,230 / 12,035 / 1,23,456
+const formatIndianNumber = (value) => {
+  const num = parseFloat(value);
+  if (isNaN(num)) return value;
+  // Use Math.round for whole rupees display
+  const rounded = Math.round(num);
+  const str = rounded.toString();
+  // Indian number system: last 3 digits, then groups of 2
+  const lastThree = str.slice(-3);
+  const rest = str.slice(0, str.length - 3);
+  const formatted = rest.length > 0
+    ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + lastThree
+    : lastThree;
+  return formatted;
+};
+
 export default function BillPreview({ route, navigation }) {
   const { issueItems, receiptItems, cashTable, summary, report, transactions, items, gst, estimate, suspense, order } = route.params || {};
   const customer = route.params?.customer || {};
@@ -91,6 +107,11 @@ export default function BillPreview({ route, navigation }) {
 
   const generateHTML = () => {
     if (estimate) {
+      const enableGST = estimate.enableGST !== false && estimate.enableGST !== undefined ? estimate.enableGST : false;
+      const estimateItems = estimate.items && estimate.items.length > 0 ? estimate.items : null;
+      const grandTotal = estimateItems
+        ? estimateItems.reduce((sum, i) => sum + i.totalAmount, 0)
+        : parseFloat(estimate.totalAmount || 0);
       return `
         <html>
           <head>
@@ -98,44 +119,62 @@ export default function BillPreview({ route, navigation }) {
               @page { size: 72mm 210mm; margin: 0; }
               body { font-family: Arial, sans-serif; width: 72mm; margin: 0; padding: 5mm; font-size: 10px; }
               h1 { text-align: center; font-size: 16px; margin-bottom: 10px; }
-              h2 { margin-top: 10px; font-size: 14px; }
+              h2 { margin-top: 10px; font-size: 12px; }
               table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-              th, td { border: 1px solid black; padding: 4px; text-align: center; font-size: 9px; }
+              th, td { border: 1px solid black; padding: 3px; text-align: center; font-size: 8px; }
               th { background-color: #f2f2f2; }
               p { margin: 3px 0; }
+              .total-row { font-weight: bold; background-color: #e8f5e9; }
             </style>
           </head>
           <body>
             <h1>ESTIMATE BILL</h1>
             <div>
-              <p><strong>Item Name:</strong> ${estimate.itemName}</p>
               <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
             </div>
             <h2>ESTIMATE DETAILS:</h2>
             <table>
               <tr>
                 <th>Item Name</th>
-                <th>Weight (g)</th>
+                <th>Wt (g)</th>
                 <th>W%</th>
-                <th>Total Weight (g)</th>
-                <th>Gold Rate</th>
-                <th>Net Amount</th>
-                <th>GST</th>
-                <th>Total Amount</th>
+                <th>Gross Wt</th>
+                <th>Rate</th>
+                <th>Net Amt</th>
+                ${enableGST ? '<th>GST</th>' : ''}
+                <th>Total</th>
               </tr>
-              <tr>
-                <td>${estimate.itemName}</td>
-                <td>${estimate.weight}</td>
-                <td>${estimate.wastagePercent}</td>
-                <td>${estimate.grossWeight}</td>
-                <td>${estimate.goldRate}</td>
-                <td>₹${estimate.netAmount}</td>
-                <td>₹${parseFloat(estimate.gst).toFixed(2)}</td>
-                <td>₹${Math.round(parseFloat(estimate.totalAmount))}</td>
+              ${estimateItems
+          ? estimateItems.map(item => `
+                  <tr>
+                    <td>${item.itemName}</td>
+                    <td>${item.weight}</td>
+                    <td>${item.wastagePercent}</td>
+                    <td>${item.grossWeight}</td>
+                    <td>${item.goldRate}</td>
+                    <td>\u20b9${item.netAmount}</td>
+                    ${enableGST ? `<td>\u20b9${item.gst}</td>` : ''}
+                    <td>\u20b9${Math.round(item.totalAmount)}</td>
+                  </tr>
+                `).join('')
+          : `
+                  <tr>
+                    <td>${estimate.itemName}</td>
+                    <td>${estimate.weight}</td>
+                    <td>${estimate.wastagePercent || 0}</td>
+                    <td>${estimate.grossWeight}</td>
+                    <td>${estimate.goldRate}</td>
+                    <td>\u20b9${estimate.netAmount}</td>
+                    ${enableGST ? `<td>\u20b9${parseFloat(estimate.gst || 0).toFixed(2)}</td>` : ''}
+                    <td>\u20b9${Math.round(parseFloat(estimate.totalAmount))}</td>
+                  </tr>
+                `
+        }
+              <tr class="total-row">
+                <td colspan="${enableGST ? 7 : 6}" style="text-align:right;">TOTAL ESTIMATE AMOUNT:</td>
+                <td>\u20b9${Math.round(grandTotal)}</td>
               </tr>
             </table>
-            <h2>TOTAL:</h2>
-            <p><strong>Total Amount:</strong> ₹${Math.round(parseFloat(estimate.totalAmount))}</p>
           </body>
         </html>
       `;
@@ -711,9 +750,11 @@ export default function BillPreview({ route, navigation }) {
 
           <ScrollView
             style={styles.page}
-            contentContainerStyle={{ flexGrow: 1, paddingBottom: 100 }}
+            contentContainerStyle={{ flexGrow: 1, paddingBottom: 160 }}
             showsVerticalScrollIndicator={true}
             keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled={true}
+            bounces={true}
           >
 
             <View style={styles.headerBox}>
@@ -754,33 +795,55 @@ export default function BillPreview({ route, navigation }) {
                 <View style={styles.sectionBox}>
                   <Text style={styles.sectionTitle}>ESTIMATE DETAILS :</Text>
 
+                  {/* Table Header */}
                   <View style={styles.tableHeader}>
-                    <Text style={styles.cell}>Item Name</Text>
-                    <Text style={styles.cell}>Weight (g)</Text>
-                    <Text style={styles.cell}>Wastage %</Text>
-                    <Text style={styles.cell}>Gross Weight (g)</Text>
-                    <Text style={styles.cell}>Gold Rate</Text>
-                    <Text style={styles.cell}>Net Amount</Text>
-                    <Text style={styles.cell}>GST</Text>
-                    <Text style={styles.cell}>Total Amount</Text>
+                    <Text style={[styles.cell, { flex: 2 }]}>Item Name</Text>
+                    <Text style={styles.cell}>Wt (g)</Text>
+                    <Text style={styles.cell}>W%</Text>
+                    <Text style={styles.cell}>Gross Wt</Text>
+                    <Text style={styles.cell}>Rate</Text>
+                    <Text style={styles.cell}>Net Amt</Text>
+                    {estimate.enableGST && <Text style={styles.cell}>GST</Text>}
+                    <Text style={styles.cell}>Total</Text>
                   </View>
 
-                  <View style={styles.tableRow}>
-                    <Text style={styles.cell}>{estimate.itemName}</Text>
-                    <Text style={styles.cell}>{estimate.weight}</Text>
-                    <Text style={styles.cell}>{estimate.wastagePercent}</Text>
-                    <Text style={styles.cell}>{estimate.grossWeight}</Text>
-                    <Text style={styles.cell}>{estimate.goldRate}</Text>
-                    <Text style={styles.cell}>₹{estimate.netAmount}</Text>
-                    <Text style={styles.cell}>₹{parseFloat(estimate.gst).toFixed(2)}</Text>
-                    <Text style={styles.cell}>₹{Math.round(parseFloat(estimate.totalAmount))}</Text>
-                  </View>
+                  {/* Multi-item list OR single-item fallback */}
+                  {estimate.items && estimate.items.length > 0
+                    ? estimate.items.map((item, idx) => (
+                      <View key={item.id || idx} style={styles.tableRow}>
+                        <Text style={[styles.cell, { flex: 2 }]}>{item.itemName}</Text>
+                        <Text style={styles.cell}>{item.weight}</Text>
+                        <Text style={styles.cell}>{item.wastagePercent}</Text>
+                        <Text style={styles.cell}>{item.grossWeight}</Text>
+                        <Text style={styles.cell}>{formatIndianNumber(item.goldRate)}</Text>
+                        <Text style={styles.cell}>₹{formatIndianNumber(item.netAmount)}</Text>
+                        {estimate.enableGST && <Text style={styles.cell}>₹{formatIndianNumber(item.gst)}</Text>}
+                        <Text style={[styles.cell, { fontWeight: 'bold' }]}>₹{formatIndianNumber(item.totalAmount)}</Text>
+                      </View>
+                    ))
+                    : (
+                      <View style={styles.tableRow}>
+                        <Text style={[styles.cell, { flex: 2 }]}>{estimate.itemName}</Text>
+                        <Text style={styles.cell}>{estimate.weight}</Text>
+                        <Text style={styles.cell}>{estimate.wastagePercent || 0}</Text>
+                        <Text style={styles.cell}>{estimate.grossWeight}</Text>
+                        <Text style={styles.cell}>{formatIndianNumber(estimate.goldRate)}</Text>
+                        <Text style={styles.cell}>₹{formatIndianNumber(estimate.netAmount)}</Text>
+                        {estimate.enableGST && <Text style={styles.cell}>₹{formatIndianNumber(estimate.gst || 0)}</Text>}
+                        <Text style={[styles.cell, { fontWeight: 'bold' }]}>₹{formatIndianNumber(estimate.totalAmount)}</Text>
+                      </View>
+                    )
+                  }
                 </View>
 
-                {/* ESTIMATE TOTAL */}
-                <View style={styles.cashBox}>
-                  <Text style={styles.sectionTitle}>TOTAL :</Text>
-                  <Text>Total Amount: ₹{Math.round(parseFloat(estimate.totalAmount))}</Text>
+                {/* ESTIMATE GRAND TOTAL */}
+                <View style={styles.estimateTotalBox}>
+                  <Text style={styles.estimateTotalLabel}>TOTAL ESTIMATE AMOUNT</Text>
+                  <Text style={styles.estimateTotalValue}>
+                    ₹{estimate.items && estimate.items.length > 0
+                      ? formatIndianNumber(estimate.items.reduce((sum, i) => sum + i.totalAmount, 0))
+                      : formatIndianNumber(estimate.totalAmount || 0)}
+                  </Text>
                 </View>
               </>
             ) : suspense ? (
@@ -1265,7 +1328,17 @@ export default function BillPreview({ route, navigation }) {
               </>
             )}
 
-            {/* Bottom Home Button Removed */}
+            {/* Bottom Home Button */}
+            <View style={styles.homeButtonWrapper}>
+              <TouchableOpacity
+                style={styles.homeButton}
+                onPress={() => navigation.navigate('Home')}
+                activeOpacity={0.8}
+              >
+                <Icon name="home" size={22} color="#fff" />
+                <Text style={styles.homeButtonText}>Home</Text>
+              </TouchableOpacity>
+            </View>
 
           </ScrollView >
         </View >
@@ -1442,5 +1515,51 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontStyle: "italic",
     lineHeight: 22,
+  },
+  estimateTotalBox: {
+    backgroundColor: '#1b5e20',
+    borderRadius: 10,
+    padding: 16,
+    marginTop: 10,
+    marginBottom: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  estimateTotalLabel: {
+    color: '#c8e6c9',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  estimateTotalValue: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+
+  homeButtonWrapper: {
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 30,
+  },
+  homeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1B4D1B',
+    paddingVertical: 13,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    gap: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  homeButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
 });
