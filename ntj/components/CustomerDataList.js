@@ -27,7 +27,7 @@ export default function CustomerMasterList({ navigation, route }) {
   useFocusEffect(
     useCallback(() => {
       fetchCustomers();
-    }, [])
+    }, []),
   );
 
   const fetchCustomers = async () => {
@@ -38,21 +38,22 @@ export default function CustomerMasterList({ navigation, route }) {
       const b2cResponse = await fetch(`${base_url}/customersB2C`);
       const b2cData = await b2cResponse.json();
 
-      const b2bCustomers = b2bData.map(customer => ({
+      const b2bCustomers = b2bData.map((customer) => ({
         ...customer,
-        customerType: 'B2B',
+        customerType: "B2B",
         customerNumber: customer.phoneNumber,
         // Add shop name field - adjust based on your API response
         shopName: customer.shopName || customer.companyName || "No Shop Name",
         // Add balance fields - adjust based on your API response
         oldBalance: customer.oldBalance || "0.000",
         advanceBalance: customer.advanceBalance || "0.000",
+        billCurrentBalance: customer.billCurrentBalance || "0.000",
         updatedAt: customer.updatedAt || new Date().toISOString(),
       }));
 
-      const b2cCustomers = b2cData.map(customer => ({
+      const b2cCustomers = b2cData.map((customer) => ({
         ...customer,
-        customerType: 'B2C',
+        customerType: "B2C",
         customerNumber: customer.phoneNumber,
         shopName: "No Shop Name",
         // Add balance fields - adjust based on your API response
@@ -64,7 +65,7 @@ export default function CustomerMasterList({ navigation, route }) {
       const allCustomers = [...b2bCustomers, ...b2cCustomers];
       setCustomers(allCustomers);
     } catch (error) {
-      console.error('Error fetching customers:', error);
+      console.error("Error fetching customers:", error);
     }
   };
 
@@ -90,20 +91,30 @@ export default function CustomerMasterList({ navigation, route }) {
         style: "destructive",
         onPress: async () => {
           try {
-            const endpoint = customer.customerType === 'B2B' ? '/customers' : '/customersB2C';
-            const response = await fetch(`${base_url}${endpoint}/${customer.customerId || customer.id}`, {
-              method: 'DELETE',
-            });
+            const endpoint =
+              customer.customerType === "B2B" ? "/customers" : "/customersB2C";
+            const response = await fetch(
+              `${base_url}${endpoint}/${customer.customerId || customer.id}`,
+              {
+                method: "DELETE",
+              },
+            );
 
             if (response.ok) {
-              setCustomers(customers.filter((c) => (c.customerId || c.id) !== (customer.customerId || customer.id)));
-              Alert.alert('Success', 'Customer deleted successfully');
+              setCustomers(
+                customers.filter(
+                  (c) =>
+                    (c.customerId || c.id) !==
+                    (customer.customerId || customer.id),
+                ),
+              );
+              Alert.alert("Success", "Customer deleted successfully");
             } else {
-              Alert.alert('Error', 'Failed to delete customer');
+              Alert.alert("Error", "Failed to delete customer");
             }
           } catch (error) {
-            console.error('Error deleting customer:', error);
-            Alert.alert('Error', 'Failed to delete customer');
+            console.error("Error deleting customer:", error);
+            Alert.alert("Error", "Failed to delete customer");
           }
         },
       },
@@ -121,7 +132,7 @@ export default function CustomerMasterList({ navigation, route }) {
     const url = `tel:${cleanPhone}`;
 
     Linking.openURL(url).catch((err) => {
-      console.error('Error opening dialer:', err);
+      console.error("Error opening dialer:", err);
       Alert.alert("Error", "Unable to open dialer");
     });
   };
@@ -138,18 +149,20 @@ export default function CustomerMasterList({ navigation, route }) {
     navigation.navigate("BillHistory", { customer });
   };
 
-
-
   const renderItem = ({ item }) => {
-    // Show balance directly from DB without re-adding logic
-    const currentBalance = Number(item.oldBalance || 0);
+    // ✅ Show exactly what's in DB - no recalculation
+    const oldBalance = Number(item.oldBalance || 0);
     const advanceBalance = Number(item.advanceBalance || 0);
+    const billCurrentBalance = Number(item.billCurrentBalance || 0);
 
     const customerId = item.customerId || item.id;
 
     return (
       <View style={styles.card}>
-        <TouchableOpacity style={styles.cardTouchable} onPress={() => handleViewBill(item)}>
+        <TouchableOpacity
+          style={styles.cardTouchable}
+          onPress={() => handleViewBill(item)}
+        >
           <View style={styles.cardHeader}>
             <View style={styles.tag}>
               <Text style={styles.tagText}>{item.customerType}</Text>
@@ -158,10 +171,14 @@ export default function CustomerMasterList({ navigation, route }) {
             <Text style={styles.name}>{item.customerName}</Text>
 
             <View style={styles.iconRow}>
-              <TouchableOpacity onPress={() => handlePhonePress(item.customerNumber)}>
+              <TouchableOpacity
+                onPress={() => handlePhonePress(item.customerNumber)}
+              >
                 <Icon name="phone" size={22} color="#000000" />
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleWhatsApp(item.customerNumber)}>
+              <TouchableOpacity
+                onPress={() => handleWhatsApp(item.customerNumber)}
+              >
                 <Icon name="whatsapp" size={22} color="#25D366" />
               </TouchableOpacity>
               <TouchableOpacity onPress={() => handleEdit(item)}>
@@ -176,42 +193,62 @@ export default function CustomerMasterList({ navigation, route }) {
           <Text style={styles.sub}>Customer ID: {customerId}</Text>
           <Text style={styles.sub}>{item.shopName}</Text>
 
+          {/* ✅ 3 separate balance blocks */}
           <View style={styles.balanceRow}>
             <View>
               <Text style={styles.balanceTitle}>Old Balance</Text>
-              <Text style={[styles.balanceValue, { color: getBalanceColor(item.updatedAt) }]}>
-                {currentBalance.toFixed(3)}
+              <Text
+                style={[
+                  styles.balanceValue,
+                  { color: getBalanceColor(item.updatedAt) },
+                ]}
+              >
+                {oldBalance.toFixed(3)}
               </Text>
             </View>
 
             <View style={styles.line} />
 
             <View>
-              <Text style={styles.balanceTitle}>Advance Balance</Text>
-              <Text style={styles.balanceValue}>
+              <Text style={styles.balanceTitle}>Advance Bal</Text>
+              {/* ✅ Always shows what user typed - never overwritten */}
+              <Text style={[styles.balanceValue, { color: "#FF6F00" }]}>
                 {advanceBalance.toFixed(3)}
+              </Text>
+            </View>
+
+            <View style={styles.line} />
+
+            {/* ✅ NEW: Bill Value - exact CURRENT from last bill */}
+            <View>
+              <Text style={[styles.balanceTitle, { color: "#6A1B9A" }]}>
+                Bill Value
+              </Text>
+              <Text style={[styles.balanceValue, { color: "#6A1B9A" }]}>
+                {billCurrentBalance.toFixed(3)}
               </Text>
             </View>
           </View>
 
           <Text style={styles.lastPaidText}>
-            Last Paid: {new Date(item.updatedAt).toLocaleDateString()} {new Date(item.updatedAt).toLocaleTimeString()}
+            Last Paid: {new Date(item.updatedAt).toLocaleDateString()}{" "}
+            {new Date(item.updatedAt).toLocaleTimeString()}
           </Text>
-        </TouchableOpacity >
-      </View >
+        </TouchableOpacity>
+      </View>
     );
   };
 
   const getBalanceColor = (dateString) => {
-    if (!dateString) return '#000';
+    if (!dateString) return "#000";
     const lastDate = new Date(dateString);
     const now = new Date();
     const diffTime = Math.abs(now - lastDate);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-    if (diffDays <= 1) return '#2196F3'; // Blue (1st day)
-    if (diffDays <= 2) return '#FF9800'; // Orange (2nd day)
-    return '#F44336'; // Red (3rd day+)
+    if (diffDays <= 1) return "#2196F3"; // Blue (1st day)
+    if (diffDays <= 2) return "#FF9800"; // Orange (2nd day)
+    return "#F44336"; // Red (3rd day+)
   };
 
   return (
@@ -219,7 +256,10 @@ export default function CustomerMasterList({ navigation, route }) {
       {/* HEADER */}
       <View style={styles.header}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={{ top: 15 }}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={{ top: 15 }}
+          >
             <Ionicons name="arrow-back" size={26} color="#fff" />
           </TouchableOpacity>
 
@@ -244,20 +284,18 @@ export default function CustomerMasterList({ navigation, route }) {
         </View>
       </View>
 
-
-
       {/* COLOR LEGEND */}
       <View style={styles.legendContainer}>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#2196F3' }]} />
+          <View style={[styles.legendDot, { backgroundColor: "#2196F3" }]} />
           <Text style={styles.legendText}>Today</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#FF9800' }]} />
+          <View style={[styles.legendDot, { backgroundColor: "#FF9800" }]} />
           <Text style={styles.legendText}>Yesterday</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#F44336' }]} />
+          <View style={[styles.legendDot, { backgroundColor: "#F44336" }]} />
           <Text style={styles.legendText}>Older</Text>
         </View>
       </View>
@@ -268,16 +306,10 @@ export default function CustomerMasterList({ navigation, route }) {
           <TouchableOpacity
             key={item}
             onPress={() => setFilter(item)}
-            style={[
-              styles.filterBtn,
-              filter === item && styles.filterActive,
-            ]}
+            style={[styles.filterBtn, filter === item && styles.filterActive]}
           >
             <Text
-              style={[
-                styles.filterText,
-                filter === item && { color: "#fff" },
-              ]}
+              style={[styles.filterText, filter === item && { color: "#fff" }]}
             >
               {item}
             </Text>
@@ -295,7 +327,7 @@ export default function CustomerMasterList({ navigation, route }) {
       <TouchableOpacity style={styles.addBtn} onPress={handleAdd}>
         <Icon name="plus" size={28} color="#fff" />
       </TouchableOpacity>
-    </SafeAreaView >
+    </SafeAreaView>
   );
 }
 
@@ -310,7 +342,7 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 20,
     borderBottomRightRadius: 20,
     elevation: 8,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 5,
@@ -383,7 +415,13 @@ const styles = StyleSheet.create({
 
   balanceTitle: { color: "#000", fontSize: 14 },
   balanceValue: { fontSize: 16, fontWeight: "bold" },
-  lastPaidText: { fontSize: 11, color: "#e87911ff", marginTop: 8, fontStyle: 'italic', textAlign: 'right' },
+  lastPaidText: {
+    fontSize: 11,
+    color: "#e87911ff",
+    marginTop: 8,
+    fontStyle: "italic",
+    textAlign: "right",
+  },
 
   line: { width: 1, backgroundColor: "#ddd" },
 
@@ -434,10 +472,10 @@ const styles = StyleSheet.create({
   },
 
   legendContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
     paddingVertical: 10,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     marginHorizontal: 20,
     marginTop: -10,
     marginBottom: 10,
@@ -446,8 +484,8 @@ const styles = StyleSheet.create({
     gap: 15,
   },
   legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   legendDot: {
     width: 10,
@@ -457,7 +495,7 @@ const styles = StyleSheet.create({
   },
   legendText: {
     fontSize: 12,
-    color: '#333',
-    fontWeight: '600',
+    color: "#333",
+    fontWeight: "600",
   },
 });

@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');  
 const connectDB = require('./DB');
 const userRoutes = require('./routes/user');
 const itemRoutes = require('./routes/item');
@@ -25,12 +26,16 @@ const upiRoutes = require('./routes/UPI');
 const thirukkuralRoutes = require("./routes/Thirukkural");
 const rateRoutes = require('./routes/Rate');
 const loginRoutes = require('./routes/Login');
-const Login = require('./models/Login'); // <-- ADD THIS
+const Login = require('./models/Login');
+
 
 const app = express();
 const PORT = 3000;
 
-// ✅ AUTO SEED DEFAULT LOGIN USER (run only after DB is connected)
+// Connect to MongoDB
+connectDB();
+
+// ✅ AUTO SEED DEFAULT LOGIN USER
 const seedDefaultUser = async () => {
   try {
     const existing = await Login.findOne({ email: 'AkshayaGold@gmail.com' });
@@ -52,6 +57,7 @@ const seedDefaultUser = async () => {
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));  
 
 // Routes
 app.use('/api/users', userRoutes);
@@ -79,17 +85,12 @@ app.use("/api/thirukkural", thirukkuralRoutes);
 app.use('/api/rates', rateRoutes);
 app.use('/api/login', loginRoutes);
 
+
 // Test route
 app.get('/', (req, res) => {
   res.send('Hello from Node.js backend!');
 });
 
-// Start only after MongoDB is connected (avoids "buffering timed out" on seed)
-const start = async () => {
-  await connectDB();
-  app.listen(PORT, async () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    await seedDefaultUser();
-  });
-};
-start();
+app.listen(PORT, async () => {
+  await seedDefaultUser();
+});

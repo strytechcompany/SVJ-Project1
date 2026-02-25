@@ -86,22 +86,47 @@ export default function CreateTransaction({ navigation }) {
   const [phone, setPhone] = useState("");
 
   // ── TOTALS (after useState, before useEffect) ───────────────
-  const totalIssuePure = issueItems.reduce((acc, it) => acc + Number(it.purity || 0), 0);
-  const totalIssueWeight = issueItems.reduce((acc, it) => acc + Number(it.weight || 0), 0);
-  const totalIssueStone = issueItems.reduce((acc, it) => acc + Number(it.stone || 0), 0);
-  const totalIssueTouch = issueItems.reduce((acc, it) => acc + Number(it.touch || 0), 0);
-  const totalReceiptPure = receiptItems.reduce((acc, it) => acc + Number(it.purity || 0), 0);
-  const totalReceiptWeight = receiptItems.reduce((acc, it) => acc + Number(it.weight || 0), 0);
-  const totalReceiptStone = receiptItems.reduce((acc, it) => acc + Number(it.stone || 0), 0);
-  const totalReceiptTouch = receiptItems.reduce((acc, it) => acc + Number(it.touch || 0), 0);
-  const totalCashPure = cashTable.reduce((acc, it) => acc + Number(it.pure || 0), 0);
+  const totalIssuePure = issueItems.reduce(
+    (acc, it) => acc + Number(it.purity || 0),
+    0,
+  );
+  const totalIssueWeight = issueItems.reduce(
+    (acc, it) => acc + Number(it.weight || 0),
+    0,
+  );
+  const totalIssueStone = issueItems.reduce(
+    (acc, it) => acc + Number(it.stone || 0),
+    0,
+  );
+  const totalIssueTouch = issueItems.reduce(
+    (acc, it) => acc + Number(it.touch || 0),
+    0,
+  );
+  const totalReceiptPure = receiptItems.reduce(
+    (acc, it) => acc + Number(it.purity || 0),
+    0,
+  );
+  const totalReceiptWeight = receiptItems.reduce(
+    (acc, it) => acc + Number(it.weight || 0),
+    0,
+  );
+  const totalReceiptStone = receiptItems.reduce(
+    (acc, it) => acc + Number(it.stone || 0),
+    0,
+  );
+  const totalReceiptTouch = receiptItems.reduce(
+    (acc, it) => acc + Number(it.touch || 0),
+    0,
+  );
+  const totalCashPure = cashTable.reduce(
+    (acc, it) => acc + Number(it.pure || 0),
+    0,
+  );
 
   // ── useEffects AFTER totals ──────────────────────────────────
   useEffect(() => {
     saveStock();
   }, [itemsStock]);
-
-
 
   // Handle customer name change for searchable dropdown
   const handleCustomerNameChange = (text) => {
@@ -110,7 +135,7 @@ export default function CreateTransaction({ navigation }) {
       const filtered = customers.filter(
         (customer) =>
           customer.name &&
-          customer.name.toLowerCase().includes(text.toLowerCase())
+          customer.name.toLowerCase().includes(text.toLowerCase()),
       );
       setFilteredCustomers(filtered);
       setShowDropdown(true);
@@ -126,8 +151,6 @@ export default function CreateTransaction({ navigation }) {
     setPhone(customer.phone || "");
     setShowDropdown(false);
   };
-
-
 
   useEffect(() => {
     const loadSavedGstList = async () => {
@@ -148,14 +171,22 @@ export default function CreateTransaction({ navigation }) {
   // Auto-calculate Total GST % based on selections
   useEffect(() => {
     if (gstEnabled) {
-      const s = isSgstEnabled ? (parseFloat(sgst) || 0) : 0;
-      const c = isCgstEnabled ? (parseFloat(cgst) || 0) : 0;
-      const i = isIgstEnabled ? (parseFloat(igst) || 0) : 0;
+      const s = isSgstEnabled ? parseFloat(sgst) || 0 : 0;
+      const c = isCgstEnabled ? parseFloat(cgst) || 0 : 0;
+      const i = isIgstEnabled ? parseFloat(igst) || 0 : 0;
       setGstPercentage((s + c + i).toString());
     } else {
       setGstPercentage("0");
     }
-  }, [gstEnabled, isSgstEnabled, isCgstEnabled, isIgstEnabled, sgst, cgst, igst]);
+  }, [
+    gstEnabled,
+    isSgstEnabled,
+    isCgstEnabled,
+    isIgstEnabled,
+    sgst,
+    cgst,
+    igst,
+  ]);
 
   // Auto-calculate GST amount in rupees
   useEffect(() => {
@@ -170,10 +201,6 @@ export default function CreateTransaction({ navigation }) {
     }
   }, [gstEnabled, gstPercentage, goldRate, totalIssuePure]);
 
-
-
-
-
   // Handler for stock update on receipt weight blur
   const updateReceiptStock = async (newWeight) => {
     if (!selectedReceiptItem || !itemsStock[selectedReceiptItem]?._id) return;
@@ -187,29 +214,36 @@ export default function CreateTransaction({ navigation }) {
         ...prev,
         [selectedReceiptItem]: {
           ...prev[selectedReceiptItem],
-          weight: (Number(prev[selectedReceiptItem]?.weight || 0) + delta).toFixed(3),
+          weight: (
+            Number(prev[selectedReceiptItem]?.weight || 0) + delta
+          ).toFixed(3),
         },
       }));
 
       // Update stock in database
       try {
-        const currentStock = Number(itemsStock[selectedReceiptItem]?.weight || 0);
+        const currentStock = Number(
+          itemsStock[selectedReceiptItem]?.weight || 0,
+        );
         const updatedWeight = Number((currentStock + delta).toFixed(3));
 
-        const stockResponse = await fetch(`${base_url}/stockMaster/${itemsStock[selectedReceiptItem]?._id}`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
+        const stockResponse = await fetch(
+          `${base_url}/stockMaster/${itemsStock[selectedReceiptItem]?._id}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              itemName: selectedReceiptItem,
+              weight: updatedWeight,
+              less: 0,
+              netWeight: updatedWeight,
+              calculation: 0,
+              pure: 0,
+            }),
           },
-          body: JSON.stringify({
-            itemName: selectedReceiptItem,
-            weight: updatedWeight,
-            less: 0,
-            netWeight: updatedWeight,
-            calculation: 0,
-            pure: 0,
-          }),
-        });
+        );
 
         if (!stockResponse.ok) {
           console.error("Failed to update stock in database on blur");
@@ -227,38 +261,72 @@ export default function CreateTransaction({ navigation }) {
   const filteredCartCustomers = customers.filter(
     (c) =>
       (c.name && c.name.toLowerCase().includes(cartSearch.toLowerCase())) ||
-      (c.phone && String(c.phone).includes(cartSearch))
+      (c.phone && String(c.phone).includes(cartSearch)),
   );
 
   const fetchCustomers = async () => {
     try {
       setLoadingCustomers(true);
-      const response = await fetch(`${base_url}/customers`);
+      const b2bResponse = await fetch(`${base_url}/customers`);
+      const b2bData = await b2bResponse.json();
 
-      if (!response.ok) {
-        throw new Error("Failed to fetch customers");
-      }
+      const b2cResponse = await fetch(`${base_url}/customersB2C`);
+      const b2cData = await b2cResponse.json();
 
-      const data = await response.json();
-
-      console.log("Fetched customers:", data);
-
-      const mappedCustomers = data
-        .filter((customer) => customer.customerName)
+      const b2bCustomers = b2bData
+        .filter((customer) => customer.customerName) // ✅ filter empty names
         .map((customer) => ({
+          ...customer,
+          customerType: "B2B",
+          customerNumber: customer.phoneNumber,
+          customerId: customer.customerId,
+          id: customer._id, // ✅ MongoDB _id for API calls
+          // ✅ These are what the UI uses in filteredCartCustomers & display
           name: customer.customerName,
           ob: customer.oldBalance || 0,
           ab: customer.advanceBalance || 0,
           company: customer.shopName || "",
           phone: customer.phoneNumber || "",
           email: customer.emailId || "",
-          address: customer.address || "", // Added address
-          gst: customer.gstin || customer.gstNo || "", // Added GST
-          id: customer._id,
+          address: customer.address || "",
+          gst: customer.gstin || "",
+          // ✅ Keep these too for CustomerMasterList
+          customerName: customer.customerName,
+          shopName: customer.shopName || customer.companyName || "No Shop Name",
+          oldBalance: customer.oldBalance || 0,
+          advanceBalance: customer.advanceBalance || 0,
+          billCurrentBalance: customer.billCurrentBalance || 0,
+          updatedAt: customer.updatedAt || new Date().toISOString(),
         }));
 
-      console.log("Mapped customers:", mappedCustomers);
-      setCustomers(mappedCustomers);
+      const b2cCustomers = b2cData
+        .filter((customer) => customer.customerName)
+        .map((customer) => ({
+          ...customer,
+          customerType: "B2C",
+          customerNumber: customer.phoneNumber,
+          customerId: customer.customerId || customer._id,
+          id: customer._id || customer.id,
+          // ✅ These are what the UI uses
+          name: customer.customerName,
+          ob: customer.oldBalance || 0,
+          ab: customer.advanceBalance || 0,
+          company: "",
+          phone: customer.phoneNumber || customer.phone || "",
+          email: "",
+          address: customer.address || "",
+          gst: customer.gstin || "",
+          // ✅ Keep these too
+          customerName: customer.customerName,
+          shopName: "No Shop Name",
+          oldBalance: customer.oldBalance || 0,
+          advanceBalance: customer.advanceBalance || 0,
+          billCurrentBalance: customer.billCurrentBalance || 0,
+          updatedAt: customer.updatedAt || new Date().toISOString(),
+        }));
+
+      const allCustomers = [...b2bCustomers, ...b2cCustomers];
+      setCustomers(allCustomers);
     } catch (error) {
       console.error("Error fetching customers:", error);
       Alert.alert("Error", "Failed to load customers from database");
@@ -274,7 +342,9 @@ export default function CreateTransaction({ navigation }) {
       if (resp.ok) {
         const data = await resp.json();
         // Extract last 5 unique customer names
-        const names = [...new Set(data.map(t => t.customerName).filter(Boolean))].slice(0, 5);
+        const names = [
+          ...new Set(data.map((t) => t.customerName).filter(Boolean)),
+        ].slice(0, 5);
         setRecentNames(names);
       }
     } catch (err) {
@@ -304,8 +374,6 @@ export default function CreateTransaction({ navigation }) {
           sellingTouch: item.sellingTouch,
           percentage: item.percentage,
           type: item.type,
-          issue: item.issue, // added
-          receipt: item.receipt, // added
           date: item.date,
         }))
         .filter((item) => item.itemName); // ensure stockName exists
@@ -345,7 +413,7 @@ export default function CreateTransaction({ navigation }) {
         }
       };
 
-      await fetchStock();
+      fetchStock();
     } catch (error) {
       console.error("Error fetching items:", error);
       Alert.alert("Error", "Failed to load items from stock master");
@@ -373,7 +441,7 @@ export default function CreateTransaction({ navigation }) {
         // Clear the param to avoid re-adding
         navigation.setParams({ newCustomer: undefined });
       }
-    }, [route.params?.newCustomer, navigation])
+    }, [route.params?.newCustomer, navigation]),
   );
 
   // Load ft rate from route params or AsyncStorage on focus
@@ -398,7 +466,7 @@ export default function CreateTransaction({ navigation }) {
         }
       };
       loadFtRate();
-    }, [route.params?.ftRate])
+    }, [route.params?.ftRate]),
   );
 
   // Function to refresh all data
@@ -418,70 +486,29 @@ export default function CreateTransaction({ navigation }) {
       console.log("📥 Received previewData:", data);
 
       if (data.customerName) {
-        const cust = customers.find(c => c.name === data.customerName);
+        const cust = customers.find((c) => c.name === data.customerName);
         if (cust) {
           setSelectedCustomer(cust);
           setSearch(cust.name);
           setPhone(cust.phone || "");
         } else {
+          // If customer not found in list, create a temporary selected customer
           setSelectedCustomer({
-            name: data.customerName || "Estimate Customer",
+            name: data.customerName,
             id: data.customerId || "N/A",
             phone: data.phone || "",
             ob: data.oldBalance || 0,
             ab: data.advBal || 0,
           });
-          setSearch(data.customerName || "Estimate Customer");
+          setSearch(data.customerName);
           setPhone(data.phone || "");
         }
       }
 
-      if (data.items && Array.isArray(data.items) && data.items.length > 0) {
-        // Handle multiple items from estimate
-        const mappedIssueItems = data.items.map((item, idx) => {
-          const w = parseFloat(item.weight) || 0;
-          const s = 0; // No stone weight from estimate
-          const t = parseFloat(item.wastagePercent) || 0;
-          const p = (w - s) * (t / 100);
-
-          return {
-            id: Date.now() + idx,
-            item: item.itemName,
-            weight: w.toFixed(3),
-            stone: s.toFixed(3),
-            touch: t.toFixed(3),
-            purity: p.toFixed(3),
-            details: "Transferred from Estimate"
-          };
-        });
-        setIssueItems(mappedIssueItems);
-
-        // Populate inputs with first item
-        const first = data.items[0];
-        setSelectedIssueItem(first.itemName);
-        setWeight(first.weight?.toString() || "");
-        setTouch(first.wastagePercent?.toString() || "");
-      } else if (data.itemName) {
-        // Single item fallback
+      if (data.itemName) {
         setSelectedIssueItem(data.itemName);
         setWeight(data.weight?.toString() || "");
         setTouch(data.touch?.toString() || "");
-
-        // Add it to the table immediately for better UX
-        const w = parseFloat(data.weight) || 0;
-        const s = 0;
-        const t = parseFloat(data.touch) || 0;
-        const p = (w - s) * (t / 100);
-
-        setIssueItems([{
-          id: Date.now(),
-          item: data.itemName,
-          weight: w.toFixed(3),
-          stone: s.toFixed(3),
-          touch: t.toFixed(3),
-          purity: p.toFixed(3),
-          details: "Transferred from Estimate"
-        }]);
       }
 
       if (data.ftRate) {
@@ -526,7 +553,7 @@ export default function CreateTransaction({ navigation }) {
     const W = parseNum(w);
     const S = parseNum(s);
     const T = parseNum(t);
-    const pure = (W * (S / 100) * (T / 100));
+    const pure = W * (S / 100) * (T / 100);
     return Number(pure.toFixed(3));
   };
 
@@ -563,7 +590,7 @@ export default function CreateTransaction({ navigation }) {
     if (issueWeight <= 0) {
       Alert.alert(
         "Invalid Weight",
-        "Please enter a valid weight greater than 0"
+        "Please enter a valid weight greater than 0",
       );
       return;
     }
@@ -609,20 +636,23 @@ export default function CreateTransaction({ navigation }) {
         const currentStock = Number(itemsStock[selectedIssueItem]?.weight || 0);
         const newWeight = Number((currentStock - issueWeight).toFixed(3));
 
-        const stockResponse = await fetch(`${base_url}/stockMaster/${itemsStock[selectedIssueItem]?._id}`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
+        const stockResponse = await fetch(
+          `${base_url}/stockMaster/${itemsStock[selectedIssueItem]?._id}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              itemName: selectedIssueItem,
+              weight: newWeight,
+              less: 0, // Assuming less remains the same, adjust if needed
+              netWeight: newWeight, // Assuming netWeight = weight - less
+              calculation: 0, // Adjust based on your schema
+              pure: 0, // Adjust based on your schema
+            }),
           },
-          body: JSON.stringify({
-            itemName: selectedIssueItem,
-            weight: newWeight,
-            less: 0, // Assuming less remains the same, adjust if needed
-            netWeight: newWeight, // Assuming netWeight = weight - less
-            calculation: 0, // Adjust based on your schema
-            pure: 0, // Adjust based on your schema
-          }),
-        });
+        );
 
         if (!stockResponse.ok) {
           console.error("Failed to update stock in database");
@@ -639,7 +669,7 @@ export default function CreateTransaction({ navigation }) {
         [selectedIssueItem]: {
           ...prev[selectedIssueItem],
           weight: Number(
-            ((prev[selectedIssueItem]?.weight || 0) - issueWeight).toFixed(3)
+            ((prev[selectedIssueItem]?.weight || 0) - issueWeight).toFixed(3),
           ),
         },
       }));
@@ -692,7 +722,7 @@ export default function CreateTransaction({ navigation }) {
     if (receiptW <= 0) {
       Alert.alert(
         "Invalid Weight",
-        "Please enter a valid weight greater than 0"
+        "Please enter a valid weight greater than 0",
       );
       return;
     }
@@ -735,23 +765,28 @@ export default function CreateTransaction({ navigation }) {
 
       // Update stock in database
       try {
-        const currentStock = Number(itemsStock[selectedReceiptItem]?.weight || 0);
+        const currentStock = Number(
+          itemsStock[selectedReceiptItem]?.weight || 0,
+        );
         const newWeight = Number((currentStock + receiptW).toFixed(3));
 
-        const stockResponse = await fetch(`${base_url}/stockMaster/${itemsStock[selectedReceiptItem]?._id}`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
+        const stockResponse = await fetch(
+          `${base_url}/stockMaster/${itemsStock[selectedReceiptItem]?._id}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              itemName: selectedReceiptItem,
+              weight: newWeight,
+              less: 0, // Assuming less remains the same, adjust if needed
+              netWeight: newWeight, // Assuming netWeight = weight - less
+              calculation: 0, // Adjust based on your schema
+              pure: 0, // Adjust based on your schema
+            }),
           },
-          body: JSON.stringify({
-            itemName: selectedReceiptItem,
-            weight: newWeight,
-            less: 0, // Assuming less remains the same, adjust if needed
-            netWeight: newWeight, // Assuming netWeight = weight - less
-            calculation: 0, // Adjust based on your schema
-            pure: 0, // Adjust based on your schema
-          }),
-        });
+        );
 
         if (!stockResponse.ok) {
           console.error("Failed to update stock in database");
@@ -767,7 +802,9 @@ export default function CreateTransaction({ navigation }) {
         ...prev,
         [selectedReceiptItem]: {
           ...prev[selectedReceiptItem],
-          weight: (Number(prev[selectedReceiptItem]?.weight || 0) + receiptW).toFixed(3),
+          weight: (
+            Number(prev[selectedReceiptItem]?.weight || 0) + receiptW
+          ).toFixed(3),
         },
       }));
 
@@ -813,7 +850,7 @@ export default function CreateTransaction({ navigation }) {
     if (parseNum(rate) <= 0) {
       Alert.alert(
         "Invalid Rate",
-        "Please enter a valid gold rate greater than 0"
+        "Please enter a valid gold rate greater than 0",
       );
       return;
     }
@@ -880,7 +917,9 @@ export default function CreateTransaction({ navigation }) {
         [itemToRemove.item]: {
           ...prev[itemToRemove.item],
           weight: Number(
-            ((prev[itemToRemove.item]?.weight || 0) + itemToRemove.weight).toFixed(3)
+            (
+              (prev[itemToRemove.item]?.weight || 0) + itemToRemove.weight
+            ).toFixed(3),
           ),
         },
       }));
@@ -897,7 +936,9 @@ export default function CreateTransaction({ navigation }) {
         [itemToRemove.item]: {
           ...prev[itemToRemove.item],
           weight: Number(
-            ((prev[itemToRemove.item]?.weight || 0) - itemToRemove.weight).toFixed(3)
+            (
+              (prev[itemToRemove.item]?.weight || 0) - itemToRemove.weight
+            ).toFixed(3),
           ),
         },
       }));
@@ -909,14 +950,9 @@ export default function CreateTransaction({ navigation }) {
     setCashTable((prev) => prev.filter((p) => p.id !== id));
   };
 
+  let oldBalance = selectedCustomer ? Number(parseNum(selectedCustomer.ob)) : 0;
 
-  let oldBalance = selectedCustomer
-    ? Number(parseNum(selectedCustomer.ob))
-    : 0;
-
-  let advBalance = selectedCustomer
-    ? Number(parseNum(selectedCustomer.ab))
-    : 0;
+  let advBalance = selectedCustomer ? Number(parseNum(selectedCustomer.ab)) : 0;
 
   // Convert negative old balance to advance balance
   if (oldBalance < 0) {
@@ -924,12 +960,18 @@ export default function CreateTransaction({ navigation }) {
     oldBalance = 0;
   }
 
-  const gstPureValue = gstEnabled ? (totalIssuePure * (parseFloat(gstPercentage) || 0) / 100) : 0;
+  const gstPureValue = gstEnabled
+    ? (totalIssuePure * (parseFloat(gstPercentage) || 0)) / 100
+    : 0;
 
   const balance = Number(
-    (oldBalance + totalIssuePure + gstPureValue - (totalReceiptPure + totalCashPure)).toFixed(3)
+    (
+      oldBalance +
+      totalIssuePure +
+      gstPureValue -
+      (totalReceiptPure + totalCashPure)
+    ).toFixed(3),
   );
-
 
   // Save stock to AsyncStorage
   const saveStock = async () => {
@@ -949,19 +991,19 @@ export default function CreateTransaction({ navigation }) {
   const calculateReport = () => {
     const totalIssue = issueItems.reduce(
       (acc, it) => acc + Number(it.weight || 0),
-      0
+      0,
     );
     const totalIssuePure = issueItems.reduce(
       (acc, it) => acc + Number(it.purity || 0),
-      0
+      0,
     );
     const totalReceipt = receiptItems.reduce(
       (acc, it) => acc + Number(it.weight || 0),
-      0
+      0,
     );
     const totalReceiptPure = receiptItems.reduce(
       (acc, it) => acc + Number(it.purity || 0),
-      0
+      0,
     );
     const cash = cashTable.reduce((sum, c) => sum + Number(c.rupees || 0), 0);
     const cashPure = cashTable.reduce((sum, c) => sum + Number(c.pure || 0), 0);
@@ -1019,151 +1061,194 @@ export default function CreateTransaction({ navigation }) {
   };
 
   const saveCompleteTransaction = async () => {
-    console.log("💾 saveCompleteTransaction called");
+  console.log("💾 saveCompleteTransaction called");
 
-    if (!selectedCustomer) {
-      Alert.alert("Error", "Please select a customer first");
-      return;
-    }
+  if (!selectedCustomer) {
+    Alert.alert("Error", "Please select a customer first");
+    return;
+  }
 
-    if (
-      issueItems.length === 0 &&
-      receiptItems.length === 0 &&
-      cashTable.length === 0
-    ) {
-      Alert.alert("Error", "No items added to transaction");
-      return;
-    }
+  if (
+    issueItems.length === 0 &&
+    receiptItems.length === 0 &&
+    cashTable.length === 0
+  ) {
+    Alert.alert("Error", "No items added to transaction");
+    return;
+  }
 
-    // Calculate final balance based on new requested formula if AB exists
-    const finalDistinctBalance = (advBalance > 0)
-      ? Number((totalIssuePure + (gstEnabled ? gstPureValue : 0) - advBalance + totalReceiptPure + totalCashPure).toFixed(3))
-      : Number((balance - advBalance).toFixed(3));
+  // ✅ FIX 1: Remove - advBalance from formula
+  const finalDistinctBalance = Number(
+    (
+      oldBalance +
+      totalIssuePure +
+      (gstEnabled ? gstPureValue : 0) -
+      totalReceiptPure -
+      totalCashPure
+      // ✅ NO - advBalance here
+    ).toFixed(3),
+  );
 
-    const transactionData = {
-      customerName: selectedCustomer.name,
-      customerId: selectedCustomer.id,
-      issueTotal: Number(totalIssueWeight.toFixed(3)),
-      issuePure: Number(totalIssuePure.toFixed(3)),
-      oldBalance: Number(oldBalance.toFixed(3)),
-      receiptPure: Number(totalReceiptPure.toFixed(3)),
-      cashPure: Number(totalCashPure.toFixed(3)),
-      balance: finalDistinctBalance,
-      advBal: Number(advBalance.toFixed(3)),
-    };
-
-    console.log("📤 Transaction data to send:", transactionData);
-    console.log("🌐 URL:", `${base_url}/transactions`);
-
-    try {
-      const response = await fetch(`${base_url}/transactions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(transactionData),
-      });
-
-      console.log("📥 Response status:", response.status);
-
-      const responseText = await response.text();
-      console.log("📥 Response body:", responseText);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${responseText}`);
-      }
-
-      const savedTransaction = JSON.parse(responseText);
-      console.log("✅ Transaction saved successfully:", savedTransaction);
-
-      // 🧮 Determine new Old Balance and Advance Balance based on final calculation
-      const distinctNetBalance = finalDistinctBalance;
-
-      let newCustomerOB = 0;
-      let newCustomerAB = 0;
-
-      if (distinctNetBalance >= 0) {
-        newCustomerOB = distinctNetBalance;
-        newCustomerAB = 0;
-      } else {
-        newCustomerOB = 0;
-        newCustomerAB = Math.abs(distinctNetBalance);
-      }
-
-      console.log(` Updating Customer Balance: Net=${distinctNetBalance} => OB=${newCustomerOB}, AB=${newCustomerAB}`);
-
-      // 🔄 Update customer DB
-      await fetch(`${base_url}/customers/${selectedCustomer.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          oldBalance: newCustomerOB,
-          advanceBalance: newCustomerAB
-        }),
-      });
-
-      // Navigate to BillPreview after successful save
-      navigation.navigate("BillPreview", {
-        customer: {
-          name: selectedCustomer.name,
-          phone: selectedCustomer.phone || "",
-          type: "B2B",
-          address: selectedCustomer.address || "",
-          gstin: selectedCustomer.gst || "",
-          date,
-          oldBalance: fmt(oldBalance),
-          advanceBalance: fmt(advBalance),
-          transactionId: savedTransaction._id,
-        },
-
-        issueItems: issueItems.map((item) => ({
-          name: item.item,
-          gross: fmt(item.weight),
-          m: fmt(item.stone),
-          net: fmt(item.weight - item.stone),
-          calc: fmt(item.touch),
-          pure: fmt(item.purity),
-        })),
-        receiptItems: receiptItems.map((item) => ({
-          name: item.item,
-          weight: fmt(item.weight),
-          result: fmt(item.weight - item.stone),
-          calc: fmt(item.touch),
-          pure: fmt(item.purity),
-        })),
-        cashTable: cashTable,
-        gst: gstEnabled ? {
-          enabled: gstEnabled,
-          percentage: (
-            (isSgstEnabled ? (parseFloat(sgst) || 0) : 0) +
-            (isCgstEnabled ? (parseFloat(cgst) || 0) : 0) +
-            (isIgstEnabled ? (parseFloat(igst) || 0) : 0)
-          ).toString(),
-          amount: gstAmount,
-          sgst: isSgstEnabled ? sgst : "0",
-          cgst: isCgstEnabled ? cgst : "0",
-          igst: isIgstEnabled ? igst : "0",
-          showInBill: true,
-        } : null,
-        summary: {
-          ob: fmt(oldBalance),
-          issue: fmt(totalIssuePure),
-          gstPure: fmt(gstPureValue),
-          receipt: fmt(totalReceiptPure),
-          cash: fmt(totalCashPure),
-          current: fmt(finalDistinctBalance),
-          obPlusIssue: fmt(oldBalance + totalIssuePure + gstPureValue),
-          receiptPlusCash: fmt(totalReceiptPure + totalCashPure),
-        },
-      });
-
-
-    } catch (error) {
-      console.error("❌ Error saving transaction:", error);
-      Alert.alert("Error", `Failed to save transaction: ${error.message}`);
-    }
+  const transactionData = {
+    customerName: selectedCustomer.name,
+    customerId: selectedCustomer.id,
+    issueTotal: Number(totalIssueWeight.toFixed(3)),
+    issuePure: Number(totalIssuePure.toFixed(3)),
+    oldBalance: Number(oldBalance.toFixed(3)),
+    receiptPure: Number(totalReceiptPure.toFixed(3)),
+    cashPure: Number(totalCashPure.toFixed(3)),
+    balance: finalDistinctBalance,
+    advBal: Number(advBalance.toFixed(3)),
   };
 
+  try {
+    const response = await fetch(`${base_url}/transactions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(transactionData),
+    });
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${responseText}`);
+    }
+
+    const savedTransaction = await response.json();
+    console.log("✅ Transaction saved:", savedTransaction);
+
+    // ✅ FIX 2: Use correct endpoint based on customerType
+    const isB2C = selectedCustomer.customerType === "B2C";
+    const updateEndpoint = isB2C
+      ? `${base_url}/customersB2C/${selectedCustomer.id}`
+      : `${base_url}/customers/${selectedCustomer.id}`;
+
+    await fetch(updateEndpoint, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        billCurrentBalance: finalDistinctBalance, // ✅ ONLY this gets updated
+      }),
+    });
+
+    // ✅ FIX 3: Use actual customerType instead of hardcoded "B2B"
+    const customerType = selectedCustomer.customerType || "B2B";
+
+    const billSummaryData = {
+      customerId: selectedCustomer.id,
+      customerName: selectedCustomer.name,
+      customerType: customerType, // ✅ FIXED - was hardcoded "B2B"
+      invoiceNo: savedTransaction._id || "N/A",
+      date: date,
+      ob: Number(oldBalance.toFixed(3)),
+      issuePure: Number(totalIssuePure.toFixed(3)),
+      receiptPure: Number(totalReceiptPure.toFixed(3)),
+      cashPure: Number(totalCashPure.toFixed(3)),
+      gstPure: Number((gstEnabled ? gstPureValue : 0).toFixed(3)),
+      advBal: Number(advBalance.toFixed(3)),
+      currentBalance: finalDistinctBalance,
+      issueItems: issueItems.map((item) => ({
+        name: item.item,
+        gross: fmt(item.weight),
+        m: fmt(item.stone),
+        net: fmt(item.weight - item.stone),
+        calc: fmt(item.touch),
+        pure: fmt(item.purity),
+      })),
+      receiptItems: receiptItems.map((item) => ({
+        name: item.item,
+        weight: fmt(item.weight),
+        result: fmt(item.weight - item.stone),
+        calc: fmt(item.touch),
+        pure: fmt(item.purity),
+      })),
+      cashTable: cashTable,
+      gst: gstEnabled
+        ? {
+            enabled: true,
+            percentage: (
+              (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
+              (isCgstEnabled ? parseFloat(cgst) || 0 : 0) +
+              (isIgstEnabled ? parseFloat(igst) || 0 : 0)
+            ).toString(),
+            amount: gstAmount,
+            sgst: isSgstEnabled ? sgst : "0",
+            cgst: isCgstEnabled ? cgst : "0",
+            igst: isIgstEnabled ? igst : "0",
+          }
+        : null,
+    };
+
+    const billRes = await fetch(`${base_url}/billSummary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(billSummaryData),
+    });
+
+    if (billRes.ok) {
+      console.log("✅ Bill summary saved to DB");
+    } else {
+      console.error("⚠️ Failed to save bill summary");
+    }
+
+    navigation.navigate("BillPreview", {
+      customer: {
+        name: selectedCustomer.name,
+        phone: selectedCustomer.phone || "",
+        type: customerType, // ✅ FIXED - was hardcoded "B2B"
+        address: selectedCustomer.address || "",
+        gstin: selectedCustomer.gst || "",
+        date,
+        oldBalance: fmt(oldBalance),
+        advanceBalance: fmt(advBalance),
+        transactionId: savedTransaction._id,
+      },
+      issueItems: issueItems.map((item) => ({
+        name: item.item,
+        gross: fmt(item.weight),
+        m: fmt(item.stone),
+        net: fmt(item.weight - item.stone),
+        calc: fmt(item.touch),
+        pure: fmt(item.purity),
+      })),
+      receiptItems: receiptItems.map((item) => ({
+        name: item.item,
+        weight: fmt(item.weight),
+        result: fmt(item.weight - item.stone),
+        calc: fmt(item.touch),
+        pure: fmt(item.purity),
+      })),
+      cashTable: cashTable,
+      gst: gstEnabled
+        ? {
+            enabled: gstEnabled,
+            percentage: (
+              (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
+              (isCgstEnabled ? parseFloat(cgst) || 0 : 0) +
+              (isIgstEnabled ? parseFloat(igst) || 0 : 0)
+            ).toString(),
+            amount: gstAmount,
+            sgst: isSgstEnabled ? sgst : "0",
+            cgst: isCgstEnabled ? cgst : "0",
+            igst: isIgstEnabled ? igst : "0",
+            showInBill: true,
+          }
+        : null,
+      summary: {
+        ob: fmt(oldBalance),
+        issue: fmt(totalIssuePure),
+        gstPure: fmt(gstPureValue),
+        receipt: fmt(totalReceiptPure),
+        cash: fmt(totalCashPure),
+        current: fmt(finalDistinctBalance),
+        obPlusIssue: fmt(oldBalance + totalIssuePure + gstPureValue),
+        receiptPlusCash: fmt(totalReceiptPure + totalCashPure),
+      },
+    });
+  } catch (error) {
+    console.error("❌ Error saving transaction:", error);
+    Alert.alert("Error", `Failed to save transaction: ${error.message}`);
+  }
+};
 
   // -----------------------
   // UI rendering
@@ -1175,7 +1260,9 @@ export default function CreateTransaction({ navigation }) {
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      <View style={{ paddingTop: 40, paddingHorizontal: 16, paddingBottom: 300 }}>
+      <View
+        style={{ paddingTop: 40, paddingHorizontal: 16, paddingBottom: 300 }}
+      >
         {/* HEADER */}
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => navigation.navigate("Home")}>
@@ -1183,7 +1270,10 @@ export default function CreateTransaction({ navigation }) {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Create Transaction</Text>
           <View style={styles.headerIcons}>
-            <TouchableOpacity onPress={() => navigation.navigate("Home")} style={{ marginRight: 15 }}>
+            <TouchableOpacity
+              onPress={() => navigation.navigate("Home")}
+              style={{ marginRight: 15 }}
+            >
               <Icon name="home-outline" color="#000" size={30} />
             </TouchableOpacity>
             <TouchableOpacity
@@ -1200,7 +1290,9 @@ export default function CreateTransaction({ navigation }) {
         {!selectedCustomer && !loadingCustomers && (
           <View style={styles.card}>
             <View style={styles.sectionHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
                 <Icon name="account-group" size={24} />
                 <Text style={styles.sectionTitle}>All Customers</Text>
               </View>
@@ -1221,9 +1313,19 @@ export default function CreateTransaction({ navigation }) {
             <ScrollView style={{ maxHeight: 200 }}>
               {!cartSearch && recentNames.length > 0 && (
                 <View>
-                  <Text style={{ fontSize: 13, color: '#888', marginBottom: 10, marginLeft: 5, fontWeight: 'bold' }}>RECENT TRANSACTIONS</Text>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      color: "#888",
+                      marginBottom: 10,
+                      marginLeft: 5,
+                      fontWeight: "bold",
+                    }}
+                  >
+                    RECENT TRANSACTIONS
+                  </Text>
                   {customers
-                    .filter(c => recentNames.includes(c.name))
+                    .filter((c) => recentNames.includes(c.name))
                     .map((cust, index) => {
                       let currentBalance = Number(cust.ob);
                       let advanceBalance = Number(cust.ab);
@@ -1235,20 +1337,41 @@ export default function CreateTransaction({ navigation }) {
                         <TouchableOpacity
                           key={`recent-${cust.id || index}`}
                           onPress={() => setSelectedCustomer(cust)}
-                          style={[styles.listItem, { borderLeftWidth: 4, borderLeftColor: '#2E7D32' }]}
+                          style={[
+                            styles.listItem,
+                            { borderLeftWidth: 4, borderLeftColor: "#2E7D32" },
+                          ]}
                         >
                           <View>
                             <Text style={styles.listItemText}>
-                              <Text style={{ fontWeight: 'bold', color: '#000' }}>{cust.name}</Text> | P : {cust.phone}
+                              <Text
+                                style={{ fontWeight: "bold", color: "#000" }}
+                              >
+                                {cust.name}
+                              </Text>{" "}
+                              | P : {cust.phone}
                             </Text>
                             <Text style={styles.balanceText}>
-                              OB: {currentBalance.toFixed(3)}g {advanceBalance > 0 ? `| AB: ${advanceBalance.toFixed(3)}g` : ''}
+                              OB: {currentBalance.toFixed(3)}g{" "}
+                              {advanceBalance > 0
+                                ? `| AB: ${advanceBalance.toFixed(3)}g`
+                                : ""}
                             </Text>
                           </View>
                         </TouchableOpacity>
                       );
                     })}
-                  <Text style={{ fontSize: 13, color: '#888', marginVertical: 10, marginLeft: 5, fontWeight: 'bold' }}>ALL CUSTOMERS</Text>
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      color: "#888",
+                      marginVertical: 10,
+                      marginLeft: 5,
+                      fontWeight: "bold",
+                    }}
+                  >
+                    ALL CUSTOMERS
+                  </Text>
                 </View>
               )}
               {filteredCartCustomers.length > 0 ? (
@@ -1270,10 +1393,16 @@ export default function CreateTransaction({ navigation }) {
                     >
                       <View>
                         <Text style={styles.listItemText}>
-                          <Text style={{ fontWeight: 'bold', color: '#000' }}>{cust.name}</Text> | P : {cust.phone}
+                          <Text style={{ fontWeight: "bold", color: "#000" }}>
+                            {cust.name}
+                          </Text>{" "}
+                          | P : {cust.phone}
                         </Text>
                         <Text style={styles.balanceText}>
-                          OB: {currentBalance.toFixed(3)}g {advanceBalance > 0 ? `| AB: ${advanceBalance.toFixed(3)}g` : ''}
+                          OB: {currentBalance.toFixed(3)}g{" "}
+                          {advanceBalance > 0
+                            ? `| AB: ${advanceBalance.toFixed(3)}g`
+                            : ""}
                         </Text>
                       </View>
                     </TouchableOpacity>
@@ -1290,7 +1419,9 @@ export default function CreateTransaction({ navigation }) {
         {selectedCustomer && (
           <View style={styles.card}>
             <View style={styles.sectionHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
                 <Icon name="account-circle" size={24} />
                 <Text style={styles.sectionTitle}>Customer Info</Text>
               </View>
@@ -1341,14 +1472,15 @@ export default function CreateTransaction({ navigation }) {
               <Text style={styles.sectionTitle}>Issue Entry</Text>
               <View style={styles.cartContainer}>
                 <Icon name="cart" size={24} color="#000" />
-                <Text style={styles.cartText}>{totalIssuePure.toFixed(3)}g</Text>
+                <Text style={styles.cartText}>
+                  {totalIssuePure.toFixed(3)}g
+                </Text>
                 {issueItems.length > 0 && (
                   <View style={styles.badge}>
                     <Text style={styles.badgeText}>{issueItems.length}</Text>
                   </View>
                 )}
               </View>
-
             </View>
 
             {/* SEARCH BOX */}
@@ -1368,26 +1500,25 @@ export default function CreateTransaction({ navigation }) {
 
             {issueItemDropdownOpen && !loadingItems && (
               <View style={styles.dropdownFloating}>
-                {itemsList.filter(
-                  (it) =>
-                    it.itemName
-                      .toLowerCase()
-                      .includes(issueItemSearch.toLowerCase()) &&
-                    (it.type === "issue" || it.issue)
-                ).length > 0 ? (
+                {itemsList.length > 0 ? (
                   itemsList
                     .filter(
                       (it) =>
+                        // Filter by search
                         it.itemName
                           .toLowerCase()
                           .includes(issueItemSearch.toLowerCase()) &&
-                        (it.type === "issue" || it.issue)
+                        // Filter by required type
+                        it.type === "issue",
                     )
-                    .slice(0, 10)
+                    .slice(0, 3)
                     .map((it, idx) => (
                       <TouchableOpacity
                         key={idx}
-                        style={[styles.listItem, styles.dropdownItemContentIssue]}
+                        style={[
+                          styles.listItem,
+                          styles.dropdownItemContentIssue,
+                        ]}
                         onPress={() => {
                           setSelectedIssueItem(it.itemName);
                           setIssueItemDropdownOpen(false);
@@ -1395,16 +1526,16 @@ export default function CreateTransaction({ navigation }) {
                           setTouch(it.sellingTouch?.toString() || ""); // Auto-fill touch
                         }}
                       >
-                        <Text style={styles.dropdownItemTextIssue}>{it.itemName}</Text>
+                        <Text style={styles.dropdownItemTextIssue}>
+                          {it.itemName}
+                        </Text>
                         <Text style={styles.dropdownItemWeightIssue}>
                           Weight: {itemsStock[it.itemName]?.weight || 0} g
                         </Text>
                       </TouchableOpacity>
                     ))
                 ) : (
-                  <View style={{ padding: 15 }}>
-                    <Text style={styles.infoText}>No matching issue items</Text>
-                  </View>
+                  <Text style={styles.infoText}>No items in stock master</Text>
                 )}
               </View>
             )}
@@ -1517,7 +1648,9 @@ export default function CreateTransaction({ navigation }) {
               <Text style={styles.sectionTitle}>Receipt Entry</Text>
               <View style={styles.cartContainer}>
                 <Icon name="cart" size={24} color="#000" />
-                <Text style={styles.cartText}>{totalReceiptPure.toFixed(3)}g</Text>
+                <Text style={styles.cartText}>
+                  {totalReceiptPure.toFixed(3)}g
+                </Text>
                 {receiptItems.length > 0 && (
                   <View style={styles.badge}>
                     <Text style={styles.badgeText}>{receiptItems.length}</Text>
@@ -1543,26 +1676,25 @@ export default function CreateTransaction({ navigation }) {
 
             {receiptItemDropdownOpen && !loadingItems && (
               <View style={styles.dropdownFloating}>
-                {itemsList.filter(
-                  (it) =>
-                    it.itemName
-                      .toLowerCase()
-                      .includes(receiptItemSearch.toLowerCase()) &&
-                    (it.type === "receipt" || it.receipt)
-                ).length > 0 ? (
+                {itemsList.length > 0 ? (
                   itemsList
                     .filter(
                       (it) =>
+                        // Filter by search input
                         it.itemName
                           .toLowerCase()
                           .includes(receiptItemSearch.toLowerCase()) &&
-                        (it.type === "receipt" || it.receipt)
+                        // Filter by required type
+                        it.type === "receipt",
                     )
-                    .slice(0, 10)
+                    .slice(0, 3)
                     .map((it, idx) => (
                       <TouchableOpacity
                         key={idx}
-                        style={[styles.listItem, styles.dropdownItemContentReceipt]}
+                        style={[
+                          styles.listItem,
+                          styles.dropdownItemContentReceipt,
+                        ]}
                         onPress={() => {
                           setSelectedReceiptItem(it.itemName);
                           setReceiptItemDropdownOpen(false);
@@ -1570,16 +1702,16 @@ export default function CreateTransaction({ navigation }) {
                           setReceiptTouch(it.sellingTouch?.toString() || ""); // Auto-fill touch
                         }}
                       >
-                        <Text style={styles.dropdownItemTextReceipt}>{it.itemName}</Text>
+                        <Text style={styles.dropdownItemTextReceipt}>
+                          {it.itemName}
+                        </Text>
                         <Text style={styles.dropdownItemWeightReceipt}>
                           Weight: {itemsStock[it.itemName]?.weight || 0} g
                         </Text>
                       </TouchableOpacity>
                     ))
                 ) : (
-                  <View style={{ padding: 15 }}>
-                    <Text style={styles.infoText}>No matching receipt items</Text>
-                  </View>
+                  <Text style={styles.infoText}>No items in stock master</Text>
                 )}
               </View>
             )}
@@ -1629,8 +1761,8 @@ export default function CreateTransaction({ navigation }) {
                       calcReceiptPure(
                         receiptWeight || 0,
                         receiptStone || 0,
-                        receiptTouch || 0
-                      )
+                        receiptTouch || 0,
+                      ),
                     )}{" "}
                     g
                   </Text>
@@ -1739,21 +1871,7 @@ export default function CreateTransaction({ navigation }) {
         {/* CASH ENTRY */}
         {selectedCustomer && (
           <View style={styles.card}>
-            <View style={styles.issueHeader}>
-              <View style={[styles.greenDot, { backgroundColor: "#f39c12" }]} />
-              <Text style={styles.sectionTitle}>Cash Received</Text>
-              <View style={styles.cartContainerColumn}>
-                <View style={styles.cartIconWrapper}>
-                  <Icon name="cart" size={24} color="#000" />
-                  {cashTable.length > 0 && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{cashTable.length}</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.cartTextBelow}>{totalCashPure.toFixed(3)}g</Text>
-              </View>
-            </View>
+            <Text style={styles.sectionTitle}>Cash Received</Text>
 
             <Text style={styles.subLabel}>Rupees ₹</Text>
             <TextInput
@@ -1858,7 +1976,12 @@ export default function CreateTransaction({ navigation }) {
                   }
                 }}
               >
-                <View style={[styles.checkbox, gstEnabled && styles.checkboxChecked]}>
+                <View
+                  style={[
+                    styles.checkbox,
+                    gstEnabled && styles.checkboxChecked,
+                  ]}
+                >
                   {gstEnabled && <Icon name="check" size={16} color="#fff" />}
                 </View>
                 <Text style={styles.checkboxLabel}>Enable GST</Text>
@@ -1869,19 +1992,44 @@ export default function CreateTransaction({ navigation }) {
               <View>
                 <View style={styles.row}>
                   <View style={styles.inputBox}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                      <TouchableOpacity onPress={() => setIsSgstEnabled(!isSgstEnabled)}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        marginBottom: 5,
+                      }}
+                    >
+                      <TouchableOpacity
+                        onPress={() => setIsSgstEnabled(!isSgstEnabled)}
+                      >
                         <Icon
-                          name={isSgstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
+                          name={
+                            isSgstEnabled
+                              ? "checkbox-marked"
+                              : "checkbox-blank-outline"
+                          }
                           size={20}
                           color={isSgstEnabled ? "#0aa76a" : "#666"}
                         />
                       </TouchableOpacity>
-                      <Text style={[styles.subLabel, { marginBottom: 0, marginLeft: 8 }]}>SGST (%)</Text>
+                      <Text
+                        style={[
+                          styles.subLabel,
+                          { marginBottom: 0, marginLeft: 8 },
+                        ]}
+                      >
+                        SGST (%)
+                      </Text>
                     </View>
 
                     <TextInput
-                      style={[styles.input, !isSgstEnabled && { backgroundColor: '#f0f0f0', color: '#999' }]}
+                      style={[
+                        styles.input,
+                        !isSgstEnabled && {
+                          backgroundColor: "#f0f0f0",
+                          color: "#999",
+                        },
+                      ]}
                       value={sgst}
                       editable={isSgstEnabled}
                       onChangeText={(val) => {
@@ -1892,18 +2040,43 @@ export default function CreateTransaction({ navigation }) {
                     />
                   </View>
                   <View style={styles.inputBox}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                      <TouchableOpacity onPress={() => setIsCgstEnabled(!isCgstEnabled)}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        marginBottom: 5,
+                      }}
+                    >
+                      <TouchableOpacity
+                        onPress={() => setIsCgstEnabled(!isCgstEnabled)}
+                      >
                         <Icon
-                          name={isCgstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
+                          name={
+                            isCgstEnabled
+                              ? "checkbox-marked"
+                              : "checkbox-blank-outline"
+                          }
                           size={20}
                           color={isCgstEnabled ? "#0aa76a" : "#666"}
                         />
                       </TouchableOpacity>
-                      <Text style={[styles.subLabel, { marginBottom: 0, marginLeft: 8 }]}>CGST (%)</Text>
+                      <Text
+                        style={[
+                          styles.subLabel,
+                          { marginBottom: 0, marginLeft: 8 },
+                        ]}
+                      >
+                        CGST (%)
+                      </Text>
                     </View>
                     <TextInput
-                      style={[styles.input, !isCgstEnabled && { backgroundColor: '#f0f0f0', color: '#999' }]}
+                      style={[
+                        styles.input,
+                        !isCgstEnabled && {
+                          backgroundColor: "#f0f0f0",
+                          color: "#999",
+                        },
+                      ]}
                       value={cgst}
                       editable={isCgstEnabled}
                       onChangeText={(val) => {
@@ -1917,18 +2090,43 @@ export default function CreateTransaction({ navigation }) {
 
                 <View style={styles.row}>
                   <View style={styles.inputBox}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                      <TouchableOpacity onPress={() => setIsIgstEnabled(!isIgstEnabled)}>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        marginBottom: 5,
+                      }}
+                    >
+                      <TouchableOpacity
+                        onPress={() => setIsIgstEnabled(!isIgstEnabled)}
+                      >
                         <Icon
-                          name={isIgstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
+                          name={
+                            isIgstEnabled
+                              ? "checkbox-marked"
+                              : "checkbox-blank-outline"
+                          }
                           size={20}
                           color={isIgstEnabled ? "#0aa76a" : "#666"}
                         />
                       </TouchableOpacity>
-                      <Text style={[styles.subLabel, { marginBottom: 0, marginLeft: 8 }]}>IGST (%)</Text>
+                      <Text
+                        style={[
+                          styles.subLabel,
+                          { marginBottom: 0, marginLeft: 8 },
+                        ]}
+                      >
+                        IGST (%)
+                      </Text>
                     </View>
                     <TextInput
-                      style={[styles.input, !isIgstEnabled && { backgroundColor: '#f0f0f0', color: '#999' }]}
+                      style={[
+                        styles.input,
+                        !isIgstEnabled && {
+                          backgroundColor: "#f0f0f0",
+                          color: "#999",
+                        },
+                      ]}
                       value={igst}
                       editable={isIgstEnabled}
                       onChangeText={(val) => {
@@ -1941,7 +2139,7 @@ export default function CreateTransaction({ navigation }) {
                   <View style={styles.inputBox}>
                     <Text style={styles.subLabel}>Total GST %</Text>
                     <TextInput
-                      style={[styles.input, { backgroundColor: '#e0e0e0' }]}
+                      style={[styles.input, { backgroundColor: "#e0e0e0" }]}
                       value={gstPercentage}
                       editable={false}
                       placeholder="0.0"
@@ -1949,7 +2147,9 @@ export default function CreateTransaction({ navigation }) {
                   </View>
                 </View>
 
-                <Text style={[styles.subLabel, { marginTop: 12 }]}>GST Amount (₹)</Text>
+                <Text style={[styles.subLabel, { marginTop: 12 }]}>
+                  GST Amount (₹)
+                </Text>
                 <TextInput
                   style={styles.input}
                   value={gstAmount}
@@ -1970,9 +2170,27 @@ export default function CreateTransaction({ navigation }) {
             animationType="slide"
             onRequestClose={() => setShowSavedGstModal(false)}
           >
-            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
-              <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 20, maxHeight: 500 }}>
-                <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 15 }}>Select a Saved GST Record</Text>
+            <View
+              style={{
+                flex: 1,
+                backgroundColor: "rgba(0,0,0,0.5)",
+                justifyContent: "center",
+                padding: 20,
+              }}
+            >
+              <View
+                style={{
+                  backgroundColor: "#fff",
+                  borderRadius: 12,
+                  padding: 20,
+                  maxHeight: 500,
+                }}
+              >
+                <Text
+                  style={{ fontSize: 18, fontWeight: "bold", marginBottom: 15 }}
+                >
+                  Select a Saved GST Record
+                </Text>
 
                 <ScrollView>
                   {savedGstList.map((item) => (
@@ -1980,8 +2198,8 @@ export default function CreateTransaction({ navigation }) {
                       key={item.id}
                       style={{
                         borderBottomWidth: 1,
-                        borderBottomColor: '#eee',
-                        paddingVertical: 12
+                        borderBottomColor: "#eee",
+                        paddingVertical: 12,
                       }}
                       onPress={() => {
                         setSgst(item.sgst || "");
@@ -1991,8 +2209,12 @@ export default function CreateTransaction({ navigation }) {
                         setShowSavedGstModal(false);
                       }}
                     >
-                      <Text style={{ fontWeight: 'bold' }}>{item.type} - HSN: {item.hsn}</Text>
-                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                      <Text style={{ fontWeight: "bold" }}>
+                        {item.type} - HSN: {item.hsn}
+                      </Text>
+                      <View
+                        style={{ flexDirection: "row", gap: 10, marginTop: 4 }}
+                      >
                         <Text>SGST: {item.sgst || 0}%</Text>
                         <Text>CGST: {item.cgst || 0}%</Text>
                         <Text>IGST: {item.igst || 0}%</Text>
@@ -2001,15 +2223,25 @@ export default function CreateTransaction({ navigation }) {
                   ))}
 
                   {savedGstList.length === 0 && (
-                    <Text style={{ textAlign: 'center', color: '#888', marginVertical: 20 }}>No saved records found.</Text>
+                    <Text
+                      style={{
+                        textAlign: "center",
+                        color: "#888",
+                        marginVertical: 20,
+                      }}
+                    >
+                      No saved records found.
+                    </Text>
                   )}
                 </ScrollView>
 
                 <TouchableOpacity
-                  style={{ marginTop: 20, alignSelf: 'center', padding: 10 }}
+                  style={{ marginTop: 20, alignSelf: "center", padding: 10 }}
                   onPress={() => setShowSavedGstModal(false)}
                 >
-                  <Text style={{ color: 'red', fontWeight: 'bold' }}>Close</Text>
+                  <Text style={{ color: "red", fontWeight: "bold" }}>
+                    Close
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -2026,7 +2258,9 @@ export default function CreateTransaction({ navigation }) {
                 <View style={styles.summaryHeaderRow}>
                   <Text style={styles.summaryHeaderText}>Issue Total (g)</Text>
                   <Text style={styles.summaryHeaderText}>Issue Pure (g)</Text>
-                  {gstEnabled && <Text style={styles.summaryHeaderText}>GST Pure (g)</Text>}
+                  {gstEnabled && (
+                    <Text style={styles.summaryHeaderText}>GST Pure (g)</Text>
+                  )}
                   <Text style={styles.summaryHeaderText}>Old Balance (g)</Text>
                   <Text style={styles.summaryHeaderText}>Receipt Pure (g)</Text>
                   <Text style={styles.summaryHeaderText}>Cash Pure (g)</Text>
@@ -2035,11 +2269,17 @@ export default function CreateTransaction({ navigation }) {
                 </View>
 
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryCell}>{fmt(totalIssueWeight)}</Text>
+                  <Text style={styles.summaryCell}>
+                    {fmt(totalIssueWeight)}
+                  </Text>
                   <Text style={styles.summaryCell}>{fmt(totalIssuePure)}</Text>
-                  {gstEnabled && <Text style={styles.summaryCell}>{fmt(gstPureValue)}</Text>}
+                  {gstEnabled && (
+                    <Text style={styles.summaryCell}>{fmt(gstPureValue)}</Text>
+                  )}
                   <Text style={styles.summaryCell}>{fmt(oldBalance)}</Text>
-                  <Text style={styles.summaryCell}>{fmt(totalReceiptPure)}</Text>
+                  <Text style={styles.summaryCell}>
+                    {fmt(totalReceiptPure)}
+                  </Text>
                   <Text style={styles.summaryCell}>{fmt(totalCashPure)}</Text>
                   <Text style={styles.summaryCell}>{fmt(balance)}</Text>
                   <Text style={styles.summaryCell}>{fmt(advBalance)}</Text>
@@ -2134,20 +2374,20 @@ const styles = StyleSheet.create({
 
   dropdownFloating: {
     position: "absolute",
-    top: 110,
+    top: 130,
     left: 18,
     right: 18,
     backgroundColor: "#fff",
     borderRadius: 12,
-    elevation: 15,
-    zIndex: 99999,
-    maxHeight: 250,
+    elevation: 10,
+    zIndex: 10000,
+    maxHeight: 200,
     borderWidth: 1,
     borderColor: "#E0E0E0",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
     overflow: "hidden",
   },
   sectionHeader: {
@@ -2550,22 +2790,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#333",
-  },
-  cartContainerColumn: {
-    alignItems: "center",
-    marginLeft: "auto",
-    justifyContent: "center",
-  },
-  cartIconWrapper: {
-    position: "relative",
-  },
-  cartTextBelow: {
-    color: "#555",
-    fontSize: 11,
-    fontWeight: "700",
-    marginTop: 2,
-    backgroundColor: "#F0F0F0",
-    paddingHorizontal: 4,
-    borderRadius: 4,
   },
 });

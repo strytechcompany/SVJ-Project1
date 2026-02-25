@@ -25,11 +25,13 @@ router.get('/:id', async (req, res) => {
 
 // Create new customer
 router.post('/', async (req, res) => {
-  const { customerName, phoneNumber, shopName, address, oldBalance, advanceBalance, gstin} = req.body;
+  const { customerName, phoneNumber, shopName, address, oldBalance, advanceBalance, gstin } = req.body;
 
   try {
-    // Check duplicate
-    const exists = await Customer.findOne({ customerName: customerName.trim(), shopName: shopName.trim() });
+    const exists = await Customer.findOne({ 
+      customerName: customerName.trim(), 
+      shopName: shopName.trim() 
+    });
     if (exists) return res.status(400).json({ message: 'Customer already exists' });
 
     const customer = new Customer({
@@ -40,6 +42,7 @@ router.post('/', async (req, res) => {
       oldBalance: oldBalance || 0,
       advanceBalance: advanceBalance || 0,
       gstin: gstin || '',
+      billCurrentBalance: 0,
     });
 
     const newCustomer = await customer.save();
@@ -49,21 +52,31 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Update customer
+// Update customer - FIXED
 router.put('/:id', async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
     if (!customer) return res.status(404).json({ message: 'Customer not found' });
 
-    const { customerName, phoneNumber, shopName, address, oldBalance, advanceBalance } = req.body;
+    const { 
+      customerName, 
+      phoneNumber, 
+      shopName, 
+      address, 
+      oldBalance, 
+      advanceBalance, 
+      gstin,
+      billCurrentBalance  // ✅ NEW
+    } = req.body;
 
-    if (customerName) customer.customerName = customerName;
-    if (phoneNumber) customer.phoneNumber = phoneNumber;
-    if (shopName) customer.shopName = shopName;
-    if (address) customer.address = address;
+    if (customerName !== undefined) customer.customerName = customerName;
+    if (phoneNumber !== undefined) customer.phoneNumber = phoneNumber;
+    if (shopName !== undefined) customer.shopName = shopName;
+    if (address !== undefined) customer.address = address;
     if (oldBalance !== undefined) customer.oldBalance = oldBalance;
     if (advanceBalance !== undefined) customer.advanceBalance = advanceBalance;
     if (gstin !== undefined) customer.gstin = gstin;
+    if (billCurrentBalance !== undefined) customer.billCurrentBalance = billCurrentBalance; // ✅ NEW
 
     const updatedCustomer = await customer.save();
     res.json(updatedCustomer);

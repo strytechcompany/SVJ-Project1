@@ -1,6 +1,5 @@
 const mongoose = require('mongoose');
 
-// Generate 6-digit customer ID
 function generateCustomerId() {
   return Math.floor(100000 + Math.random() * 900000);
 }
@@ -40,15 +39,19 @@ const customerSchema = new mongoose.Schema({
     default: 0,
   },
   gstin: {
-  type: String,
-  default: '',
-  trim: true,
-},
+    type: String,
+    default: '',
+    trim: true,
+  },
+  // ✅ NEW FIELD - stores the CURRENT value from last generated bill
+  billCurrentBalance: {
+    type: Number,
+    default: 0,
+  },
 }, {
   timestamps: true
 });
 
-// Unique index to prevent duplicate customerName + shopName
 customerSchema.index({ customerName: 1, shopName: 1 }, { unique: true });
 
 module.exports = mongoose.model('Customer', customerSchema);

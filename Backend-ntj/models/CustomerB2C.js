@@ -35,7 +35,11 @@ const customerB2CSchema = new mongoose.Schema({
   gstin: { 
     type: String, 
     default: "" 
-  }
-}, { timestamps: true });
+  },
+  billCurrentBalance: { 
+    type: Number, 
+    default: 0 },
+}, 
+{ timestamps: true });
 
 module.exports = mongoose.model('CustomerB2C', customerB2CSchema);
