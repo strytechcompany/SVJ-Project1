@@ -424,23 +424,64 @@ export default function CreateTransaction({ navigation }) {
           setSearch(cust.name);
           setPhone(cust.phone || "");
         } else {
-          // If customer not found in list, create a temporary selected customer
           setSelectedCustomer({
-            name: data.customerName,
+            name: data.customerName || "Estimate Customer",
             id: data.customerId || "N/A",
             phone: data.phone || "",
             ob: data.oldBalance || 0,
             ab: data.advBal || 0,
           });
-          setSearch(data.customerName);
+          setSearch(data.customerName || "Estimate Customer");
           setPhone(data.phone || "");
         }
       }
 
-      if (data.itemName) {
+      if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+        // Handle multiple items from estimate
+        const mappedIssueItems = data.items.map((item, idx) => {
+          const w = parseFloat(item.weight) || 0;
+          const s = 0; // No stone weight from estimate
+          const t = parseFloat(item.wastagePercent) || 0;
+          const p = (w - s) * (t / 100);
+
+          return {
+            id: Date.now() + idx,
+            item: item.itemName,
+            weight: w.toFixed(3),
+            stone: s.toFixed(3),
+            touch: t.toFixed(3),
+            purity: p.toFixed(3),
+            details: "Transferred from Estimate"
+          };
+        });
+        setIssueItems(mappedIssueItems);
+
+        // Populate inputs with first item
+        const first = data.items[0];
+        setSelectedIssueItem(first.itemName);
+        setWeight(first.weight?.toString() || "");
+        setTouch(first.wastagePercent?.toString() || "");
+      } else if (data.itemName) {
+        // Single item fallback
         setSelectedIssueItem(data.itemName);
         setWeight(data.weight?.toString() || "");
         setTouch(data.touch?.toString() || "");
+
+        // Add it to the table immediately for better UX
+        const w = parseFloat(data.weight) || 0;
+        const s = 0;
+        const t = parseFloat(data.touch) || 0;
+        const p = (w - s) * (t / 100);
+
+        setIssueItems([{
+          id: Date.now(),
+          item: data.itemName,
+          weight: w.toFixed(3),
+          stone: s.toFixed(3),
+          touch: t.toFixed(3),
+          purity: p.toFixed(3),
+          details: "Transferred from Estimate"
+        }]);
       }
 
       if (data.ftRate) {
