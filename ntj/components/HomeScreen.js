@@ -42,6 +42,32 @@ export default function HomeScreen() {
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [currentDateTime, setCurrentDateTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentDateTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatDateTime = (date) => {
+    const d = date || new Date();
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    const seconds = String(d.getSeconds()).padStart(2, "0");
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+
+    hours = hours % 12;
+    hours = hours ? hours : 12; // the hour '0' should be '12'
+    const strHours = String(hours).padStart(2, "0");
+
+    return `${day}-${month}-${year} ${strHours}:${minutes}:${seconds} ${ampm}`;
+  };
 
   useEffect(() => {
     fetchData();
@@ -172,6 +198,21 @@ export default function HomeScreen() {
     }
 
     setModalVisible(false);
+  };
+
+
+  const handleRefresh = async () => {
+    setLoading(true);
+    try {
+      await fetchData();
+      await loadRates();
+      console.log("Success", "Data refreshed successfully!");
+    } catch (error) {
+      console.error("Refresh error:", error);
+      console.log("Error", "Failed to refresh data.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const filteredTransactions = transactions.filter((txn) => {
@@ -307,40 +348,39 @@ export default function HomeScreen() {
             }}
           >
             <Text style={styles.headerText}>Hey! Super Admin</Text>
-            <TouchableOpacity onPress={() => navigation.navigate("#")}>
-              <Icon
-                name="logout"
-                size={25}
-                color="red"
-                style={{ top: 25 }}
-              />
-            </TouchableOpacity>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 15 }}>
+              <TouchableOpacity onPress={handleRefresh}>
+                <Icon name="refresh" size={28} color="#fff" style={{ top: 25 }} />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
         {/* Gold + FT Card */}
         <View style={styles.goldCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.goldLabel}>GOLD PRICE</Text>
-            <Text style={styles.goldRate}>₹{goldRate}</Text>
-            <Text style={styles.liveRate}>LIVE RATE</Text>
-            <Text style={styles.liveDate}>{goldDate}</Text>
+          <TouchableOpacity
+            style={styles.cardEditIcon}
+            onPress={() => setModalVisible(true)}
+          >
+            <Icon name="pencil" size={20} style={{ top: 70 }} color="#FFD700" />
+          </TouchableOpacity>
+
+          <View style={styles.cardRow}>
+            <View>
+              <Text style={styles.goldLabel}>GOLD PRICE</Text>
+              <Text style={styles.goldRate}>₹{goldRate}</Text>
+            </View>
+            <View style={{ alignItems: "flex-end" }}>
+              <Text style={styles.goldLabel}>FT RATE</Text>
+              <Text style={styles.goldRate}>₹{ftRate}</Text>
+            </View>
           </View>
 
-          <View style={{ flex: 1, alignItems: "flex-end" }}>
-            <Text style={styles.goldLabel}>FT RATE</Text>
-            <Text style={styles.goldRate}>₹{ftRate}</Text>
-            <Text style={styles.liveRate}>LIVE RATE</Text>
-            <Text style={styles.liveDate}>{ftDate}</Text>
+          <View style={styles.cardBottomRow}>
+            <Icon name="clock-outline" size={14} color="#FFD700" style={{ marginRight: 6 }} />
+            <Text style={styles.clockTextInside}>{formatDateTime(currentDateTime)}</Text>
           </View>
         </View>
-
-        <TouchableOpacity
-          style={styles.editBtn}
-          onPress={() => setModalVisible(true)}
-        >
-          <Text style={styles.editBtnText}>Edit Gold Rate</Text>
-        </TouchableOpacity>
 
         <Text style={styles.sectionTitle}>Quick Access</Text>
 
@@ -351,7 +391,7 @@ export default function HomeScreen() {
               navigation.navigate("B2BCalculationPage", { ftRate })
             }
           >
-            <Text style={styles.quickTileText}>B2B Transaction</Text>
+            <Text style={styles.quickTileText}>B2B</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -360,14 +400,14 @@ export default function HomeScreen() {
               navigation.navigate("B2CCalculationPage", { goldRate })
             }
           >
-            <Text style={styles.quickTileText}>B2C Transaction</Text>
+            <Text style={styles.quickTileText}>B2C</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.quickTile}
-            onPress={() => navigation.navigate("Payments")}
+            onPress={() => navigation.navigate("StockMaster")}
           >
-            <Text style={styles.quickTileText}>Payments</Text>
+            <Text style={styles.quickTileText}>StockMaster</Text>
           </TouchableOpacity>
         </View>
 
@@ -631,39 +671,64 @@ const styles = StyleSheet.create({
   },
   goldCard: {
     backgroundColor: "#1B4D1B",
-    margin: 20,
+    marginHorizontal: 15,
+    marginTop: 20,
     borderRadius: 20,
     padding: 20,
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+  },
+  cardRow: {
     flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 15,
   },
   goldLabel: {
     color: "#FFD700",
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "bold",
+    letterSpacing: 0.5,
   },
   goldRate: {
     color: "#fff",
-    fontSize: 40,
+    fontSize: 28,
     fontWeight: "bold",
+  },
+  cardBottomRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 215, 0, 0.2)",
+    paddingTop: 12,
+  },
+  clockTextInside: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+    letterSpacing: 0.5,
   },
   liveRate: {
-    color: "red",
-    marginTop: 10,
-    fontWeight: "600",
+    display: 'none',
   },
   liveDate: {
-    color: "#ffffff",
+    display: 'none',
+  },
+  cardEditIcon: {
+    position: "absolute",
+    top: 15,
+    right: 15,
+    padding: 5,
+    zIndex: 5,
+  },
+  dateTimeContainer: {
+    display: 'none',
   },
   editBtn: {
-    backgroundColor: "#FFD700",
-    marginHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 20,
-    alignItems: "center",
-  },
-  editBtnText: {
-    fontWeight: "bold",
-    fontSize: 16,
+    display: 'none',
   },
   sectionTitle: {
     marginLeft: 20,
