@@ -100,9 +100,9 @@ export default function CreateTransaction({ navigation }) {
   useEffect(() => {
     saveStock();
   }, [itemsStock]);
-  
 
- 
+
+
   // Handle customer name change for searchable dropdown
   const handleCustomerNameChange = (text) => {
     setSearch(text);
@@ -127,7 +127,7 @@ export default function CreateTransaction({ navigation }) {
     setShowDropdown(false);
   };
 
- 
+
 
   useEffect(() => {
     const loadSavedGstList = async () => {
@@ -170,9 +170,9 @@ export default function CreateTransaction({ navigation }) {
     }
   }, [gstEnabled, gstPercentage, goldRate, totalIssuePure]);
 
-  
 
-  
+
+
 
   // Handler for stock update on receipt weight blur
   const updateReceiptStock = async (newWeight) => {
@@ -304,6 +304,8 @@ export default function CreateTransaction({ navigation }) {
           sellingTouch: item.sellingTouch,
           percentage: item.percentage,
           type: item.type,
+          issue: item.issue, // added
+          receipt: item.receipt, // added
           date: item.date,
         }))
         .filter((item) => item.itemName); // ensure stockName exists
@@ -343,7 +345,7 @@ export default function CreateTransaction({ navigation }) {
         }
       };
 
-      fetchStock();
+      await fetchStock();
     } catch (error) {
       console.error("Error fetching items:", error);
       Alert.alert("Error", "Failed to load items from stock master");
@@ -866,7 +868,7 @@ export default function CreateTransaction({ navigation }) {
     setCashTable((prev) => prev.filter((p) => p.id !== id));
   };
 
-  
+
   let oldBalance = selectedCustomer
     ? Number(parseNum(selectedCustomer.ob))
     : 0;
@@ -1066,11 +1068,11 @@ export default function CreateTransaction({ navigation }) {
           phone: selectedCustomer.phone || "",
           type: "B2B",
           address: selectedCustomer.address || "",
-          gstin: selectedCustomer.gst || "", 
+          gstin: selectedCustomer.gst || "",
           date,
           oldBalance: fmt(oldBalance),
           advanceBalance: fmt(advBalance),
-          transactionId: savedTransaction._id, 
+          transactionId: savedTransaction._id,
         },
 
         issueItems: issueItems.map((item) => ({
@@ -1121,7 +1123,7 @@ export default function CreateTransaction({ navigation }) {
     }
   };
 
-  
+
   // -----------------------
   // UI rendering
   // -----------------------
@@ -1325,18 +1327,22 @@ export default function CreateTransaction({ navigation }) {
 
             {issueItemDropdownOpen && !loadingItems && (
               <View style={styles.dropdownFloating}>
-                {itemsList.length > 0 ? (
+                {itemsList.filter(
+                  (it) =>
+                    it.itemName
+                      .toLowerCase()
+                      .includes(issueItemSearch.toLowerCase()) &&
+                    (it.type === "issue" || it.issue)
+                ).length > 0 ? (
                   itemsList
                     .filter(
                       (it) =>
-                        // Filter by search
                         it.itemName
                           .toLowerCase()
                           .includes(issueItemSearch.toLowerCase()) &&
-                        // Filter by required type
-                        it.type === "issue"
+                        (it.type === "issue" || it.issue)
                     )
-                    .slice(0, 3)
+                    .slice(0, 10)
                     .map((it, idx) => (
                       <TouchableOpacity
                         key={idx}
@@ -1355,7 +1361,9 @@ export default function CreateTransaction({ navigation }) {
                       </TouchableOpacity>
                     ))
                 ) : (
-                  <Text style={styles.infoText}>No items in stock master</Text>
+                  <View style={{ padding: 15 }}>
+                    <Text style={styles.infoText}>No matching issue items</Text>
+                  </View>
                 )}
               </View>
             )}
@@ -1494,18 +1502,22 @@ export default function CreateTransaction({ navigation }) {
 
             {receiptItemDropdownOpen && !loadingItems && (
               <View style={styles.dropdownFloating}>
-                {itemsList.length > 0 ? (
+                {itemsList.filter(
+                  (it) =>
+                    it.itemName
+                      .toLowerCase()
+                      .includes(receiptItemSearch.toLowerCase()) &&
+                    (it.type === "receipt" || it.receipt)
+                ).length > 0 ? (
                   itemsList
                     .filter(
                       (it) =>
-                        // Filter by search input
                         it.itemName
                           .toLowerCase()
                           .includes(receiptItemSearch.toLowerCase()) &&
-                        // Filter by required type
-                        it.type === "receipt"
+                        (it.type === "receipt" || it.receipt)
                     )
-                    .slice(0, 3)
+                    .slice(0, 10)
                     .map((it, idx) => (
                       <TouchableOpacity
                         key={idx}
@@ -1524,7 +1536,9 @@ export default function CreateTransaction({ navigation }) {
                       </TouchableOpacity>
                     ))
                 ) : (
-                  <Text style={styles.infoText}>No items in stock master</Text>
+                  <View style={{ padding: 15 }}>
+                    <Text style={styles.infoText}>No matching receipt items</Text>
+                  </View>
                 )}
               </View>
             )}
@@ -1684,7 +1698,21 @@ export default function CreateTransaction({ navigation }) {
         {/* CASH ENTRY */}
         {selectedCustomer && (
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Cash Received</Text>
+            <View style={styles.issueHeader}>
+              <View style={[styles.greenDot, { backgroundColor: "#f39c12" }]} />
+              <Text style={styles.sectionTitle}>Cash Received</Text>
+              <View style={styles.cartContainerColumn}>
+                <View style={styles.cartIconWrapper}>
+                  <Icon name="cart" size={24} color="#000" />
+                  {cashTable.length > 0 && (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{cashTable.length}</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.cartTextBelow}>{totalCashPure.toFixed(3)}g</Text>
+              </View>
+            </View>
 
             <Text style={styles.subLabel}>Rupees ₹</Text>
             <TextInput
@@ -2065,20 +2093,20 @@ const styles = StyleSheet.create({
 
   dropdownFloating: {
     position: "absolute",
-    top: 130,
+    top: 110,
     left: 18,
     right: 18,
     backgroundColor: "#fff",
     borderRadius: 12,
-    elevation: 10,
-    zIndex: 10000,
-    maxHeight: 200,
+    elevation: 15,
+    zIndex: 99999,
+    maxHeight: 250,
     borderWidth: 1,
     borderColor: "#E0E0E0",
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
     overflow: "hidden",
   },
   sectionHeader: {
@@ -2481,5 +2509,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     color: "#333",
+  },
+  cartContainerColumn: {
+    alignItems: "center",
+    marginLeft: "auto",
+    justifyContent: "center",
+  },
+  cartIconWrapper: {
+    position: "relative",
+  },
+  cartTextBelow: {
+    color: "#555",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 2,
+    backgroundColor: "#F0F0F0",
+    paddingHorizontal: 4,
+    borderRadius: 4,
   },
 });
