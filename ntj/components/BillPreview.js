@@ -93,10 +93,18 @@ export default function BillPreview({ route, navigation }) {
     }
   }, [upiAmount, showUpi]);
 
-  // Calculate current/resulting balance positions
   const b2bCurrentBalance = summary ? Number(summary.current) : 0;
   const currentOD = b2bCurrentBalance > 0 ? b2bCurrentBalance.toFixed(3) : "0.000";
   const currentAB = b2bCurrentBalance < 0 ? Math.abs(b2bCurrentBalance).toFixed(3) : (customer.advanceBalance || "0.000");
+
+  useEffect(() => {
+    if (route.params?.customer?.autoShare || route.params?.autoShare) {
+      // Small delay to ensure layout is ready
+      setTimeout(() => {
+        handleWhatsAppShare();
+      }, 1000);
+    }
+  }, [route.params?.customer?.autoShare, route.params?.autoShare]);
 
   const finalBalance = summary ? summary.current : "N/A";
 
@@ -105,7 +113,7 @@ export default function BillPreview({ route, navigation }) {
   const totalIssuePure = issueItems ? issueItems.reduce((sum, item) => sum + parseFloat(item.pure || 0), 0).toFixed(3) : '0.000';
   const totalReceiptPure = receiptItems ? receiptItems.reduce((sum, item) => sum + parseFloat(item.pure || 0), 0).toFixed(3) : '0.000';
 
-  const generateHTML = () => {
+  function generateHTML() {
     if (estimate) {
       const enableGST = estimate.enableGST !== false && estimate.enableGST !== undefined ? estimate.enableGST : false;
       const estimateItems = estimate.items && estimate.items.length > 0 ? estimate.items : null;
@@ -459,8 +467,8 @@ export default function BillPreview({ route, navigation }) {
               <p><strong>GST No:</strong> ${customer.gstin || 'N/A'}</p>
               <p><strong>Type:</strong> ${customer.type}</p>
               <p><strong>Date:</strong> ${customer.date}</p>
-              <p><strong>OB:</strong> ${customer.oldBalance}</p>
-              <p><strong>Advance:</strong> ${customer.advanceBalance || 0}</p>
+              <p><strong>Old Balance:</strong> ${customer.oldBalance}</p>
+              <p><strong>Advance Balance:</strong> ${customer.advanceBalance || 0}</p>
             </div>
             <h2>ISSUE:</h2>
             <table>
@@ -510,36 +518,36 @@ export default function BillPreview({ route, navigation }) {
             <h2>SUMMARY:</h2>
             <table>
               ${customer.oldBalance && parseFloat(customer.oldBalance) !== 0 ? `
-                <!-- OB exists: Show OB | ISSUE | RECEIPT | CASH | CURRENT -->
+                <!-- OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | Old Balance -->
                 <tr>
-                  <th>OB</th>
+                  <th>Old Balance</th>
                   <th>ISSUE</th>
                   <th>RECEIPT</th>
                   <th>CASH</th>
-                  <th>CURRENT</th>
+                  <th>Old Balance</th>
                 </tr>
                 <tr>
-                  <td>${summary ? summary.ob : 'N/A'}</td>
+                  <td>${customer?.oldBalance || 'N/A'}</td>
                   <td>${summary ? summary.issue : 'N/A'}</td>
                   <td>${summary ? summary.receipt : 'N/A'}</td>
                   <td>${summary ? summary.cash : 'N/A'}</td>
                   <td>${summary ? summary.current : 'N/A'}</td>
                 </tr>
                 <tr>
-                  <td>${summary ? summary.obPlusIssue : 'N/A'}</td>
+                  <td>${customer?.oldBalance ? (parseFloat(customer.oldBalance) + parseFloat(summary?.issue || 0)).toFixed(3) : 'N/A'}</td>
                   <td>-</td>
                   <td>${summary ? summary.receiptPlusCash : 'N/A'}</td>
                   <td>=</td>
-                  <td>${summary ? (Number(summary.obPlusIssue) - Number(summary.receiptPlusCash)).toFixed(3) : 'N/A'}</td>
+                  <td>${finalBalance}</td>
                 </tr>
               ` : `
-                <!-- AB exists: Show ISSUE | AB | RECEIPT | CASH | CURRENT -->
+                <!-- AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | Advance Balance -->
                 <tr>
                   <th>ISSUE</th>
-                  <th>AB</th>
+                  <th>Advance Balance</th>
                   <th>RECEIPT</th>
                   <th>CASH</th>
-                  <th>CURRENT</th>
+                  <th>Advance Balance</th>
                 </tr>
                 <tr>
                   <td>${summary ? summary.issue : 'N/A'}</td>
@@ -560,7 +568,7 @@ export default function BillPreview({ route, navigation }) {
         </html >
     `;
     }
-  };
+  }
 
   const handleDownload = async () => {
     try {
@@ -624,35 +632,12 @@ export default function BillPreview({ route, navigation }) {
     }
   };
 
-  const openDirectWhatsApp = () => {
-    const phone = order ? order.phone : customer.phone;
-    if (phone) {
-      // Clean the phone number (remove non-digits, ensuring it starts with 91 for India if not already)
-      let cleanedPhone = phone.toString().replace(/\D/g, "");
-      if (cleanedPhone.length === 10) {
-        cleanedPhone = "91" + cleanedPhone;
-      }
-      const url = `whatsapp://send?phone=${cleanedPhone}`;
-      Linking.canOpenURL(url)
-        .then((supported) => {
-          if (supported) {
-            Linking.openURL(url);
-          } else {
-            // Fallback to web link if app scheme fails
-            const webUrl = `https://wa.me/${cleanedPhone}`;
-            Linking.openURL(webUrl);
-          }
-        })
-        .catch((err) => {
-          console.error("An error occurred", err);
-          Alert.alert("Error", "Could not open WhatsApp");
-        });
-    } else {
-      Alert.alert("Info", "No phone number available for this customer");
-    }
+  const openDirectWhatsApp = async () => {
+    // Generate PDF and open Share Sheet (User picks WhatsApp)
+    handleWhatsAppShare();
   };
 
-  const handleWhatsAppShare = async () => {
+  async function handleWhatsAppShare() {
     try {
       const html = generateHTML();
       const { uri } = await Print.printToFileAsync({
@@ -673,7 +658,7 @@ export default function BillPreview({ route, navigation }) {
       console.error(error);
       Alert.alert("Error", "Failed to share bill");
     }
-  };
+  }
 
   const handlePrint = async () => {
     try {
@@ -760,659 +745,678 @@ export default function BillPreview({ route, navigation }) {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
       style={{ flex: 1, backgroundColor: '#fff' }}
     >
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={{ flex: 1 }}>
-          {/* FIXED HEADER BAR */}
-          {!isPrinting && (
-            <View style={styles.buttonContainer}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <TouchableOpacity style={styles.headerBtn} onPress={() => {
-                  if (customer && (customer.customerId || customer.id) && !items) {
-                    navigation.navigate("BillHistory", { customer: customer });
-                  } else {
-                    navigation.navigate(order ? "Order" : estimate ? "Estimate" : isB2C ? "B2CCalculationPage" : "B2BCalculationPage");
-                  }
-                }}>
-                  <Icon name="arrow-left" size={22} color="#1E88E5" />
-                </TouchableOpacity>
+      <View style={{ flex: 1 }}>
+        {/* FIXED HEADER BAR */}
+        {!isPrinting && (
+          <View style={styles.buttonContainer}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <TouchableOpacity style={styles.headerBtn} onPress={() => {
+                if (customer && (customer.customerId || customer.id) && !items) {
+                  navigation.navigate("BillHistory", { customer: customer });
+                } else {
+                  navigation.navigate(order ? "Order" : estimate ? "Estimate" : isB2C ? "B2CCalculationPage" : "B2BCalculationPage");
+                }
+              }}>
+                <Icon name="arrow-left" size={22} color="#1E88E5" />
+              </TouchableOpacity>
 
-                <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate("Home")}>
-                  <Icon name="home" size={22} color="#1E88E5" />
-                </TouchableOpacity>
+              <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate("Home")}>
+                <Icon name="home" size={22} color="#1E88E5" />
+              </TouchableOpacity>
 
-                <TouchableOpacity style={styles.headerBtn} onPress={handlePrint}>
-                  <Icon name="printer" size={22} color="#1E88E5" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.headerActions}>
-                <TouchableOpacity style={styles.actionIcon} onPress={openDirectWhatsApp}>
-                  <Icon name="whatsapp" size={24} color="#25D366" />
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.actionIcon} onPress={handleWhatsAppShare}>
-                  <Icon name="share-variant" size={24} color="#1E88E5" />
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.actionIcon} onPress={handleDownload}>
-                  <Icon name="download" size={24} color="#1E88E5" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
-          <ScrollView
-            style={styles.page}
-            contentContainerStyle={{ flexGrow: 1, paddingBottom: 160 }}
-            showsVerticalScrollIndicator={true}
-            keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled={true}
-            bounces={true}
-          >
-            {/* TRANSFER BUTTONS FOR ESTIMATE */}
-            {estimate && (
-              <View style={styles.transferContainer}>
-                <TouchableOpacity style={styles.transferBtnB2B} onPress={handleTransferToB2B}>
-                  <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 5 }} />
-                  <Text style={styles.transferBtnText}>Transfer to B2B</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.transferBtnB2C} onPress={handleTransferToB2C}>
-                  <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 5 }} />
-                  <Text style={styles.transferBtnText}>Transfer to B2C</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            <View style={styles.headerBox}>
-              <Text style={styles.billTitle}>{estimate ? 'ESTIMATE BILL' : suspense ? 'SUSPENSE BILL' : order ? 'ORDER RECEIPT' : 'BILL'}</Text>
-
-              <View style={styles.headerRow}>
-                <View>
-                  {!estimate && !suspense && !order && <Text>Invoice No : {customer.invoiceNo || customer.id || 'N/A'}</Text>}
-                  {order && <Text>Order No : {order.orderNo}</Text>}
-                  <Text>Name : {estimate ? (estimate.itemName || "Estimate Customer") : order ? order.customer : customer.name}</Text>
-                  {(suspense || isB2C || order) && <Text>Phone : {order ? order.phone : customer.phone || 'N/A'}</Text>}
-                  <Text>Address : {customer?.address || 'N/A'}</Text>
-                  <Text>GST No : {customer?.gstin || 'N/A'}</Text>
-                </View>
-
-                <View>
-                  <Text>Type : {estimate ? 'Estimate' : order ? 'Order' : customer.type}</Text>
-                  <Text>Date : {estimate ? new Date().toLocaleDateString() : order ? order.date : customer.date}</Text>
-                  {estimate ? (
-                    <Text>OD : N/A</Text>
-                  ) : (
-                    <>
-                      {customer.oldBalance && parseFloat(customer.oldBalance) !== 0 ? (
-                        <Text>OB : {customer.oldBalance}</Text>
-                      ) : null}
-                      {customer.advanceBalance && parseFloat(customer.advanceBalance) !== 0 ? (
-                        <Text>AB : {customer.advanceBalance}</Text>
-                      ) : null}
-                    </>
-                  )}
-                </View>
-              </View>
-            </View>
-
-            {estimate ? (
-              <>
-                {/* ESTIMATE DETAILS */}
-                <View style={styles.sectionBox}>
-                  <Text style={styles.sectionTitle}>ESTIMATE DETAILS :</Text>
-
-                  {/* Table Header */}
-                  <View style={styles.tableHeader}>
-                    <Text style={[styles.cell, { flex: 2 }]}>Item Name</Text>
-                    <Text style={styles.cell}>Wt (g)</Text>
-                    <Text style={styles.cell}>W%</Text>
-                    <Text style={styles.cell}>Gross Wt</Text>
-                    <Text style={styles.cell}>Rate</Text>
-                    <Text style={styles.cell}>Net Amt</Text>
-                    {estimate.enableGST && <Text style={styles.cell}>GST</Text>}
-                    <Text style={styles.cell}>Total</Text>
-                  </View>
-
-                  {/* Multi-item list OR single-item fallback */}
-                  {estimate.items && estimate.items.length > 0
-                    ? estimate.items.map((item, idx) => (
-                      <View key={item.id || idx} style={styles.tableRow}>
-                        <Text style={[styles.cell, { flex: 2 }]}>{item.itemName}</Text>
-                        <Text style={styles.cell}>{item.weight}</Text>
-                        <Text style={styles.cell}>{item.wastagePercent}</Text>
-                        <Text style={styles.cell}>{item.grossWeight}</Text>
-                        <Text style={styles.cell}>{formatIndianNumber(item.goldRate)}</Text>
-                        <Text style={styles.cell}>₹{formatIndianNumber(item.netAmount)}</Text>
-                        {estimate.enableGST && <Text style={styles.cell}>₹{formatIndianNumber(item.gst)}</Text>}
-                        <Text style={[styles.cell, { fontWeight: 'bold' }]}>₹{formatIndianNumber(item.totalAmount)}</Text>
-                      </View>
-                    ))
-                    : (
-                      <View style={styles.tableRow}>
-                        <Text style={[styles.cell, { flex: 2 }]}>{estimate.itemName}</Text>
-                        <Text style={styles.cell}>{estimate.weight}</Text>
-                        <Text style={styles.cell}>{estimate.wastagePercent || 0}</Text>
-                        <Text style={styles.cell}>{estimate.grossWeight}</Text>
-                        <Text style={styles.cell}>{formatIndianNumber(estimate.goldRate)}</Text>
-                        <Text style={styles.cell}>₹{formatIndianNumber(estimate.netAmount)}</Text>
-                        {estimate.enableGST && <Text style={styles.cell}>₹{formatIndianNumber(estimate.gst || 0)}</Text>}
-                        <Text style={[styles.cell, { fontWeight: 'bold' }]}>₹{formatIndianNumber(estimate.totalAmount)}</Text>
-                      </View>
-                    )
-                  }
-                </View>
-
-                {/* ESTIMATE GRAND TOTAL */}
-                <View style={styles.estimateTotalBox}>
-                  <Text style={styles.estimateTotalLabel}>TOTAL ESTIMATE AMOUNT</Text>
-                  <Text style={styles.estimateTotalValue}>
-                    ₹{estimate.items && estimate.items.length > 0
-                      ? formatIndianNumber(estimate.items.reduce((sum, i) => sum + i.totalAmount, 0))
-                      : formatIndianNumber(estimate.totalAmount || 0)}
-                  </Text>
-                </View>
-              </>
-            ) : suspense ? (
-              <>
-                {/* SUSPENSE DETAILS */}
-                <View style={styles.sectionBox}>
-                  <Text style={styles.sectionTitle}>ISSUE ITEMS :</Text>
-                  <View style={styles.tableHeader}>
-                    <Text style={[styles.cell, { flex: 2 }]}>Item</Text>
-                    <Text style={styles.cell}>Wght</Text>
-                    <Text style={styles.cell}>Qty</Text>
-                    <Text style={styles.cell}>Rate</Text>
-                    <Text style={styles.cell}>Pure</Text>
-                    <Text style={styles.cell}>Amt</Text>
-                  </View>
-                  {suspense.issueItems.map((item, idx) => (
-                    <View key={idx} style={styles.tableRow}>
-                      <Text style={[styles.cell, { flex: 2 }]}>{item.name}</Text>
-                      <Text style={styles.cell}>{item.weight.toFixed(3)}</Text>
-                      <Text style={styles.cell}>{item.count}</Text>
-                      <Text style={styles.cell}>{item.rate}</Text>
-                      <Text style={styles.cell}>{item.pure.toFixed(3)}</Text>
-                      <Text style={styles.cell}>{item.amount.toFixed(2)}</Text>
-                    </View>
-                  ))}
-                  <View style={[styles.tableRow, { backgroundColor: '#f0f0f0' }]}>
-                    <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>Total</Text>
-                    <Text style={styles.cell}></Text>
-                    <Text style={styles.cell}></Text>
-                    <Text style={styles.cell}></Text>
-                    <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalIssuePure.toFixed(3)}</Text>
-                    <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalIssueAmount.toFixed(2)}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.sectionBox}>
-                  <Text style={styles.sectionTitle}>RECEIPT ITEMS :</Text>
-                  <View style={styles.tableHeader}>
-                    <Text style={[styles.cell, { flex: 2 }]}>Item</Text>
-                    <Text style={styles.cell}>Wght</Text>
-                    <Text style={styles.cell}>Qty</Text>
-                    <Text style={styles.cell}>Rate</Text>
-                    <Text style={styles.cell}>Pure</Text>
-                    <Text style={styles.cell}>Amt</Text>
-                  </View>
-                  {suspense.receiptItems.map((item, idx) => (
-                    <View key={idx} style={styles.tableRow}>
-                      <Text style={[styles.cell, { flex: 2 }]}>{item.name}</Text>
-                      <Text style={styles.cell}>{item.weight.toFixed(3)}</Text>
-                      <Text style={styles.cell}>{item.count}</Text>
-                      <Text style={styles.cell}>{item.rate}</Text>
-                      <Text style={styles.cell}>{item.pure.toFixed(3)}</Text>
-                      <Text style={styles.cell}>{item.amount.toFixed(2)}</Text>
-                    </View>
-                  ))}
-                  <View style={[styles.tableRow, { backgroundColor: '#f0f0f0' }]}>
-                    <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>Total</Text>
-                    <Text style={styles.cell}></Text>
-                    <Text style={styles.cell}></Text>
-                    <Text style={styles.cell}></Text>
-                    <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalReceiptPure.toFixed(3)}</Text>
-                    <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalReceiptAmount.toFixed(2)}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.cashBox}>
-                  <Text style={styles.sectionTitle}>SUMMARY :</Text>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
-                    <Text style={{ fontWeight: 'bold' }}>Net Pure Gold:</Text>
-                    <Text style={{ fontWeight: 'bold', color: suspense.netPure >= 0 ? '#D32F2F' : '#2E7D32' }}>{suspense.netPure.toFixed(3)} g</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                    <Text style={{ fontWeight: 'bold' }}>Net Amount:</Text>
-                    <Text style={{ fontWeight: 'bold' }}>₹{suspense.netAmount.toFixed(2)}</Text>
-                  </View>
-                </View>
-              </>
-            ) : order ? (
-              <>
-                <View style={styles.sectionBox}>
-                  <Text style={styles.sectionTitle}>ORDER DETAILS :</Text>
-                  <View style={{ padding: 10, flexDirection: 'row', justifyContent: 'space-between' }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 16, marginBottom: 5 }}>Order No: {order.orderNo}</Text>
-                      <Text style={{ fontSize: 16, marginBottom: 5 }}>Item: {order.type}</Text>
-                      <Text style={{ fontSize: 16, marginBottom: 5 }}>Weight: {order.weight} GMS</Text>
-                      <Text style={{ fontSize: 16, marginBottom: 5 }}>Payment: {order.payment}</Text>
-                      <Text style={{ fontSize: 16, marginBottom: 5 }}>Pending Balance: ₹{order.balance}</Text>
-                    </View>
-                    {order.image && (
-                      <View style={{ width: 120, height: 120, borderRadius: 10, overflow: 'hidden', backgroundColor: '#f9f9f9', borderWidth: 1, borderColor: '#eee' }}>
-                        <Image
-                          source={{ uri: order.image.startsWith('http') ? order.image : `${base_url}/${order.image}` }}
-                          style={{ width: '100%', height: '100%' }}
-                          resizeMode="cover"
-                        />
-                      </View>
-                    )}
-                  </View>
-                </View>
-
-
-
-                <View style={styles.kuralContainer}>
-                  <Text style={styles.kuralText}>{thirukkural}</Text>
-                  <Text style={styles.visitAgainText}>Thank you for choosing NJT Jewellery!</Text>
-                </View>
-              </>
-            ) : isB2C ? (
-              <>
-                {/* B2C ITEMS */}
-                <View style={styles.sectionBox}>
-                  <Text style={styles.sectionTitle}>ITEMS :</Text>
-
-                  <View style={styles.tableHeader}>
-                    <Text style={styles.cell}>Item</Text>
-                    <Text style={styles.cell}>Weight</Text>
-                    <Text style={styles.cell}>Touch</Text>
-                    <Text style={styles.cell}>W/M</Text>
-                    <Text style={styles.cell}>Rate</Text>
-                    <Text style={styles.cell}>Total</Text>
-                    <Text style={styles.cell}>GST</Text>
-                    <Text style={styles.cell}>Final</Text>
-                  </View>
-
-                  {items && items.length > 0 ? (
-                    items.map((item, i) => (
-                      <View key={i} style={styles.tableRow}>
-                        <Text style={styles.cell}>{item.displayItemName || item.itemName}</Text>
-                        <Text style={styles.cell}>{item.weight}</Text>
-                        <Text style={styles.cell}>{item.touch}</Text>
-                        <Text style={styles.cell}>{item.wastage}</Text>
-                        <Text style={styles.cell}>{item.rate}</Text>
-                        <Text style={styles.cell}>{item.total}</Text>
-                        <Text style={styles.cell}>{item.gst}</Text>
-                        <Text style={styles.cell}>{item.final}</Text>
-                      </View>
-                    ))
-                  ) : (
-                    <Text style={styles.noData}>No items</Text>
-                  )}
-                </View>
-
-                {/* B2C RECEIPT / OLD GOLD ITEMS */}
-                {receiptItems && receiptItems.length > 0 && (
-                  <View style={styles.sectionBox}>
-                    <Text style={styles.sectionTitle}>RECEIPT / OLD GOLD :</Text>
-
-                    <View style={styles.tableHeader}>
-                      <Text style={styles.cell}>Item</Text>
-                      <Text style={styles.cell}>Wt</Text>
-                      <Text style={styles.cell}>Sub</Text>
-                      <Text style={styles.cell}>Net Wt</Text>
-                      <Text style={styles.cell}>Rate</Text>
-                      <Text style={styles.cell}>Amt</Text>
-                    </View>
-
-                    {receiptItems.map((item, i) => (
-                      <View key={i} style={styles.tableRow}>
-                        <Text style={styles.cell}>{item.name}</Text>
-                        <Text style={styles.cell}>{item.weight}</Text>
-                        <Text style={styles.cell}>{item.sub}</Text>
-                        <Text style={styles.cell}>{item.netWeight}</Text>
-                        <Text style={styles.cell}>{item.rate}</Text>
-                        <Text style={styles.cell}>{item.amount}</Text>
-                      </View>
-                    ))}
-
-                    <View style={styles.totalRow}>
-                      <Text style={styles.totalCell}>Total Old Gold Amount:</Text>
-                      <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>
-                        ₹{receiptItems.reduce((acc, item) => acc + parseFloat(item.amount || 0), 0).toFixed(2)}
-                      </Text>
-                    </View>
-                  </View>
-                )}
-
-                {/* GST */}
-                {gst && gst.enabled && (
-                  <View style={styles.cashBox}>
-                    <Text style={styles.sectionTitle}>GST :</Text>
-                    <Text>GST Percentage: {gst.percentage}%</Text>
-                    <Text>GST Amount: ₹{gst.amount}</Text>
-                  </View>
-                )}
-
-                {/* B2C TOTAL */}
-                <View style={styles.cashBox}>
-                  <Text style={styles.sectionTitle}>TOTAL :</Text>
-                  <Text>Total Amount: {report ? report.cash : 'N/A'}</Text>
-                  <Text>Current OD: {isB2C ? (Math.max(0, parseFloat(report?.cash || 0) - parseFloat(customer?.advanceBalance || 0)).toFixed(2)) : '0.00'}</Text>
-                  <Text>Current AB: {isB2C ? (Math.max(0, parseFloat(customer?.advanceBalance || 0) - parseFloat(report?.cash || 0)).toFixed(2)) : '0.00'}</Text>
-                  {cashAmount ? (
-                    <>
-                      <Text>Cash Amount: ₹{cashAmount}</Text>
-                      <Text>UPI Amount: ₹{upiAmount}</Text>
-                    </>
-                  ) : null}
-                </View>
-
-                {/* CASH INPUT */}
-                <View style={styles.row}>
-                  <Text style={styles.label}>Cash Amount</Text>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter cash amount"
-                    keyboardType="numeric"
-                    value={cashAmount}
-                    onChangeText={setCashAmount}
-                  />
-                </View>
-
-                {/* UPI INPUT */}
-                {cashAmount && (
-                  <>
-                    <View style={styles.row}>
-                      <Text style={styles.label}>UPI Amount</Text>
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Enter UPI amount"
-                        keyboardType="numeric"
-                        value={upiAmount}
-                        onChangeText={setUpiAmount}
-                      />
-                    </View>
-
-                    <View style={styles.row}>
-                      <Text style={styles.label}>Phone Number</Text>
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Enter Phone Number"
-                        keyboardType="phone-pad"
-                        value={additionalPhone}
-                        onChangeText={setAdditionalPhone}
-                      />
-                    </View>
-
-                    <View style={styles.row}>
-                      <Text style={styles.label}>Cash</Text>
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Enter Cash"
-                        keyboardType="numeric"
-                        value={additionalCash}
-                        onChangeText={setAdditionalCash}
-                      />
-                    </View>
-                  </>
-                )}
-
-                {/* SUBMIT BUTTON */}
-                {cashAmount && (
-                  <TouchableOpacity style={styles.submitBtn} onPress={() => setShowUpi(true)}>
-                    <Text style={styles.submitText}>Generate QR Code</Text>
-                  </TouchableOpacity>
-                )}
-
-                {/* QR CODE */}
-                {showUpi && upiAmount > 0 && (
-                  <View style={styles.qrContainer}>
-                    <Text style={styles.qrLabel}>UPI QR Code for ₹{upiAmount}</Text>
-                    <Text style={styles.upiIdText}>UPI ID: {upiId}</Text>
-                    <TouchableOpacity style={styles.changeUpiBtn} onPress={() => navigation.navigate('UPIControl')}>
-                      <Text style={styles.changeUpiText}>Change UPI ID</Text>
-                    </TouchableOpacity>
-                    <Image
-                      source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent("NTJ Jewellery")}&am=${upiAmount}&cu=INR`)}` }}
-                      style={{ width: 200, height: 200 }
-                      }
-                    />
-                    < TouchableOpacity style={styles.printQrBtn} onPress={handlePrintQR} >
-                      <Text style={styles.printQrText}>Print QR Code</Text>
-                    </TouchableOpacity >
-                  </View >
-                )}
-
-                {/* Thirukkural Quote for B2C */}
-                <View style={styles.kuralContainer}>
-                  <Text style={styles.kuralText}>{thirukkural}</Text>
-                  <Text style={styles.visitAgainText}>Thank you for your visit. Please visit again.</Text>
-                </View>
-              </>
-            ) : (
-              <>
-                {/* ISSUE */}
-                <View style={styles.sectionBox}>
-                  <Text style={styles.sectionTitle}>ISSUE :</Text>
-
-                  <View style={styles.tableHeader}>
-                    <Text style={styles.cell}>Name</Text>
-                    <Text style={styles.cell}>G.Weight</Text>
-                    <Text style={styles.cell}>M</Text>
-                    <Text style={styles.cell}>N.Weight</Text>
-                    <Text style={styles.cell}>Calc</Text>
-                    <Text style={styles.cell}>Pure</Text>
-                  </View>
-
-                  {issueItems.map((row, i) => (
-                    <View key={i} style={styles.tableRow}>
-                      <Text style={styles.cell}>{row.name}</Text>
-                      <Text style={styles.cell}>{row.gross}</Text>
-                      <Text style={styles.cell}>{row.m}</Text>
-                      <Text style={styles.cell}>{row.net}</Text>
-                      <Text style={styles.cell}>{row.calc}</Text>
-                      <Text style={styles.cell}>{row.pure}</Text>
-                    </View>
-                  ))}
-
-                  {/* ISSUE TOTAL */}
-                  <View style={styles.totalRow}>
-                    <Text style={styles.totalCell}>Total Issue Pure:</Text>
-                    <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>{totalIssuePure}</Text>
-                  </View>
-                </View>
-
-                {/* RECEIPT */}
-                <View style={styles.sectionBox}>
-                  <Text style={styles.sectionTitle}>RECEIPT :</Text>
-
-                  <View style={styles.tableHeader}>
-                    <Text style={styles.cell}>Name</Text>
-                    <Text style={styles.cell}>Weight</Text>
-                    <Text style={styles.cell}>Result</Text>
-                    <Text style={styles.cell}>Calc</Text>
-                    <Text style={styles.cell}>Pure</Text>
-                  </View>
-
-                  {receiptItems && receiptItems.length > 0 ? (
-                    receiptItems.map((row, i) => (
-                      <View key={i} style={styles.tableRow}>
-                        <Text style={styles.cell}>{row.name}</Text>
-                        <Text style={styles.cell}>{row.weight}</Text>
-                        <Text style={styles.cell}>{row.result}</Text>
-                        <Text style={styles.cell}>{row.calc}</Text>
-                        <Text style={styles.cell}>{row.pure}</Text>
-                      </View>
-                    ))
-                  ) : (
-                    <Text style={styles.noData}>No receipt items</Text>
-                  )}
-
-                  {/* RECEIPT TOTAL */}
-                  <View style={styles.totalRow}>
-                    <Text style={styles.totalCell}>Total Receipt Pure:</Text>
-                    <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>{totalReceiptPure}</Text>
-                  </View>
-                </View>
-
-                {/* CASH */}
-                <View style={styles.cashBox}>
-                  <Text style={styles.sectionTitle}>CASH :</Text>
-                  {cashTable && cashTable.length > 0 ? (
-                    <View>
-                      <View style={styles.tableHeader}>
-                        <Text style={styles.cell}>Amount</Text>
-                        <Text style={styles.cell}>Rate</Text>
-                        <Text style={styles.cell}>Pure</Text>
-                      </View>
-                      {cashTable.map((cashEntry, i) => (
-                        <View key={i} style={styles.tableRow}>
-                          <Text style={styles.cell}>{cashEntry.rupees}</Text>
-                          <Text style={styles.cell}>{cashEntry.goldRate}</Text>
-                          <Text style={styles.cell}>{cashEntry.pure}</Text>
-                        </View>
-                      ))}
-                      <View style={styles.totalRow}>
-                        <Text style={styles.totalCell}>Total Cash Pure:</Text>
-                        <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>
-                          {cashTable.reduce((sum, c) => sum + parseFloat(c.pure || 0), 0).toFixed(3)}
-                        </Text>
-                      </View>
-                    </View>
-                  ) : (
-                    <Text>N/A</Text>
-                  )}
-                </View>
-
-                {/* GST */}
-                {gst && gst.enabled && gst.showInBill !== false && (
-                  <View style={styles.cashBox}>
-                    <Text style={styles.sectionTitle}>GST :</Text>
-
-                    {/* Dynamic Display Logic */}
-                    {parseFloat(gst.igst) > 0 ? (
-                      // IGST Case
-                      <View>
-                        <Text>IGST {gst.igst}% : ₹{gst.amount}</Text>
-                      </View>
-                    ) : (parseFloat(gst.sgst) > 0 || parseFloat(gst.cgst) > 0) ? (
-                      // SGST + CGST Case
-                      <View>
-                        <Text>SGST {gst.sgst || 0}% : ₹{(parseFloat(gst.amount) / 2).toFixed(2)}</Text>
-                        <Text>CGST {gst.cgst || 0}% : ₹{(parseFloat(gst.amount) / 2).toFixed(2)}</Text>
-                      </View>
-                    ) : (
-                      // Fallback (Legacy or Total only)
-                      <View>
-                        <Text>GST Percentage: {gst.percentage}%</Text>
-                        <Text>GST Amount: ₹{gst.amount}</Text>
-                      </View>
-                    )}
-
-                    {(parseFloat(gst.igst) > 0 || parseFloat(gst.sgst) > 0) && (
-                      <Text style={{ marginTop: 4, fontWeight: 'bold' }}>Total GST Amount: ₹{gst.amount}</Text>
-                    )}
-                  </View>
-                )}
-
-                {/* SUMMARY */}
-                <View style={styles.summaryBox}>
-                  <Text style={styles.sectionTitle}>SUMMARY :</Text>
-
-                  {/* Conditional rendering based on OB or AB */}
-                  {customer?.oldBalance && parseFloat(customer.oldBalance) !== 0 ? (
-                    // OB exists: Show OB | ISSUE | RECEIPT | CASH | CURRENT
-                    <>
-                      <View style={styles.summaryHeader}>
-                        <Text style={styles.sumCell}>OB</Text>
-                        <Text style={styles.sumCell}>ISSUE</Text>
-                        <Text style={styles.sumCell}>RECEIPT</Text>
-                        <Text style={styles.sumCell}>CASH</Text>
-                        <Text style={styles.sumCell}>CURRENT</Text>
-                      </View>
-
-                      <View style={styles.summaryRow}>
-                        <Text style={styles.sumCell}>{summary ? summary.ob : 'N/A'}</Text>
-                        <Text style={styles.sumCell}>{summary ? summary.issue : 'N/A'}</Text>
-                        <Text style={styles.sumCell}>{summary ? summary.receipt : 'N/A'}</Text>
-                        <Text style={styles.sumCell}>{summary ? summary.cash : 'N/A'}</Text>
-                        <Text style={styles.sumCell}>{finalBalance}</Text>
-                      </View>
-
-                      <View style={styles.finalSummaryRow}>
-                        <Text style={styles.sumCell}>{summary ? summary.obPlusIssue : 'N/A'}</Text>
-                        <Text style={styles.sumCell}>-</Text>
-                        <Text style={styles.sumCell}>{summary ? summary.receiptPlusCash : 'N/A'}</Text>
-                        <Text style={styles.sumCell}>=</Text>
-                        <Text style={styles.sumCell}>{summary ? (Number(summary.obPlusIssue) - Number(summary.receiptPlusCash)).toFixed(3) : 'N/A'}</Text>
-                      </View>
-                    </>
-                  ) : (
-                    // AB exists: Show ISSUE | AB | RECEIPT | CASH | CURRENT
-                    <>
-                      <View style={styles.summaryHeader}>
-                        <Text style={styles.sumCell}>ISSUE</Text>
-                        <Text style={styles.sumCell}>AB</Text>
-                        <Text style={styles.sumCell}>RECEIPT</Text>
-                        <Text style={styles.sumCell}>CASH</Text>
-                        <Text style={styles.sumCell}>CURRENT</Text>
-                      </View>
-
-                      <View style={styles.summaryRow}>
-                        <Text style={styles.sumCell}>{summary ? summary.issue : 'N/A'}</Text>
-                        <Text style={styles.sumCell}>
-                          {customer?.advanceBalance && parseFloat(customer.advanceBalance) !== 0
-                            ? customer.advanceBalance
-                            : '0.000'}
-                        </Text>
-                        <Text style={styles.sumCell}>{summary ? summary.receipt : 'N/A'}</Text>
-                        <Text style={styles.sumCell}>{summary ? summary.cash : 'N/A'}</Text>
-                        <Text style={styles.sumCell}>
-                          {summary && customer?.advanceBalance ? (
-                            (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - parseFloat(summary.issue)).toFixed(3)
-                          ) : finalBalance}
-                        </Text>
-                      </View>
-
-                      <View style={styles.finalSummaryRow}>
-                        <Text style={[styles.sumCell, { flex: 2.5 }]}>
-                          {customer?.advanceBalance || '0.000'} + {summary?.receipt || '0.000'} + {summary?.cash || '0.000'} - {summary?.issue || '0.000'}
-                        </Text>
-                        <Text style={[styles.sumCell, { flex: 0.5 }]}>=</Text>
-                        <Text style={[styles.sumCell, { flex: 1 }]}>
-                          {summary && customer?.advanceBalance ? (
-                            (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - parseFloat(summary.issue)).toFixed(3)
-                          ) : finalBalance}
-                        </Text>
-                      </View>
-                    </>
-                  )}
-                </View>
-              </>
-            )}
-
-            {/* Bottom Home Button */}
-            <View style={styles.homeButtonWrapper}>
-              <TouchableOpacity
-                style={styles.homeButton}
-                onPress={() => navigation.navigate('Home')}
-                activeOpacity={0.8}
-              >
-                <Icon name="home" size={22} color="#fff" />
-                <Text style={styles.homeButtonText}>Home</Text>
+              <TouchableOpacity style={styles.headerBtn} onPress={handlePrint}>
+                <Icon name="printer" size={22} color="#1E88E5" />
               </TouchableOpacity>
             </View>
 
-          </ScrollView >
-        </View >
-      </TouchableWithoutFeedback >
-    </KeyboardAvoidingView >
+            <View style={styles.headerActions}>
+              <TouchableOpacity style={styles.actionIcon} onPress={openDirectWhatsApp}>
+                <Icon name="whatsapp" size={24} color="#25D366" />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.actionIcon} onPress={handleWhatsAppShare}>
+                <Icon name="share-variant" size={24} color="#1E88E5" />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.actionIcon} onPress={handleDownload}>
+                <Icon name="download" size={24} color="#1E88E5" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        <ScrollView
+          style={styles.page}
+          contentContainerStyle={{ flexGrow: 1, paddingBottom: 160 }}
+          showsVerticalScrollIndicator={true}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          nestedScrollEnabled={true}
+          bounces={true}
+        >
+          {/* TRANSFER BUTTONS FOR ESTIMATE */}
+          {estimate && (
+            <View style={styles.transferContainer}>
+              <TouchableOpacity style={styles.transferBtnB2B} onPress={handleTransferToB2B}>
+                <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 5 }} />
+                <Text style={styles.transferBtnText}>Transfer to B2B</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.transferBtnB2C} onPress={handleTransferToB2C}>
+                <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 5 }} />
+                <Text style={styles.transferBtnText}>Transfer to B2C</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={styles.headerBox}>
+            <Text style={styles.billTitle}>{estimate ? 'ESTIMATE BILL' : suspense ? 'SUSPENSE BILL' : order ? 'ORDER RECEIPT' : 'BILL'}</Text>
+
+            <View style={styles.headerRow}>
+              <View>
+                {!estimate && !suspense && !order && <Text>Invoice No : {customer.invoiceNo || customer.id || 'N/A'}</Text>}
+                {order && <Text>Order No : {order.orderNo}</Text>}
+                <Text>Name : {estimate ? (estimate.itemName || "Estimate Customer") : order ? order.customer : customer.name}</Text>
+                {(suspense || isB2C || order) && <Text>Phone : {order ? order.phone : customer.phone || 'N/A'}</Text>}
+                <Text>Address : {customer?.address || 'N/A'}</Text>
+                <Text>GST No : {customer?.gstin || 'N/A'}</Text>
+              </View>
+
+              <View>
+                <Text>Type : {estimate ? 'Estimate' : order ? 'Order' : customer.type}</Text>
+                <Text>Date : {estimate ? new Date().toLocaleDateString() : order ? order.date : customer.date}</Text>
+                {estimate ? (
+                  <Text>OD : N/A</Text>
+                ) : (
+                  <>
+                    {customer.oldBalance && parseFloat(customer.oldBalance) !== 0 ? (
+                      <Text>Old Balance : {customer.oldBalance}</Text>
+                    ) : null}
+                    {customer.advanceBalance && parseFloat(customer.advanceBalance) !== 0 ? (
+                      <Text>Advance Balance : {customer.advanceBalance}</Text>
+                    ) : null}
+                  </>
+                )}
+              </View>
+            </View>
+          </View>
+
+          {estimate ? (
+            <>
+              {/* ESTIMATE DETAILS */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ESTIMATE DETAILS :</Text>
+
+                {/* Table Header */}
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.cell, { flex: 2 }]}>Item Name</Text>
+                  <Text style={styles.cell}>Wt (g)</Text>
+                  <Text style={styles.cell}>W%</Text>
+                  <Text style={styles.cell}>Gross Wt</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Net Amt</Text>
+                  {estimate.enableGST && <Text style={styles.cell}>GST</Text>}
+                  <Text style={styles.cell}>Total</Text>
+                </View>
+
+                {/* Multi-item list OR single-item fallback */}
+                {estimate.items && estimate.items.length > 0
+                  ? estimate.items.map((item, idx) => (
+                    <View key={item.id || idx} style={styles.tableRow}>
+                      <Text style={[styles.cell, { flex: 2 }]}>{item.itemName}</Text>
+                      <Text style={styles.cell}>{item.weight}</Text>
+                      <Text style={styles.cell}>{item.wastagePercent}</Text>
+                      <Text style={styles.cell}>{item.grossWeight}</Text>
+                      <Text style={styles.cell}>{formatIndianNumber(item.goldRate)}</Text>
+                      <Text style={styles.cell}>₹{formatIndianNumber(item.netAmount)}</Text>
+                      {estimate.enableGST && <Text style={styles.cell}>₹{formatIndianNumber(item.gst)}</Text>}
+                      <Text style={[styles.cell, { fontWeight: 'bold' }]}>₹{formatIndianNumber(item.totalAmount)}</Text>
+                    </View>
+                  ))
+                  : (
+                    <View style={styles.tableRow}>
+                      <Text style={[styles.cell, { flex: 2 }]}>{estimate.itemName}</Text>
+                      <Text style={styles.cell}>{estimate.weight}</Text>
+                      <Text style={styles.cell}>{estimate.wastagePercent || 0}</Text>
+                      <Text style={styles.cell}>{estimate.grossWeight}</Text>
+                      <Text style={styles.cell}>{formatIndianNumber(estimate.goldRate)}</Text>
+                      <Text style={styles.cell}>₹{formatIndianNumber(estimate.netAmount)}</Text>
+                      {estimate.enableGST && <Text style={styles.cell}>₹{formatIndianNumber(estimate.gst || 0)}</Text>}
+                      <Text style={[styles.cell, { fontWeight: 'bold' }]}>₹{formatIndianNumber(estimate.totalAmount)}</Text>
+                    </View>
+                  )
+                }
+              </View>
+
+              {/* ESTIMATE GRAND TOTAL */}
+              <View style={styles.estimateTotalBox}>
+                <Text style={styles.estimateTotalLabel}>TOTAL ESTIMATE AMOUNT</Text>
+                <Text style={styles.estimateTotalValue}>
+                  ₹{estimate.items && estimate.items.length > 0
+                    ? formatIndianNumber(estimate.items.reduce((sum, i) => sum + i.totalAmount, 0))
+                    : formatIndianNumber(estimate.totalAmount || 0)}
+                </Text>
+              </View>
+            </>
+          ) : suspense ? (
+            <>
+              {/* SUSPENSE DETAILS */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ISSUE ITEMS :</Text>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.cell, { flex: 2 }]}>Item</Text>
+                  <Text style={styles.cell}>Wght</Text>
+                  <Text style={styles.cell}>Qty</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Pure</Text>
+                  <Text style={styles.cell}>Amt</Text>
+                </View>
+                {suspense.issueItems.map((item, idx) => (
+                  <View key={idx} style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>{item.name}</Text>
+                    <Text style={styles.cell}>{item.weight.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.count}</Text>
+                    <Text style={styles.cell}>{item.rate}</Text>
+                    <Text style={styles.cell}>{item.pure.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.amount.toFixed(2)}</Text>
+                  </View>
+                ))}
+                <View style={[styles.tableRow, { backgroundColor: '#f0f0f0' }]}>
+                  <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>Total</Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalIssuePure.toFixed(3)}</Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalIssueAmount.toFixed(2)}</Text>
+                </View>
+              </View>
+
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>RECEIPT ITEMS :</Text>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.cell, { flex: 2 }]}>Item</Text>
+                  <Text style={styles.cell}>Wght</Text>
+                  <Text style={styles.cell}>Qty</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Pure</Text>
+                  <Text style={styles.cell}>Amt</Text>
+                </View>
+                {suspense.receiptItems.map((item, idx) => (
+                  <View key={idx} style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>{item.name}</Text>
+                    <Text style={styles.cell}>{item.weight.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.count}</Text>
+                    <Text style={styles.cell}>{item.rate}</Text>
+                    <Text style={styles.cell}>{item.pure.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.amount.toFixed(2)}</Text>
+                  </View>
+                ))}
+                <View style={[styles.tableRow, { backgroundColor: '#f0f0f0' }]}>
+                  <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>Total</Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalReceiptPure.toFixed(3)}</Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalReceiptAmount.toFixed(2)}</Text>
+                </View>
+              </View>
+
+              <View style={styles.cashBox}>
+                <Text style={styles.sectionTitle}>SUMMARY :</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                  <Text style={{ fontWeight: 'bold' }}>Net Pure Gold:</Text>
+                  <Text style={{ fontWeight: 'bold', color: suspense.netPure >= 0 ? '#D32F2F' : '#2E7D32' }}>{suspense.netPure.toFixed(3)} g</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ fontWeight: 'bold' }}>Net Amount:</Text>
+                  <Text style={{ fontWeight: 'bold' }}>₹{suspense.netAmount.toFixed(2)}</Text>
+                </View>
+              </View>
+            </>
+          ) : order ? (
+            <>
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ORDER DETAILS :</Text>
+                <View style={{ padding: 10, flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Order No: {order.orderNo}</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Item: {order.type}</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Weight: {order.weight} GMS</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Payment: {order.payment}</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Pending Balance: ₹{order.balance}</Text>
+                  </View>
+                  {order.image && (
+                    <View style={{ width: 120, height: 120, borderRadius: 10, overflow: 'hidden', backgroundColor: '#f9f9f9', borderWidth: 1, borderColor: '#eee' }}>
+                      <Image
+                        source={{ uri: order.image.startsWith('http') ? order.image : `${base_url}/${order.image}` }}
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="cover"
+                      />
+                    </View>
+                  )}
+                </View>
+              </View>
+
+
+
+              <View style={styles.kuralContainer}>
+                <Text style={styles.kuralText}>{thirukkural}</Text>
+                <Text style={styles.visitAgainText}>Thank you for choosing NJT Jewellery!</Text>
+              </View>
+            </>
+          ) : isB2C ? (
+            <>
+              {/* B2C ITEMS */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ITEMS :</Text>
+
+                <View style={styles.tableHeader}>
+                  <Text style={styles.cell}>Item</Text>
+                  <Text style={styles.cell}>Weight</Text>
+                  <Text style={styles.cell}>Touch</Text>
+                  <Text style={styles.cell}>W/M</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Total</Text>
+                  <Text style={styles.cell}>GST</Text>
+                  <Text style={styles.cell}>Final</Text>
+                </View>
+
+                {items && items.length > 0 ? (
+                  items.map((item, i) => (
+                    <View key={i} style={styles.tableRow}>
+                      <Text style={styles.cell}>{item.displayItemName || item.itemName}</Text>
+                      <Text style={styles.cell}>{item.weight}</Text>
+                      <Text style={styles.cell}>{item.touch}</Text>
+                      <Text style={styles.cell}>{item.wastage}</Text>
+                      <Text style={styles.cell}>{item.rate}</Text>
+                      <Text style={styles.cell}>{item.total}</Text>
+                      <Text style={styles.cell}>{item.gst}</Text>
+                      <Text style={styles.cell}>{item.final}</Text>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.noData}>No items</Text>
+                )}
+              </View>
+
+              {/* B2C RECEIPT / OLD GOLD ITEMS */}
+              {receiptItems && receiptItems.length > 0 && (
+                <View style={styles.sectionBox}>
+                  <Text style={styles.sectionTitle}>RECEIPT / OLD GOLD :</Text>
+
+                  <View style={styles.tableHeader}>
+                    <Text style={styles.cell}>Item</Text>
+                    <Text style={styles.cell}>Wt</Text>
+                    <Text style={styles.cell}>Sub</Text>
+                    <Text style={styles.cell}>Net Wt</Text>
+                    <Text style={styles.cell}>Rate</Text>
+                    <Text style={styles.cell}>Amt</Text>
+                  </View>
+
+                  {receiptItems.map((item, i) => (
+                    <View key={i} style={styles.tableRow}>
+                      <Text style={styles.cell}>{item.name}</Text>
+                      <Text style={styles.cell}>{item.weight}</Text>
+                      <Text style={styles.cell}>{item.sub}</Text>
+                      <Text style={styles.cell}>{item.netWeight}</Text>
+                      <Text style={styles.cell}>{item.rate}</Text>
+                      <Text style={styles.cell}>{item.amount}</Text>
+                    </View>
+                  ))}
+
+                  <View style={styles.totalRow}>
+                    <Text style={styles.totalCell}>Total Old Gold Amount:</Text>
+                    <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>
+                      ₹{receiptItems.reduce((acc, item) => acc + parseFloat(item.amount || 0), 0).toFixed(2)}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* GST */}
+              {gst && gst.enabled && (
+                <View style={styles.cashBox}>
+                  <Text style={styles.sectionTitle}>GST :</Text>
+                  <Text>GST Percentage: {gst.percentage}%</Text>
+                  <Text>GST Amount: ₹{gst.amount}</Text>
+                </View>
+              )}
+
+              {/* B2C TOTAL */}
+              <View style={styles.cashBox}>
+                <Text style={styles.sectionTitle}>TOTAL :</Text>
+                <Text>Total Amount: {report ? report.cash : 'N/A'}</Text>
+                <Text>Current OD: {isB2C ? (Math.max(0, parseFloat(report?.cash || 0) - parseFloat(customer?.advanceBalance || 0)).toFixed(2)) : '0.00'}</Text>
+                <Text>Current AB: {isB2C ? (Math.max(0, parseFloat(customer?.advanceBalance || 0) - parseFloat(report?.cash || 0)).toFixed(2)) : '0.00'}</Text>
+                {cashAmount ? (
+                  <>
+                    <Text>Cash Amount: ₹{cashAmount}</Text>
+                    <Text>UPI Amount: ₹{upiAmount}</Text>
+                  </>
+                ) : null}
+              </View>
+
+              {/* CASH INPUT */}
+              <View style={styles.row}>
+                <Text style={styles.label}>Cash Amount</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter cash amount"
+                  keyboardType="numeric"
+                  value={cashAmount}
+                  onChangeText={setCashAmount}
+                />
+              </View>
+
+              {/* UPI INPUT */}
+              {cashAmount && (
+                <>
+                  <View style={styles.row}>
+                    <Text style={styles.label}>UPI Amount</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter UPI amount"
+                      keyboardType="numeric"
+                      value={upiAmount}
+                      onChangeText={setUpiAmount}
+                    />
+                  </View>
+
+                  <View style={styles.row}>
+                    <Text style={styles.label}>Phone Number</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter Phone Number"
+                      keyboardType="phone-pad"
+                      value={additionalPhone}
+                      onChangeText={setAdditionalPhone}
+                    />
+                  </View>
+
+                  <View style={styles.row}>
+                    <Text style={styles.label}>Cash</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Enter Cash"
+                      keyboardType="numeric"
+                      value={additionalCash}
+                      onChangeText={setAdditionalCash}
+                    />
+                  </View>
+                </>
+              )}
+
+              {/* SUBMIT BUTTON */}
+              {cashAmount && (
+                <TouchableOpacity style={styles.submitBtn} onPress={() => setShowUpi(true)}>
+                  <Text style={styles.submitText}>Generate QR Code</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* QR CODE */}
+              {showUpi && upiAmount > 0 && (
+                <View style={styles.qrContainer}>
+                  <Text style={styles.qrLabel}>UPI QR Code for ₹{upiAmount}</Text>
+                  <Text style={styles.upiIdText}>UPI ID: {upiId}</Text>
+                  <TouchableOpacity style={styles.changeUpiBtn} onPress={() => navigation.navigate('UPIControl')}>
+                    <Text style={styles.changeUpiText}>Change UPI ID</Text>
+                  </TouchableOpacity>
+                  <Image
+                    source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent("NTJ Jewellery")}&am=${upiAmount}&cu=INR`)}` }}
+                    style={{ width: 200, height: 200 }
+                    }
+                  />
+                  < TouchableOpacity style={styles.printQrBtn} onPress={handlePrintQR} >
+                    <Text style={styles.printQrText}>Print QR Code</Text>
+                  </TouchableOpacity >
+                </View >
+              )}
+
+              {/* Thirukkural Quote for B2C */}
+              <View style={styles.kuralContainer}>
+                <Text style={styles.kuralText}>{thirukkural}</Text>
+                <Text style={styles.visitAgainText}>Thank you for your visit. Please visit again.</Text>
+              </View>
+            </>
+          ) : (
+            <>
+              {/* ISSUE */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ISSUE :</Text>
+
+                <View style={styles.tableHeader}>
+                  <Text style={styles.cell}>Name</Text>
+                  <Text style={styles.cell}>G.Weight</Text>
+                  <Text style={styles.cell}>M</Text>
+                  <Text style={styles.cell}>N.Weight</Text>
+                  <Text style={styles.cell}>Calc</Text>
+                  <Text style={styles.cell}>Pure</Text>
+                </View>
+
+                {issueItems.map((row, i) => (
+                  <View key={i} style={styles.tableRow}>
+                    <Text style={styles.cell}>{row.name}</Text>
+                    <Text style={styles.cell}>{row.gross}</Text>
+                    <Text style={styles.cell}>{row.m}</Text>
+                    <Text style={styles.cell}>{row.net}</Text>
+                    <Text style={styles.cell}>{row.calc}</Text>
+                    <Text style={styles.cell}>{row.pure}</Text>
+                  </View>
+                ))}
+
+                {/* ISSUE TOTAL */}
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalCell}>Total Issue Pure:</Text>
+                  <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>{totalIssuePure}</Text>
+                </View>
+              </View>
+
+              {/* RECEIPT */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>RECEIPT :</Text>
+
+                <View style={styles.tableHeader}>
+                  <Text style={styles.cell}>Name</Text>
+                  <Text style={styles.cell}>Weight</Text>
+                  <Text style={styles.cell}>Result</Text>
+                  <Text style={styles.cell}>Calc</Text>
+                  <Text style={styles.cell}>Pure</Text>
+                </View>
+
+                {receiptItems && receiptItems.length > 0 ? (
+                  receiptItems.map((row, i) => (
+                    <View key={i} style={styles.tableRow}>
+                      <Text style={styles.cell}>{row.name}</Text>
+                      <Text style={styles.cell}>{row.weight}</Text>
+                      <Text style={styles.cell}>{row.result}</Text>
+                      <Text style={styles.cell}>{row.calc}</Text>
+                      <Text style={styles.cell}>{row.pure}</Text>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.noData}>No receipt items</Text>
+                )}
+
+                {/* RECEIPT TOTAL */}
+                <View style={styles.totalRow}>
+                  <Text style={styles.totalCell}>Total Receipt Pure:</Text>
+                  <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>{totalReceiptPure}</Text>
+                </View>
+              </View>
+
+              {/* CASH */}
+              <View style={styles.cashBox}>
+                <Text style={styles.sectionTitle}>CASH :</Text>
+                {cashTable && cashTable.length > 0 ? (
+                  <View>
+                    <View style={styles.tableHeader}>
+                      <Text style={styles.cell}>Amount</Text>
+                      <Text style={styles.cell}>Rate</Text>
+                      <Text style={styles.cell}>Pure</Text>
+                    </View>
+                    {cashTable.map((cashEntry, i) => (
+                      <View key={i} style={styles.tableRow}>
+                        <Text style={styles.cell}>{cashEntry.rupees}</Text>
+                        <Text style={styles.cell}>{cashEntry.goldRate}</Text>
+                        <Text style={styles.cell}>{cashEntry.pure}</Text>
+                      </View>
+                    ))}
+                    <View style={styles.totalRow}>
+                      <Text style={styles.totalCell}>Total Cash Pure:</Text>
+                      <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>
+                        {cashTable.reduce((sum, c) => sum + parseFloat(c.pure || 0), 0).toFixed(3)}
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <Text>N/A</Text>
+                )}
+              </View>
+
+              {/* GST */}
+              {gst && gst.enabled && gst.showInBill !== false && (
+                <View style={styles.cashBox}>
+                  <Text style={styles.sectionTitle}>GST :</Text>
+
+                  {/* Dynamic Display Logic */}
+                  {parseFloat(gst.igst) > 0 ? (
+                    // IGST Case
+                    <View>
+                      <Text>IGST {gst.igst}% : ₹{gst.amount}</Text>
+                    </View>
+                  ) : (parseFloat(gst.sgst) > 0 || parseFloat(gst.cgst) > 0) ? (
+                    // SGST + CGST Case
+                    <View>
+                      <Text>SGST {gst.sgst || 0}% : ₹{(parseFloat(gst.amount) / 2).toFixed(2)}</Text>
+                      <Text>CGST {gst.cgst || 0}% : ₹{(parseFloat(gst.amount) / 2).toFixed(2)}</Text>
+                    </View>
+                  ) : (
+                    // Fallback (Legacy or Total only)
+                    <View>
+                      <Text>GST Percentage: {gst.percentage}%</Text>
+                      <Text>GST Amount: ₹{gst.amount}</Text>
+                    </View>
+                  )}
+
+                  {(parseFloat(gst.igst) > 0 || parseFloat(gst.sgst) > 0) && (
+                    <Text style={{ marginTop: 4, fontWeight: 'bold' }}>Total GST Amount: ₹{gst.amount}</Text>
+                  )}
+                </View>
+              )}
+
+              {/* SUMMARY */}
+              <View style={styles.summaryBox}>
+                <Text style={styles.sectionTitle}>SUMMARY :</Text>
+
+                {/* Conditional rendering based on OB or AB */}
+                {customer?.oldBalance && parseFloat(customer.oldBalance) !== 0 ? (
+                  // OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | [Old Balance or Advance Balance]
+                  <>
+                    <View style={styles.summaryHeader}>
+                      <Text style={styles.sumCell}>Old Balance</Text>
+                      <Text style={styles.sumCell}>ISSUE</Text>
+                      <Text style={styles.sumCell}>RECEIPT</Text>
+                      <Text style={styles.sumCell}>CASH</Text>
+                      <Text style={styles.sumCell}>{parseFloat(finalBalance) >= 0 ? "Old Balance" : "Advance Balance"}</Text>
+                    </View>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.sumCell}>{customer?.oldBalance || 'N/A'}</Text>
+                      <Text style={styles.sumCell}>{summary ? summary.issue : 'N/A'}</Text>
+                      <Text style={styles.sumCell}>{summary ? summary.receipt : 'N/A'}</Text>
+                      <Text style={styles.sumCell}>{summary ? summary.cash : 'N/A'}</Text>
+                      <Text style={styles.sumCell}>{parseFloat(finalBalance) >= 0 ? finalBalance : Math.abs(parseFloat(finalBalance)).toFixed(3)}</Text>
+                    </View>
+
+                    <View style={styles.finalSummaryRow}>
+                      <Text style={styles.sumCell}>
+                        {customer?.oldBalance ? (parseFloat(customer.oldBalance) + (summary ? parseFloat(summary.issue) : 0)).toFixed(3) : 'N/A'}
+                      </Text>
+                      <Text style={styles.sumCell}>-</Text>
+                      <Text style={styles.sumCell}>{summary ? summary.receiptPlusCash : 'N/A'}</Text>
+                      <Text style={styles.sumCell}>=</Text>
+                      <Text style={styles.sumCell}>{parseFloat(finalBalance) >= 0 ? finalBalance : Math.abs(parseFloat(finalBalance)).toFixed(3)}</Text>
+                    </View>
+                  </>
+                ) : (
+                  // AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | [Advance Balance or Old Balance]
+                  <>
+                    <View style={styles.summaryHeader}>
+                      <Text style={styles.sumCell}>ISSUE</Text>
+                      <Text style={styles.sumCell}>Advance Balance</Text>
+                      <Text style={styles.sumCell}>RECEIPT</Text>
+                      <Text style={styles.sumCell}>CASH</Text>
+                      <Text style={styles.sumCell}>{(summary && customer?.advanceBalance ? (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - parseFloat(summary.issue)) : parseFloat(finalBalance)) >= 0 ? "Advance Balance" : "Old Balance"}</Text>
+                    </View>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.sumCell}>{summary ? summary.issue : 'N/A'}</Text>
+                      <Text style={styles.sumCell}>
+                        {customer?.advanceBalance && parseFloat(customer.advanceBalance) !== 0
+                          ? customer.advanceBalance
+                          : '0.000'}
+                      </Text>
+                      <Text style={styles.sumCell}>{summary ? summary.receipt : 'N/A'}</Text>
+                      <Text style={styles.sumCell}>{summary ? summary.cash : 'N/A'}</Text>
+                      <Text style={styles.sumCell}>
+                        {(() => {
+                          const val = summary && customer?.advanceBalance ?
+                            (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - parseFloat(summary.issue)) :
+                            parseFloat(finalBalance);
+                          return Math.abs(val).toFixed(3);
+                        })()}
+                      </Text>
+                    </View>
+
+                    <View style={styles.finalSummaryRow}>
+                      <Text style={[styles.sumCell, { flex: 2.5 }]}>
+                        {customer?.advanceBalance || '0.000'} + {summary?.receipt || '0.000'} + {summary?.cash || '0.000'} - {summary?.issue || '0.000'}
+                      </Text>
+                      <Text style={[styles.sumCell, { flex: 0.5 }]}>=</Text>
+                      <Text style={[styles.sumCell, { flex: 1 }]}>
+                        {(() => {
+                          const val = summary && customer?.advanceBalance ?
+                            (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - parseFloat(summary.issue)) :
+                            parseFloat(finalBalance);
+                          return Math.abs(val).toFixed(3);
+                        })()}
+                      </Text>
+                    </View>
+                  </>
+                )}
+              </View>
+            </>
+          )}
+
+          {/* Save Button */}
+          <View style={{ alignItems: 'center', marginTop: 24 }}>
+            <TouchableOpacity
+              style={styles.saveButton}
+              onPress={() => { }} // No function added as requested
+              activeOpacity={0.8}
+            >
+              <Icon name="content-save-outline" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>Save Bill</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Bottom Home Button */}
+          <View style={styles.homeButtonWrapper}>
+            <TouchableOpacity
+              style={styles.homeButton}
+              onPress={() => navigation.navigate('Home')}
+              activeOpacity={0.8}
+            >
+              <Icon name="home-outline" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>Home</Text>
+            </TouchableOpacity>
+          </View>
+
+        </ScrollView>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -1630,6 +1634,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     letterSpacing: 0.5,
+  },
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0056b3', // Premium Blue
+    paddingVertical: 13,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    gap: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   transferContainer: {
     flexDirection: 'row',
