@@ -1119,58 +1119,39 @@ export default function CreateTransaction({ navigation, route }) {
     console.log("FINAL REPORT 👉", reportData);
     console.log("FINAL TXNS 👉", transactionData);
 
-    // Update customer's balance (OB/AB)
+    // Unified Transactional Save
     try {
       const customer = b2cCustomers.find(c => (c.customerName === customerName || c.name === customerName) && (c.phone === phone || c.customerNumber === phone));
+
+      // 1. Update Customer Balance
       if (customer) {
         const ob = parseFloat(customer.oldBalance || 0);
         const ab = parseFloat(customer.advanceBalance || 0);
         const currentNet = ob - ab;
-        const issueWeight = parseFloat(reportData.totalReceiptPure); // Issue pure weight
-
-        // Receipt pure weight from Old Gold items
-        const receiptPure = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
-
-        // Convert cash amount to gold equivalent using gold rate
+        const issueWeight = parseFloat(reportData.totalReceiptPure);
+        const receiptPureValue = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
         const goldRateValue = parseFloat(passedGoldRate || 0) || 1;
-        const cashPure = parseFloat(reportData.cash) / goldRateValue;
+        const cashPureVal = parseFloat(reportData.cash) / goldRateValue;
+        const newNet = currentNet + issueWeight - receiptPureValue - cashPureVal;
 
-        const newNet = currentNet + issueWeight - receiptPure - cashPure;
-
-        let newCustomerOB = 0;
-        let newCustomerAB = 0;
-
-        if (newNet >= 0) {
-          newCustomerOB = newNet;
-          newCustomerAB = 0;
-        } else {
-          newCustomerOB = 0;
-          newCustomerAB = Math.abs(newNet);
-        }
+        let newCustomerOB = 0, newCustomerAB = 0;
+        if (newNet >= 0) { newCustomerOB = newNet; newCustomerAB = 0; }
+        else { newCustomerOB = 0; newCustomerAB = Math.abs(newNet); }
 
         const updateResponse = await fetch(`${base_url}/customersB2C/${customer.id}`, {
           method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             oldBalance: newCustomerOB.toFixed(3),
             advanceBalance: newCustomerAB.toFixed(3),
           }),
         });
 
-        if (!updateResponse.ok) {
-          console.error("Failed to update customer balance");
-        } else {
-          console.log("✅ Customer balance updated successfully:", { newCustomerOB, newCustomerAB });
-        }
+        if (!updateResponse.ok) throw new Error("Failed to update customer balance.");
+        console.log("✅ Customer balance updated successfully");
       }
-    } catch (error) {
-      console.error("Error updating customer balance:", error);
-    }
 
-    // Save transaction to unified transactions endpoint
-    try {
+      // 2. Save Transaction History
       const transactionRecord = {
         customerName,
         customerId: currentCustomer?.id || currentCustomer?._id || "N/A",
@@ -1182,11 +1163,7 @@ export default function CreateTransaction({ navigation, route }) {
         receiptItems: b2cReceiptItems,
         gst: gstEnabled ? {
           sgst, cgst, igst,
-          total: (
-            (isSgstEnabled ? (parseFloat(sgst) || 0) : 0) +
-            (isCgstEnabled ? (parseFloat(cgst) || 0) : 0) +
-            (isIgstEnabled ? (parseFloat(igst) || 0) : 0)
-          ).toString(),
+          total: ((isSgstEnabled ? parseFloat(sgst) || 0 : 0) + (isCgstEnabled ? parseFloat(cgst) || 0 : 0) + (isIgstEnabled ? parseFloat(igst) || 0 : 0)).toString(),
           amount: items.reduce((sum, item) => sum + (parseFloat(item.gst) || 0), 0).toFixed(2)
         } : null,
         invoiceNo: invoiceNo || "N/A",
@@ -1195,19 +1172,67 @@ export default function CreateTransaction({ navigation, route }) {
 
       const saveResponse = await fetch(`${base_url}/transactions`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(transactionRecord),
       });
 
-      if (saveResponse.ok) {
-        console.log("✅ B2C Transaction saved to history");
-      } else {
-        console.error("Failed to save B2C transaction to history");
-      }
+      if (!saveResponse.ok) throw new Error("Failed to save transaction history.");
+      const savedTxn = await saveResponse.json();
+
+      // 3. Save Full Bill Summary
+      const customerObj = b2cCustomers.find(c => c.customerName === customerName && c.phone === phone);
+      const billSummaryData = {
+        customerId: customerObj?.id || "N/A",
+        customerName: customerName,
+        customerType: "B2C",
+        invoiceNo: invoiceNo || savedTxn._id || "N/A",
+        date: date,
+        ob: parseFloat(customerObj?.oldBalance || 0),
+        advBal: parseFloat(customerObj?.advanceBalance || 0),
+        issuePure: parseFloat(reportData.totalReceiptPure),
+        receiptPure: b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0),
+        cashPure: parseFloat(reportData.cash) / (parseFloat(passedGoldRate || 0) || 1),
+        currentBalance: (() => {
+          const ob = parseFloat(customerObj?.oldBalance || 0);
+          const ab = parseFloat(customerObj?.advanceBalance || 0);
+          const issue = parseFloat(reportData.totalReceiptPure);
+          const receipt = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
+          const cashPure = parseFloat(reportData.cash) / (parseFloat(passedGoldRate || 0) || 1);
+          return (ob - ab) + issue - receipt - cashPure;
+        })(),
+        issueItems: items.map(it => ({
+          name: it.displayItemName || it.itemName,
+          gross: it.weight,
+          m: '-',
+          net: it.weight,
+          calc: it.touch,
+          pure: it.pure
+        })),
+        receiptItems: b2cReceiptItems.map(it => ({
+          name: it.name, weight: it.weight, result: it.netWeight, calc: it.touch, pure: it.netWeight
+        })),
+        cashTable: [],
+        gst: gstEnabled ? {
+          enabled: true,
+          percentage: (transactionRecord.gst?.total || "0"),
+          amount: (transactionRecord.gst?.amount || "0"),
+          sgst, cgst, igst
+        } : null,
+      };
+
+      const billRes = await fetch(`${base_url}/billSummary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(billSummaryData),
+      });
+
+      if (!billRes.ok) throw new Error("Failed to save full bill summary.");
+      console.log("✅ Entire B2C bill saved successfully");
+
     } catch (error) {
-      console.error("Error saving B2C transaction:", error);
+      console.error("❌ Error during final save:", error);
+      Alert.alert("Save Error", error.message);
+      return;
     }
 
     const currentCustomer = b2cCustomers.find(c => c.customerName === customerName && c.phone === phone);
@@ -1225,6 +1250,7 @@ export default function CreateTransaction({ navigation, route }) {
         email: "-",
         date: date,
         goldRate: rate,
+        autoShare: true,
       },
       report: reportData,
       transactions: transactionData,
