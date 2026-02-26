@@ -361,8 +361,9 @@ export default function HomeScreen() {
           <TouchableOpacity
             style={styles.cardEditIcon}
             onPress={() => setModalVisible(true)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Icon name="pencil" size={20} style={{ top: 70 }} color="#FFD700" />
+            <Icon name="pencil" size={20} color="#FFD700" />
           </TouchableOpacity>
 
           <View style={styles.cardRow}>
@@ -719,7 +720,7 @@ const styles = StyleSheet.create({
   },
   cardEditIcon: {
     position: "absolute",
-    top: 15,
+    top: 80,
     right: 15,
     padding: 5,
     zIndex: 5,
