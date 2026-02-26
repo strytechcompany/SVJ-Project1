@@ -1061,109 +1061,129 @@ export default function CreateTransaction({ navigation }) {
   };
 
   const saveCompleteTransaction = async () => {
-  console.log("💾 saveCompleteTransaction called");
+    console.log("💾 saveCompleteTransaction called");
 
-  if (!selectedCustomer) {
-    Alert.alert("Error", "Please select a customer first");
-    return;
-  }
-
-  if (
-    issueItems.length === 0 &&
-    receiptItems.length === 0 &&
-    cashTable.length === 0
-  ) {
-    Alert.alert("Error", "No items added to transaction");
-    return;
-  }
-
-  // ✅ FIX 1: Remove - advBalance from formula
-  const finalDistinctBalance = Number(
-    (
-      oldBalance +
-      totalIssuePure +
-      (gstEnabled ? gstPureValue : 0) -
-      totalReceiptPure -
-      totalCashPure
-      // ✅ NO - advBalance here
-    ).toFixed(3),
-  );
-
-  const transactionData = {
-    customerName: selectedCustomer.name,
-    customerId: selectedCustomer.id,
-    issueTotal: Number(totalIssueWeight.toFixed(3)),
-    issuePure: Number(totalIssuePure.toFixed(3)),
-    oldBalance: Number(oldBalance.toFixed(3)),
-    receiptPure: Number(totalReceiptPure.toFixed(3)),
-    cashPure: Number(totalCashPure.toFixed(3)),
-    balance: finalDistinctBalance,
-    advBal: Number(advBalance.toFixed(3)),
-  };
-
-  try {
-    const response = await fetch(`${base_url}/transactions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(transactionData),
-    });
-
-    if (!response.ok) {
-      const responseText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${responseText}`);
+    if (!selectedCustomer) {
+      Alert.alert("Error", "Please select a customer first");
+      return;
     }
 
-    const savedTransaction = await response.json();
-    console.log("✅ Transaction saved:", savedTransaction);
+    if (
+      issueItems.length === 0 &&
+      receiptItems.length === 0 &&
+      cashTable.length === 0
+    ) {
+      Alert.alert("Error", "No items added to transaction");
+      return;
+    }
 
-    // ✅ FIX 2: Use correct endpoint based on customerType
-    const isB2C = selectedCustomer.customerType === "B2C";
-    const updateEndpoint = isB2C
-      ? `${base_url}/customersB2C/${selectedCustomer.id}`
-      : `${base_url}/customers/${selectedCustomer.id}`;
+    // ✅ FIX 1: Remove - advBalance from formula
+    const finalDistinctBalance = Number(
+      (
+        oldBalance +
+        totalIssuePure +
+        (gstEnabled ? gstPureValue : 0) -
+        totalReceiptPure -
+        totalCashPure
+        // ✅ NO - advBalance here
+      ).toFixed(3),
+    );
 
-    await fetch(updateEndpoint, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        billCurrentBalance: finalDistinctBalance, // ✅ ONLY this gets updated
-      }),
-    });
-
-    // ✅ FIX 3: Use actual customerType instead of hardcoded "B2B"
-    const customerType = selectedCustomer.customerType || "B2B";
-
-    const billSummaryData = {
-      customerId: selectedCustomer.id,
+    const transactionData = {
       customerName: selectedCustomer.name,
-      customerType: customerType, // ✅ FIXED - was hardcoded "B2B"
-      invoiceNo: savedTransaction._id || "N/A",
-      date: date,
-      ob: Number(oldBalance.toFixed(3)),
+      customerId: selectedCustomer.id,
+      issueTotal: Number(totalIssueWeight.toFixed(3)),
       issuePure: Number(totalIssuePure.toFixed(3)),
+      oldBalance: Number(oldBalance.toFixed(3)),
       receiptPure: Number(totalReceiptPure.toFixed(3)),
       cashPure: Number(totalCashPure.toFixed(3)),
-      gstPure: Number((gstEnabled ? gstPureValue : 0).toFixed(3)),
+      balance: finalDistinctBalance,
       advBal: Number(advBalance.toFixed(3)),
-      currentBalance: finalDistinctBalance,
-      issueItems: issueItems.map((item) => ({
-        name: item.item,
-        gross: fmt(item.weight),
-        m: fmt(item.stone),
-        net: fmt(item.weight - item.stone),
-        calc: fmt(item.touch),
-        pure: fmt(item.purity),
-      })),
-      receiptItems: receiptItems.map((item) => ({
-        name: item.item,
-        weight: fmt(item.weight),
-        result: fmt(item.weight - item.stone),
-        calc: fmt(item.touch),
-        pure: fmt(item.purity),
-      })),
-      cashTable: cashTable,
-      gst: gstEnabled
-        ? {
+    };
+
+    try {
+      const response = await fetch(`${base_url}/transactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(transactionData),
+      });
+
+      if (!response.ok) {
+        const responseText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${responseText}`);
+      }
+
+      const savedTransaction = await response.json();
+      console.log("✅ Transaction saved:", savedTransaction);
+
+      const isB2C = selectedCustomer.customerType === "B2C";
+      const updateEndpoint = isB2C
+        ? `${base_url}/customersB2C/${selectedCustomer.id}`
+        : `${base_url}/customers/${selectedCustomer.id}`;
+
+      // Calculate updated balances to save back to master record
+      const currentNet = oldBalance - advBalance;
+      const newNet = Number((currentNet + totalIssuePure + (gstEnabled ? gstPureValue : 0) - totalReceiptPure - totalCashPure).toFixed(3));
+
+      let final_OB = 0;
+      let final_AB = 0;
+
+      if (newNet >= 0) {
+        final_OB = newNet;
+        final_AB = 0;
+      } else {
+        final_OB = 0;
+        final_AB = Math.abs(newNet);
+      }
+
+      // 1. Update Customer Balance in Master Record
+      const customerUpdateRes = await fetch(updateEndpoint, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          billCurrentBalance: newNet,
+          oldBalance: final_OB.toFixed(3),
+          advanceBalance: final_AB.toFixed(3),
+        }),
+      });
+
+      if (!customerUpdateRes.ok) {
+        throw new Error("Failed to update customer balance in master.");
+      }
+
+      const customerType = selectedCustomer.customerType || "B2B";
+
+      const billSummaryData = {
+        customerId: selectedCustomer.id,
+        customerName: selectedCustomer.name,
+        customerType: customerType,
+        invoiceNo: savedTransaction._id || "N/A",
+        date: date,
+        ob: Number(oldBalance.toFixed(3)),
+        issuePure: Number(totalIssuePure.toFixed(3)),
+        receiptPure: Number(totalReceiptPure.toFixed(3)),
+        cashPure: Number(totalCashPure.toFixed(3)),
+        gstPure: Number((gstEnabled ? gstPureValue : 0).toFixed(3)),
+        advBal: Number(advBalance.toFixed(3)),
+        currentBalance: newNet,
+        issueItems: issueItems.map((item) => ({
+          name: item.item,
+          gross: fmt(item.weight),
+          m: fmt(item.stone),
+          net: fmt(item.weight - item.stone),
+          calc: fmt(item.touch),
+          pure: fmt(item.purity),
+        })),
+        receiptItems: receiptItems.map((item) => ({
+          name: item.item,
+          weight: fmt(item.weight),
+          result: fmt(item.weight - item.stone),
+          calc: fmt(item.touch),
+          pure: fmt(item.purity),
+        })),
+        cashTable: cashTable,
+        gst: gstEnabled
+          ? {
             enabled: true,
             percentage: (
               (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
@@ -1175,51 +1195,53 @@ export default function CreateTransaction({ navigation }) {
             cgst: isCgstEnabled ? cgst : "0",
             igst: isIgstEnabled ? igst : "0",
           }
-        : null,
-    };
+          : null,
+      };
 
-    const billRes = await fetch(`${base_url}/billSummary`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(billSummaryData),
-    });
+      // 2. Save Full Bill Summary for History
+      const billRes = await fetch(`${base_url}/billSummary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(billSummaryData),
+      });
 
-    if (billRes.ok) {
-      console.log("✅ Bill summary saved to DB");
-    } else {
-      console.error("⚠️ Failed to save bill summary");
-    }
+      if (!billRes.ok) {
+        throw new Error("Failed to save full bill summary.");
+      }
 
-    navigation.navigate("BillPreview", {
-      customer: {
-        name: selectedCustomer.name,
-        phone: selectedCustomer.phone || "",
-        type: customerType, // ✅ FIXED - was hardcoded "B2B"
-        address: selectedCustomer.address || "",
-        gstin: selectedCustomer.gst || "",
-        date,
-        oldBalance: fmt(oldBalance),
-        advanceBalance: fmt(advBalance),
-        transactionId: savedTransaction._id,
-      },
-      issueItems: issueItems.map((item) => ({
-        name: item.item,
-        gross: fmt(item.weight),
-        m: fmt(item.stone),
-        net: fmt(item.weight - item.stone),
-        calc: fmt(item.touch),
-        pure: fmt(item.purity),
-      })),
-      receiptItems: receiptItems.map((item) => ({
-        name: item.item,
-        weight: fmt(item.weight),
-        result: fmt(item.weight - item.stone),
-        calc: fmt(item.touch),
-        pure: fmt(item.purity),
-      })),
-      cashTable: cashTable,
-      gst: gstEnabled
-        ? {
+      console.log("✅ Entire bill saved successfully");
+
+      navigation.navigate("BillPreview", {
+        customer: {
+          name: selectedCustomer.name,
+          phone: selectedCustomer.phone || "",
+          type: customerType, // ✅ FIXED - was hardcoded "B2B"
+          address: selectedCustomer.address || "",
+          gstin: selectedCustomer.gst || "",
+          date,
+          oldBalance: fmt(oldBalance),
+          advanceBalance: fmt(advBalance),
+          transactionId: savedTransaction._id,
+          autoShare: true,
+        },
+        issueItems: issueItems.map((item) => ({
+          name: item.item,
+          gross: fmt(item.weight),
+          m: fmt(item.stone),
+          net: fmt(item.weight - item.stone),
+          calc: fmt(item.touch),
+          pure: fmt(item.purity),
+        })),
+        receiptItems: receiptItems.map((item) => ({
+          name: item.item,
+          weight: fmt(item.weight),
+          result: fmt(item.weight - item.stone),
+          calc: fmt(item.touch),
+          pure: fmt(item.purity),
+        })),
+        cashTable: cashTable,
+        gst: gstEnabled
+          ? {
             enabled: gstEnabled,
             percentage: (
               (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
@@ -1232,23 +1254,23 @@ export default function CreateTransaction({ navigation }) {
             igst: isIgstEnabled ? igst : "0",
             showInBill: true,
           }
-        : null,
-      summary: {
-        ob: fmt(oldBalance),
-        issue: fmt(totalIssuePure),
-        gstPure: fmt(gstPureValue),
-        receipt: fmt(totalReceiptPure),
-        cash: fmt(totalCashPure),
-        current: fmt(finalDistinctBalance),
-        obPlusIssue: fmt(oldBalance + totalIssuePure + gstPureValue),
-        receiptPlusCash: fmt(totalReceiptPure + totalCashPure),
-      },
-    });
-  } catch (error) {
-    console.error("❌ Error saving transaction:", error);
-    Alert.alert("Error", `Failed to save transaction: ${error.message}`);
-  }
-};
+          : null,
+        summary: {
+          ob: fmt(oldBalance),
+          issue: fmt(totalIssuePure),
+          gstPure: fmt(gstPureValue),
+          receipt: fmt(totalReceiptPure),
+          cash: fmt(totalCashPure),
+          current: fmt(newNet),
+          obPlusIssue: fmt(oldBalance + totalIssuePure + gstPureValue),
+          receiptPlusCash: fmt(totalReceiptPure + totalCashPure),
+        },
+      });
+    } catch (error) {
+      console.error("❌ Error saving transaction:", error);
+      Alert.alert("Error", `Failed to save transaction: ${error.message}`);
+    }
+  };
 
   // -----------------------
   // UI rendering
@@ -1871,7 +1893,21 @@ export default function CreateTransaction({ navigation }) {
         {/* CASH ENTRY */}
         {selectedCustomer && (
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Cash Received</Text>
+            <View style={styles.issueHeader}>
+              <View style={[styles.greenDot, { backgroundColor: "#1e88e5" }]} />
+              <Text style={styles.sectionTitle}>Cash Received</Text>
+              <View style={styles.cartContainer}>
+                <Icon name="cart" size={24} color="#000" />
+                <Text style={styles.cartText}>
+                  {totalCashPure.toFixed(3)}g
+                </Text>
+                {cashTable.length > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{cashTable.length}</Text>
+                  </View>
+                )}
+              </View>
+            </View>
 
             <Text style={styles.subLabel}>Rupees ₹</Text>
             <TextInput
