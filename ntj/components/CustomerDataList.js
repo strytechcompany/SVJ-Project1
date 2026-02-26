@@ -200,7 +200,7 @@ export default function CustomerMasterList({ navigation, route }) {
               <Text
                 style={[
                   styles.balanceValue,
-                  { color: getBalanceColor(item.updatedAt) },
+                  { color: getBalanceColor(item.balance) },
                 ]}
               >
                 {oldBalance.toFixed(3)}
@@ -217,17 +217,6 @@ export default function CustomerMasterList({ navigation, route }) {
               </Text>
             </View>
 
-            <View style={styles.line} />
-
-            {/* ✅ NEW: Bill Value - exact CURRENT from last bill */}
-            <View>
-              <Text style={[styles.balanceTitle, { color: "#6A1B9A" }]}>
-                Bill Value
-              </Text>
-              <Text style={[styles.balanceValue, { color: "#6A1B9A" }]}>
-                {billCurrentBalance.toFixed(3)}
-              </Text>
-            </View>
           </View>
 
           <Text style={styles.lastPaidText}>
