@@ -27,6 +27,7 @@ const thirukkuralRoutes = require("./routes/Thirukkural");
 const rateRoutes = require('./routes/Rate');
 const loginRoutes = require('./routes/Login');
 const Login = require('./models/Login');
+const billSummaryRoutes = require('./routes/billSummary');
 
 
 const app = express();
@@ -84,6 +85,7 @@ app.use('/api/upi', upiRoutes);
 app.use("/api/thirukkural", thirukkuralRoutes);
 app.use('/api/rates', rateRoutes);
 app.use('/api/login', loginRoutes);
+app.use('/api/billSummary', billSummaryRoutes); 
 
 
 // Test route

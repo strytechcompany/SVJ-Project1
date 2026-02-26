@@ -16,6 +16,7 @@ import { useRoute, useFocusEffect } from "@react-navigation/native";
 import { base_url } from "./config";
 import * as Print from "expo-print";
 import * as FileSystem from "expo-file-system";
+import { styles } from "./B2BCalculationPageStyles";
 
 /**
  * CreateTransaction (Full)
@@ -1085,8 +1086,9 @@ export default function CreateTransaction({ navigation }) {
         (gstEnabled ? gstPureValue : 0) -
         totalReceiptPure -
         totalCashPure
+      )
         // ✅ NO - advBalance here
-      ).toFixed(3),
+        .toFixed(3),
     );
 
     const transactionData = {
@@ -1123,7 +1125,15 @@ export default function CreateTransaction({ navigation }) {
 
       // Calculate updated balances to save back to master record
       const currentNet = oldBalance - advBalance;
-      const newNet = Number((currentNet + totalIssuePure + (gstEnabled ? gstPureValue : 0) - totalReceiptPure - totalCashPure).toFixed(3));
+      const newNet = Number(
+        (
+          currentNet +
+          totalIssuePure +
+          (gstEnabled ? gstPureValue : 0) -
+          totalReceiptPure -
+          totalCashPure
+        ).toFixed(3),
+      );
 
       let final_OB = 0;
       let final_AB = 0;
@@ -1184,21 +1194,21 @@ export default function CreateTransaction({ navigation }) {
         cashTable: cashTable,
         gst: gstEnabled
           ? {
-            enabled: true,
-            percentage: (
-              (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
-              (isCgstEnabled ? parseFloat(cgst) || 0 : 0) +
-              (isIgstEnabled ? parseFloat(igst) || 0 : 0)
-            ).toString(),
-            amount: gstAmount,
-            sgst: isSgstEnabled ? sgst : "0",
-            cgst: isCgstEnabled ? cgst : "0",
-            igst: isIgstEnabled ? igst : "0",
-          }
+              enabled: true,
+              percentage: (
+                (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
+                (isCgstEnabled ? parseFloat(cgst) || 0 : 0) +
+                (isIgstEnabled ? parseFloat(igst) || 0 : 0)
+              ).toString(),
+              amount: gstAmount,
+              sgst: isSgstEnabled ? sgst : "0",
+              cgst: isCgstEnabled ? cgst : "0",
+              igst: isIgstEnabled ? igst : "0",
+            }
           : null,
       };
 
-      // 2. Save Full Bill Summary for History
+      // AFTER
       const billRes = await fetch(`${base_url}/billSummary`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1206,7 +1216,8 @@ export default function CreateTransaction({ navigation }) {
       });
 
       if (!billRes.ok) {
-        throw new Error("Failed to save full bill summary.");
+        const billErrText = await billRes.text(); // ← reveals actual server error
+        throw new Error(`Failed to save full bill summary: ${billErrText}`);
       }
 
       console.log("✅ Entire bill saved successfully");
@@ -1242,18 +1253,18 @@ export default function CreateTransaction({ navigation }) {
         cashTable: cashTable,
         gst: gstEnabled
           ? {
-            enabled: gstEnabled,
-            percentage: (
-              (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
-              (isCgstEnabled ? parseFloat(cgst) || 0 : 0) +
-              (isIgstEnabled ? parseFloat(igst) || 0 : 0)
-            ).toString(),
-            amount: gstAmount,
-            sgst: isSgstEnabled ? sgst : "0",
-            cgst: isCgstEnabled ? cgst : "0",
-            igst: isIgstEnabled ? igst : "0",
-            showInBill: true,
-          }
+              enabled: gstEnabled,
+              percentage: (
+                (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
+                (isCgstEnabled ? parseFloat(cgst) || 0 : 0) +
+                (isIgstEnabled ? parseFloat(igst) || 0 : 0)
+              ).toString(),
+              amount: gstAmount,
+              sgst: isSgstEnabled ? sgst : "0",
+              cgst: isCgstEnabled ? cgst : "0",
+              igst: isIgstEnabled ? igst : "0",
+              showInBill: true,
+            }
           : null,
         summary: {
           ob: fmt(oldBalance),
@@ -1898,9 +1909,7 @@ export default function CreateTransaction({ navigation }) {
               <Text style={styles.sectionTitle}>Cash Received</Text>
               <View style={styles.cartContainer}>
                 <Icon name="cart" size={24} color="#000" />
-                <Text style={styles.cartText}>
-                  {totalCashPure.toFixed(3)}g
-                </Text>
+                <Text style={styles.cartText}>{totalCashPure.toFixed(3)}g</Text>
                 {cashTable.length > 0 && (
                   <View style={styles.badge}>
                     <Text style={styles.badgeText}>{cashTable.length}</Text>
@@ -2334,497 +2343,3 @@ export default function CreateTransaction({ navigation }) {
     </ScrollView>
   );
 }
-
-// -------------------------- STYLES ----------------------------
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F7F7F7",
-    paddingTop: 40,
-    paddingHorizontal: 16,
-  },
-
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
-    gap: 10,
-  },
-
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    flex: 1,
-  },
-
-  headerIcons: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  dropdownCard: {
-    backgroundColor: "#fff",
-    margin: 12,
-    padding: 16,
-    borderRadius: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    elevation: 2,
-  },
-
-  dropdownCardSmall: {
-    backgroundColor: "#fff",
-    marginVertical: 6,
-    padding: 12,
-    borderRadius: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    elevation: 1,
-  },
-
-  dropdownText: {
-    marginLeft: 10,
-    fontSize: 16,
-  },
-
-  rowCenter: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  card: {
-    backgroundColor: "#fff",
-    margin: 12,
-    padding: 18,
-    borderRadius: 20,
-    elevation: 3,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    borderWidth: 1,
-    borderColor: "#F0F0F0",
-  },
-
-  dropdownFloating: {
-    position: "absolute",
-    top: 130,
-    left: 18,
-    right: 18,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    elevation: 10,
-    zIndex: 10000,
-    maxHeight: 200,
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    overflow: "hidden",
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-
-  issueHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 20,
-  },
-
-  greenDot: {
-    width: 12,
-    height: 12,
-    backgroundColor: "green",
-    borderRadius: 6,
-  },
-
-  sectionTitle: {
-    fontSize: 19,
-    fontWeight: "700",
-    color: "#2C3E50",
-    marginBottom: 4,
-  },
-
-  infoText: {
-    fontSize: 17,
-    marginVertical: 2,
-  },
-
-  label: {
-    marginTop: 10,
-    fontSize: 15,
-    color: "#555",
-  },
-
-  subLabel: {
-    fontSize: 14,
-    marginBottom: 8,
-    color: "#555",
-  },
-
-  greenValue: {
-    fontSize: 20,
-    color: "green",
-    fontWeight: "700",
-  },
-
-  blackValue: {
-    fontSize: 20,
-    fontWeight: "700",
-  },
-
-  row: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-
-  inputBox: {
-    width: "48%",
-  },
-
-  input: {
-    backgroundColor: "#F4F4F4",
-    padding: 12,
-    borderRadius: 10,
-    fontSize: 16,
-  },
-
-  purityBox: {
-    backgroundColor: "#F4F4F4",
-    padding: 12,
-    borderRadius: 10,
-    justifyContent: "center",
-  },
-
-  purityText: {
-    fontSize: 16,
-    fontWeight: "600",
-  },
-
-  addBtn: {
-    backgroundColor: "#C9F8D0",
-    padding: 15,
-    borderRadius: 12,
-    alignItems: "center",
-    marginTop: 20,
-  },
-
-  addBtnText: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: "#135F25",
-  },
-
-  addBtn2: {
-    backgroundColor: "#13A857",
-    padding: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    marginTop: 20,
-  },
-
-  addBtnText2: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-  },
-
-  searchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 15,
-  },
-
-  searchBox: {
-    backgroundColor: "#fff",
-    padding: 14,
-    borderRadius: 12,
-    fontSize: 16,
-    flex: 1,
-    marginRight: 10,
-    borderWidth: 1,
-    borderColor: "#E0E0E0",
-    color: "#000",
-  },
-
-  searchBtn: {
-    backgroundColor: "#13A857",
-    padding: 12,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  listItem: {
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderColor: "#F5F5F5",
-    backgroundColor: "#fff",
-  },
-
-  listItemText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#34495E",
-  },
-
-  dropdownItemContentIssue: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
-    backgroundColor: "#fff",
-  },
-  dropdownItemTextIssue: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#2C3E50",
-    flex: 1,
-  },
-  dropdownItemWeightIssue: {
-    fontSize: 13,
-    color: "#1B5E20",
-    fontWeight: "700",
-    backgroundColor: "#E8F5E9",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  dropdownItemContentReceipt: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
-    backgroundColor: "#fff",
-  },
-  dropdownItemTextReceipt: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#2C3E50",
-    flex: 1,
-  },
-  dropdownItemWeightReceipt: {
-    fontSize: 13,
-    color: "#004D40",
-    fontWeight: "700",
-    backgroundColor: "#E0F2F1",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-
-  secondTableHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    backgroundColor: "#FFF0B3",
-    paddingVertical: 12,
-    borderRadius: 10,
-    marginTop: 10,
-  },
-
-  secondTableHeaderText: {
-    width: "25%",
-    textAlign: "center",
-    fontWeight: "700",
-    fontSize: 14,
-    color: "#333",
-  },
-
-  secondTableRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderColor: "#E5E5E5",
-  },
-
-  secondTableCell: {
-    width: "25%",
-    textAlign: "center",
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#000",
-  },
-
-  actionText: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-
-  /* Product table (horizontal) */
-  productTable: {
-    width: 1260, // wide width to allow horizontal scroll
-  },
-
-  productTableHeader: {
-    flexDirection: "row",
-    backgroundColor: "#F8F9FA",
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: "center",
-    borderBottomWidth: 2,
-    borderBottomColor: "#E9ECEF",
-  },
-  productHeaderCell: {
-    width: 140,
-    textAlign: "center",
-    fontWeight: "700",
-    fontSize: 14,
-    color: "#495057",
-  },
-
-  productTableRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderColor: "#eee",
-  },
-
-  productCell: {
-    width: 140,
-    textAlign: "center",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-
-  /* Summary table (horizontal) */
-  summaryContainer: {
-    width: 1000, // must be > screen width
-  },
-
-  summaryHeaderRow: {
-    flexDirection: "row",
-    backgroundColor: "#FFF7D1",
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-
-  summaryHeaderText: {
-    width: 140,
-    textAlign: "center",
-    fontWeight: "700",
-    fontSize: 13,
-  },
-
-  summaryRow: {
-    flexDirection: "row",
-    backgroundColor: "#FFF8E6",
-    paddingVertical: 12,
-    borderRadius: 6,
-  },
-
-  summaryCell: {
-    width: 140,
-    textAlign: "center",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  dropdown: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    elevation: 3,
-    marginTop: 5,
-    maxHeight: 200,
-  },
-
-  customerInfoRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-  },
-  customerDetails: {
-    flex: 1,
-  },
-  balanceContainer: {
-    alignItems: "flex-end",
-  },
-  balanceText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: "#7F8C8D",
-    marginTop: 4,
-  },
-  cartContainer: {
-    position: "relative",
-    marginLeft: "auto",
-  },
-  cartText: {
-    color: "gray",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  badge: {
-    position: "absolute",
-    top: -8,
-    right: -8,
-    backgroundColor: "#FF5722",
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  badgeText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "bold",
-  },
-  changeButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "#E3F2FD",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  changeButtonText: {
-    color: "#1E88E5",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  checkboxRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  checkboxContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderWidth: 2,
-    borderColor: "#1E88E5",
-    borderRadius: 4,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 10,
-  },
-  checkboxChecked: {
-    backgroundColor: "#1E88E5",
-  },
-  checkboxLabel: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#333",
-  },
-});
