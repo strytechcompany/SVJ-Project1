@@ -23,7 +23,12 @@
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
-        "android.permission.RECORD_AUDIO","android.permission.BLUETOOTH","android.permission.BLUETOOTH_ADMIN","android.permission.BLUETOOTH_CONNECT","android.permission.ACCESS_FINE_LOCATION","android.permission.ACCESS_COARSE_LOCATION"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
       ]
     },
     "web": {
@@ -40,8 +45,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "10ef5148-146a-416d-8814-6a4e5edc588e"
+        "projectId": "63908080-204a-4b41-904e-949e45da6a97"
       }
-    }
+    },
+    "owner": "sudhar2330"
   }
 }
