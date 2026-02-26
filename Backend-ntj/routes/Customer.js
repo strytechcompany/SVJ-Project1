@@ -1,9 +1,9 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const Customer = require('../models/Customer');
+const Customer = require("../models/Customer");
 
 // Get all B2B customers
-router.get('/', async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const customers = await Customer.find();
     res.json(customers);
@@ -13,10 +13,11 @@ router.get('/', async (req, res) => {
 });
 
 // Get single customer by ID
-router.get('/:id', async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
-    if (!customer) return res.status(404).json({ message: 'Customer not found' });
+    if (!customer)
+      return res.status(404).json({ message: "Customer not found" });
     res.json(customer);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -24,15 +25,24 @@ router.get('/:id', async (req, res) => {
 });
 
 // Create new customer
-router.post('/', async (req, res) => {
-  const { customerName, phoneNumber, shopName, address, oldBalance, advanceBalance, gstin } = req.body;
+router.post("/", async (req, res) => {
+  const {
+    customerName,
+    phoneNumber,
+    shopName,
+    address,
+    oldBalance,
+    advanceBalance,
+    gstin,
+  } = req.body;
 
   try {
-    const exists = await Customer.findOne({ 
-      customerName: customerName.trim(), 
-      shopName: shopName.trim() 
+    const exists = await Customer.findOne({
+      customerName: customerName.trim(),
+      shopName: shopName.trim(),
     });
-    if (exists) return res.status(400).json({ message: 'Customer already exists' });
+    if (exists)
+      return res.status(400).json({ message: "Customer already exists" });
 
     const customer = new Customer({
       customerName,
@@ -41,7 +51,7 @@ router.post('/', async (req, res) => {
       address,
       oldBalance: oldBalance || 0,
       advanceBalance: advanceBalance || 0,
-      gstin: gstin || '',
+      gstin: gstin || "",
       billCurrentBalance: 0,
     });
 
@@ -53,20 +63,21 @@ router.post('/', async (req, res) => {
 });
 
 // Update customer - FIXED
-router.put('/:id', async (req, res) => {
+router.put("/:id", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
-    if (!customer) return res.status(404).json({ message: 'Customer not found' });
+    if (!customer)
+      return res.status(404).json({ message: "Customer not found" });
 
-    const { 
-      customerName, 
-      phoneNumber, 
-      shopName, 
-      address, 
-      oldBalance, 
-      advanceBalance, 
+    const {
+      customerName,
+      phoneNumber,
+      shopName,
+      address,
+      oldBalance,
+      advanceBalance,
       gstin,
-      billCurrentBalance  // ✅ NEW
+      billCurrentBalance, // ✅ NEW
     } = req.body;
 
     if (customerName !== undefined) customer.customerName = customerName;
@@ -76,7 +87,15 @@ router.put('/:id', async (req, res) => {
     if (oldBalance !== undefined) customer.oldBalance = oldBalance;
     if (advanceBalance !== undefined) customer.advanceBalance = advanceBalance;
     if (gstin !== undefined) customer.gstin = gstin;
-    if (billCurrentBalance !== undefined) customer.billCurrentBalance = billCurrentBalance; // ✅ NEW
+    if (billCurrentBalance !== undefined)
+      customer.billCurrentBalance = billCurrentBalance;
+    if (req.body.gstPercentage !== undefined)
+      customer.gstPercentage = req.body.gstPercentage;
+    if (req.body.gstAmount !== undefined)
+      customer.gstAmount = req.body.gstAmount;
+    if (req.body.sgst !== undefined) customer.sgst = req.body.sgst;
+    if (req.body.cgst !== undefined) customer.cgst = req.body.cgst;
+    if (req.body.igst !== undefined) customer.igst = req.body.igst;
 
     const updatedCustomer = await customer.save();
     res.json(updatedCustomer);
@@ -86,13 +105,14 @@ router.put('/:id', async (req, res) => {
 });
 
 // Delete customer
-router.delete('/:id', async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id);
-    if (!customer) return res.status(404).json({ message: 'Customer not found' });
+    if (!customer)
+      return res.status(404).json({ message: "Customer not found" });
 
     await customer.deleteOne();
-    res.json({ message: 'Customer deleted successfully' });
+    res.json({ message: "Customer deleted successfully" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

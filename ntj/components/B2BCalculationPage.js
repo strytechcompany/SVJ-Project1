@@ -1146,7 +1146,6 @@ export default function CreateTransaction({ navigation }) {
         final_AB = Math.abs(newNet);
       }
 
-      // 1. Update Customer Balance in Master Record
       const customerUpdateRes = await fetch(updateEndpoint, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -1154,6 +1153,14 @@ export default function CreateTransaction({ navigation }) {
           billCurrentBalance: newNet,
           oldBalance: final_OB.toFixed(3),
           advanceBalance: final_AB.toFixed(3),
+          ...(gstEnabled && {
+            gstin: selectedCustomer.gst || "",
+            gstPercentage: gstPercentage,
+            gstAmount: gstAmount,
+            sgst: isSgstEnabled ? sgst : "0",
+            cgst: isCgstEnabled ? cgst : "0",
+            igst: isIgstEnabled ? igst : "0",
+          }),
         }),
       });
 
