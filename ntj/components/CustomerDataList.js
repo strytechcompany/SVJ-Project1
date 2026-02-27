@@ -1,5 +1,5 @@
 // screens/CustomerMasterList.js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Linking,
   Alert,
   Platform,
+  Animated,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
@@ -18,6 +19,144 @@ import { base_url } from "./config";
 
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback } from "react";
+
+const CustomerCard = ({
+  item,
+  handleViewBill,
+  handlePhonePress,
+  handleWhatsApp,
+  handleEdit,
+  handleDelete,
+}) => {
+  const opacityValue = useRef(new Animated.Value(1)).current;
+
+  const oldBalance = Number(item.oldBalance || 0);
+  const advanceBalance = Number(item.advanceBalance || 0);
+  const updatedAt = item.updatedAt;
+
+  const getBalanceInfo = () => {
+    if (advanceBalance > 0) return { color: "#2E7D32", blinking: false }; // Green for Advance
+    if (oldBalance > 0) {
+      if (!updatedAt) return { color: "#000", blinking: false };
+      const lastDate = new Date(updatedAt);
+      const now = new Date();
+      const diffTime = Math.abs(now - lastDate);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      if (diffDays <= 1) return { color: "#2196F3", blinking: false }; // Blue (1st day)
+      if (diffDays === 2) return { color: "#000000", blinking: false }; // Black (2nd day)
+      if (diffDays === 3 || diffDays === 4)
+        return { color: "#F44336", blinking: false }; // Red (3rd/4th day)
+      if (diffDays >= 5) return { color: "#F44336", blinking: true }; // Red + Blinking (5th day+)
+    }
+    return { color: "#000", blinking: false };
+  };
+
+  const { color: valueColor, blinking } = getBalanceInfo();
+
+  useEffect(() => {
+    let animation;
+    if (blinking) {
+      animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(opacityValue, {
+            toValue: 0.3,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacityValue, {
+            toValue: 1,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+      animation.start();
+    } else {
+      opacityValue.stopAnimation();
+      opacityValue.setValue(1);
+    }
+    return () => {
+      if (animation) animation.stop();
+    };
+  }, [blinking]);
+
+  const customerId = item.customerId || item.id;
+
+  return (
+    <View style={styles.card}>
+      <TouchableOpacity
+        style={styles.cardTouchable}
+        onPress={() => handleViewBill(item)}
+      >
+        <View style={styles.cardHeader}>
+          <View style={styles.tag}>
+            <Text style={styles.tagText}>{item.customerType}</Text>
+          </View>
+
+          <Text style={styles.name}>{item.customerName}</Text>
+
+          <View style={styles.iconRow}>
+            <TouchableOpacity
+              onPress={() => handlePhonePress(item.customerNumber)}
+            >
+              <Icon name="phone" size={22} color="#000000" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => handleWhatsApp(item.customerNumber)}
+            >
+              <Icon name="whatsapp" size={22} color="#25D366" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => handleEdit(item)}>
+              <Icon name="pencil" size={22} color="#2D89EF" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => handleDelete(item)}>
+              <Icon name="delete" size={22} color="#E53935" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <Text style={styles.sub}>Customer ID: {customerId}</Text>
+        <Text style={styles.sub}>{item.shopName}</Text>
+
+        <View style={styles.balanceRow}>
+          <View>
+            <Text style={styles.balanceTitle}>Old Balance</Text>
+            <Animated.Text
+              style={[
+                styles.balanceValue,
+                { color: valueColor, opacity: blinking ? opacityValue : 1 },
+              ]}
+            >
+              {oldBalance.toFixed(3)}
+            </Animated.Text>
+          </View>
+
+          <View style={styles.line} />
+
+          <View>
+            <Text style={styles.balanceTitle}>Advance Bal</Text>
+            <Animated.Text
+              style={[
+                styles.balanceValue,
+                {
+                  color: advanceBalance > 0 ? "#2E7D32" : "#FF6F00",
+                },
+              ]}
+            >
+              {advanceBalance.toFixed(3)}
+            </Animated.Text>
+          </View>
+        </View>
+
+        <Text style={styles.lastPaidText}>
+          Last Paid: {new Date(item.updatedAt).toLocaleDateString()}{" "}
+          {new Date(item.updatedAt).toLocaleTimeString()}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 export default function CustomerMasterList({ navigation, route }) {
   const [customers, setCustomers] = useState([]);
@@ -150,95 +289,18 @@ export default function CustomerMasterList({ navigation, route }) {
   };
 
   const renderItem = ({ item }) => {
-    // ✅ Show exactly what's in DB - no recalculation
-    const oldBalance = Number(item.oldBalance || 0);
-    const advanceBalance = Number(item.advanceBalance || 0);
-    const billCurrentBalance = Number(item.billCurrentBalance || 0);
-
-    const customerId = item.customerId || item.id;
-
     return (
-      <View style={styles.card}>
-        <TouchableOpacity
-          style={styles.cardTouchable}
-          onPress={() => handleViewBill(item)}
-        >
-          <View style={styles.cardHeader}>
-            <View style={styles.tag}>
-              <Text style={styles.tagText}>{item.customerType}</Text>
-            </View>
-
-            <Text style={styles.name}>{item.customerName}</Text>
-
-            <View style={styles.iconRow}>
-              <TouchableOpacity
-                onPress={() => handlePhonePress(item.customerNumber)}
-              >
-                <Icon name="phone" size={22} color="#000000" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => handleWhatsApp(item.customerNumber)}
-              >
-                <Icon name="whatsapp" size={22} color="#25D366" />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleEdit(item)}>
-                <Icon name="pencil" size={22} color="#2D89EF" />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => handleDelete(item)}>
-                <Icon name="delete" size={22} color="#E53935" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <Text style={styles.sub}>Customer ID: {customerId}</Text>
-          <Text style={styles.sub}>{item.shopName}</Text>
-
-          {/* ✅ 3 separate balance blocks */}
-          <View style={styles.balanceRow}>
-            <View>
-              <Text style={styles.balanceTitle}>Old Balance</Text>
-              <Text
-                style={[
-                  styles.balanceValue,
-                  { color: getBalanceColor(item.balance) },
-                ]}
-              >
-                {oldBalance.toFixed(3)}
-              </Text>
-            </View>
-
-            <View style={styles.line} />
-
-            <View>
-              <Text style={styles.balanceTitle}>Advance Bal</Text>
-              {/* ✅ Always shows what user typed - never overwritten */}
-              <Text style={[styles.balanceValue, { color: "#FF6F00" }]}>
-                {advanceBalance.toFixed(3)}
-              </Text>
-            </View>
-
-          </View>
-
-          <Text style={styles.lastPaidText}>
-            Last Paid: {new Date(item.updatedAt).toLocaleDateString()}{" "}
-            {new Date(item.updatedAt).toLocaleTimeString()}
-          </Text>
-        </TouchableOpacity>
-      </View>
+      <CustomerCard
+        item={item}
+        handleViewBill={handleViewBill}
+        handlePhonePress={handlePhonePress}
+        handleWhatsApp={handleWhatsApp}
+        handleEdit={handleEdit}
+        handleDelete={handleDelete}
+      />
     );
   };
 
-  const getBalanceColor = (dateString) => {
-    if (!dateString) return "#000";
-    const lastDate = new Date(dateString);
-    const now = new Date();
-    const diffTime = Math.abs(now - lastDate);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays <= 1) return "#2196F3"; // Blue (1st day)
-    if (diffDays <= 2) return "#FF9800"; // Orange (2nd day)
-    return "#F44336"; // Red (3rd day+)
-  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -277,15 +339,19 @@ export default function CustomerMasterList({ navigation, route }) {
       <View style={styles.legendContainer}>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: "#2196F3" }]} />
-          <Text style={styles.legendText}>Today</Text>
+          <Text style={styles.legendText}>1st Day</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: "#FF9800" }]} />
-          <Text style={styles.legendText}>Yesterday</Text>
+          <View style={[styles.legendDot, { backgroundColor: "#000000" }]} />
+          <Text style={styles.legendText}>2nd Day</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: "#F44336" }]} />
-          <Text style={styles.legendText}>Older</Text>
+          <Text style={styles.legendText}>3rd Day+</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: "#2E7D32" }]} />
+          <Text style={styles.legendText}>Advance</Text>
         </View>
       </View>
 
@@ -470,7 +536,8 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 15,
     elevation: 2,
-    gap: 15,
+    flexWrap: "wrap",
+    gap: 8,
   },
   legendItem: {
     flexDirection: "row",
