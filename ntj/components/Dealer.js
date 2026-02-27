@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
+  ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { base_url } from "./config";
@@ -15,15 +16,22 @@ export default function Dealer({ navigation, route }) {
   const [dealers, setDealers] = useState([]);
   const [transfers, setTransfers] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [dealerWeights, setDealerWeights] = useState({});
+  const [dealerDropdowns, setDealerDropdowns] = useState({});
+  const [dealerSearchQuery, setDealerSearchQuery] = useState({});
+  const [dropdownOpen, setDropdownOpen] = useState({});
+  const [itemEntryItems, setItemEntryItems] = useState([]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       fetchDealers();
       fetchTransfers();
+      fetchItems();
     });
 
     fetchDealers();
     fetchTransfers();
+    fetchItems();
 
     return unsubscribe;
   }, [navigation]);
@@ -37,6 +45,25 @@ export default function Dealer({ navigation, route }) {
       }
     } catch (error) {
       console.error('Error fetching transfers:', error);
+    }
+  };
+
+  const fetchItems = async () => {
+    try {
+      const response = await fetch(`${base_url}/items`);
+      if (response.ok) {
+        const data = await response.json();
+        const formattedItems = data.map((item) => ({
+          id: item._id || item.id,
+          label: `${item.stockName} ${item.issue ? '(Issue)' : item.receipt ? '(Receipt)' : ''}`.trim(),
+          value: item.stockName,
+          issue: item.issue,
+          receipt: item.receipt,
+        })).filter(item => item.issue || item.receipt); // Ensure they are issue or receipt
+        setItemEntryItems(formattedItems);
+      }
+    } catch (error) {
+      console.error('Error fetching items:', error);
     }
   };
 
@@ -95,6 +122,99 @@ export default function Dealer({ navigation, route }) {
     );
   };
 
+  const handleSaveWeight = async (item) => {
+    const w = parseFloat(dealerWeights[item._id || item.id]);
+    const selectedType = dealerDropdowns[item._id || item.id];
+
+    if (!w || w <= 0) {
+      Alert.alert("Error", "Please enter a valid weight");
+      return;
+    }
+    if (!selectedType) {
+      Alert.alert("Error", "Please select an item type from the dropdown");
+      return;
+    }
+
+    try {
+      // 1. Update StockMaster
+      const stockRes = await fetch(`${base_url}/stockMaster`);
+      const stocks = await stockRes.json();
+      const stockItem = stocks.find(s => s.itemName === selectedType);
+
+      if (stockItem) {
+        const updatedWeight = parseFloat(stockItem.weight || 0) + w;
+        await fetch(`${base_url}/stockMaster/${stockItem._id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...stockItem, weight: updatedWeight })
+        });
+      }
+
+      // 2. Add to Transfer History 
+      const transferData = {
+        date: new Date().toISOString(),
+        selectedDealer: item.customerName,
+        selectedItems: [selectedType],
+        totalSelectedWeight: w,
+        weightSubtraction: 0,
+        transferWeight: w,
+        type: "dealerTransfer"
+      };
+
+      await fetch(`${base_url}/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(transferData)
+      });
+
+      // 3. Update Dealer Balance
+      let ob = parseFloat(item.oldBalance || 0);
+      let ab = parseFloat(item.advanceBalance || 0);
+      let currentNetBalance = ob - ab;
+
+      // "subtracted from the current balance"
+      let newNetBalance = currentNetBalance - w;
+
+      let newOb = 0;
+      let newAb = 0;
+      if (newNetBalance >= 0) {
+        newOb = newNetBalance;
+        newAb = 0;
+      } else {
+        newOb = 0;
+        newAb = Math.abs(newNetBalance);
+      }
+
+      const updateResponse = await fetch(`${base_url}/customersDealer/${item._id || item.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...item,
+          oldBalance: newOb,
+          advanceBalance: newAb
+        }),
+      });
+
+      if (updateResponse.ok) {
+        Alert.alert("Success", "Weight added to stock, balance updated, and recorded in history.");
+
+        // Clear inputs for this dealer
+        setDealerWeights((prev) => ({ ...prev, [item._id || item.id]: "" }));
+        setDealerDropdowns((prev) => ({ ...prev, [item._id || item.id]: "" }));
+        setDealerSearchQuery((prev) => ({ ...prev, [item._id || item.id]: "" }));
+
+        // Reload data
+        fetchDealers();
+        fetchTransfers();
+      } else {
+        Alert.alert("Error", "Failed to update dealer balance");
+      }
+    } catch (error) {
+      console.error("Error saving weight:", error);
+      Alert.alert("Error", "An error occurred while saving weight");
+    }
+  };
+
   return (
     <View style={{ flex: 1, backgroundColor: "#fff" }}>
       {/* Header */}
@@ -123,6 +243,7 @@ export default function Dealer({ navigation, route }) {
       </View>
 
       <FlatList
+        keyboardShouldPersistTaps="handled"
         data={dealers.filter(dealer =>
           (dealer.customerName?.toLowerCase() || "").includes(searchQuery.toLowerCase()) ||
           (dealer.customerNumber?.toLowerCase() || "").includes(searchQuery.toLowerCase())
@@ -136,10 +257,7 @@ export default function Dealer({ navigation, route }) {
           const totalTransferred = dealerTransfers.reduce((sum, t) => sum + (t.transferWeight || 0), 0);
 
           return (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() => navigation.navigate("EditCustomerMaster", { customer: item })}
-            >
+            <View style={[styles.card, { zIndex: dropdownOpen[item._id || item.id] ? 10 : 1 }]}>
               <View style={styles.cardHeader}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.cardTitle}>{item.customerName}</Text>
@@ -173,40 +291,77 @@ export default function Dealer({ navigation, route }) {
                 </Text>
               </View>
 
-              {/* Transfer History */}
-              {dealerTransfers.length > 0 && (
-                <View style={styles.transferInfo}>
-                  {/* Total Transferred Weight Summary */}
-                  <View style={styles.totalTransferredBox}>
-                    <Text style={styles.totalTransferredLabel}>Total Transferred Weight:</Text>
-                    <Text style={styles.totalTransferredValue}>{totalTransferred.toFixed(3)} g</Text>
-                  </View>
-
-                  <Text style={styles.transferTitle}>Transfer History ({dealerTransfers.length}):</Text>
-                  {dealerTransfers
-                    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-                    .slice(0, 2)
-                    .map((transfer, index) => (
-                      <View key={transfer._id || index} style={styles.transferItem}>
-                        <Text style={styles.transferDate}>
-                          {new Date(transfer.date).toLocaleDateString()} at {new Date(transfer.createdAt).toLocaleTimeString()}
-                        </Text>
-                        <Text style={styles.transferText}>
-                          Items: {transfer.selectedItems?.join(', ') || 'N/A'}
-                        </Text>
-                        <Text style={styles.transferText}>
-                          Total Weight: {transfer.totalSelectedWeight?.toFixed(3)} g
-                        </Text>
-                        <Text style={styles.transferWeightText}>
-                          Transfer Weight: {transfer.transferWeight?.toFixed(3)} g
-                        </Text>
-                        <Text style={styles.transferText}>
-                          Balance Weight: {transfer.weightSubtraction?.toFixed(3)} g
-                        </Text>
-                      </View>
-                    ))}
+              {/* Type Dropdown Field (Searchable) */}
+              <View style={[styles.dropdownContainer, { zIndex: 10 }]}>
+                <Text style={styles.weightInputLabel}>Select Type</Text>
+                <View style={[styles.pickerWrapper, { paddingHorizontal: 0, paddingVertical: 0 }]}>
+                  <TextInput
+                    style={styles.searchDropdownInput}
+                    placeholder="Search Issue or Receipt Item..."
+                    value={dealerSearchQuery[item._id || item.id] ?? ""}
+                    onFocus={() => {
+                      setDropdownOpen((prev) => ({ ...prev, [item._id || item.id]: true }));
+                    }}
+                    onBlur={() => {
+                      setTimeout(() => setDropdownOpen((prev) => ({ ...prev, [item._id || item.id]: false })), 200);
+                    }}
+                    onChangeText={(val) => {
+                      setDealerSearchQuery((prev) => ({ ...prev, [item._id || item.id]: val }));
+                      setDropdownOpen((prev) => ({ ...prev, [item._id || item.id]: true }));
+                    }}
+                  />
+                  {dropdownOpen[item._id || item.id] && (
+                    <View style={styles.dropdownList}>
+                      <ScrollView
+                        nestedScrollEnabled={true}
+                        style={{ maxHeight: 150 }}
+                        keyboardShouldPersistTaps="always"
+                      >
+                        {itemEntryItems
+                          .filter(entryItem =>
+                            entryItem.label.toLowerCase().includes((dealerSearchQuery[item._id || item.id] || "").toLowerCase())
+                          )
+                          .map((entryItem) => (
+                            <TouchableOpacity
+                              key={entryItem.id}
+                              style={styles.dropdownOption}
+                              onPress={() => {
+                                setDealerDropdowns((prev) => ({ ...prev, [item._id || item.id]: entryItem.value }));
+                                setDealerSearchQuery((prev) => ({ ...prev, [item._id || item.id]: entryItem.label }));
+                                setDropdownOpen((prev) => ({ ...prev, [item._id || item.id]: false }));
+                              }}
+                            >
+                              <Text style={styles.dropdownOptionText}>{entryItem.label}</Text>
+                            </TouchableOpacity>
+                          ))}
+                      </ScrollView>
+                    </View>
+                  )}
                 </View>
-              )}
+              </View>
+
+              {/* Weight Input Field */}
+              <View style={styles.weightInputContainer}>
+                <Text style={styles.weightInputLabel}>Weight (g)</Text>
+                <View style={styles.weightInputRow}>
+                  <TextInput
+                    style={styles.weightInput}
+                    placeholder="Enter Weight"
+                    keyboardType="decimal-pad"
+                    value={dealerWeights[item._id || item.id] || ""}
+                    onChangeText={(val) => setDealerWeights((prev) => ({ ...prev, [item._id || item.id]: val }))}
+                  />
+                  <TouchableOpacity
+                    style={styles.weightSaveButton}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleSaveWeight(item);
+                    }}
+                  >
+                    <Text style={styles.weightSaveText}>SAVE</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
 
               {/* View Bill Button */}
               <TouchableOpacity
@@ -219,7 +374,7 @@ export default function Dealer({ navigation, route }) {
                 <Ionicons name="document-text" size={20} color="#fff" />
                 <Text style={styles.viewBillText}>View Bill</Text>
               </TouchableOpacity>
-            </TouchableOpacity>
+            </View>
           );
         }}
 
@@ -410,5 +565,81 @@ const styles = StyleSheet.create({
   iconButton: {
     marginLeft: 15,
     padding: 5,
+  },
+  weightInputContainer: {
+    marginTop: 15,
+  },
+  weightInputLabel: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#2E7D32",
+    marginBottom: 5,
+  },
+  weightInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  weightInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 14,
+    backgroundColor: "#F9F9F9",
+  },
+  weightSaveButton: {
+    backgroundColor: "#1565C0",
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 15,
+    marginLeft: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 2,
+  },
+  weightSaveText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "bold",
+  },
+  dropdownContainer: {
+    marginTop: 15,
+    zIndex: 10, // Ensure dropdown overlaps elements below
+  },
+  pickerWrapper: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    backgroundColor: "#F9F9F9",
+    overflow: "visible", // Allowed overflow so the absolute dropdown works
+  },
+  searchDropdownInput: {
+    padding: 12,
+    fontSize: 14,
+    color: "#333",
+  },
+  dropdownList: {
+    position: "absolute",
+    top: 50,
+    left: 0,
+    right: 0,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    borderTopWidth: 0,
+    elevation: 3,
+    zIndex: 100,
+  },
+  dropdownOption: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  dropdownOptionText: {
+    fontSize: 14,
+    color: "#333",
   },
 });
