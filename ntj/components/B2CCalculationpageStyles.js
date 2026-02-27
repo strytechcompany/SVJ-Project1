@@ -2,7 +2,7 @@
 import { StyleSheet, Platform, StatusBar } from "react-native";
 
 // ---------------- STYLES ----------------
-const styles = StyleSheet.create({
+export const styles = StyleSheet.create({
   appHeader: {
     height: Platform.OS === 'ios' ? 120 : 110,
     backgroundColor: "#2E7D32",
@@ -59,13 +59,17 @@ const styles = StyleSheet.create({
   td: { width: 90, padding: 8, textAlign: "center" },
 
   addRowBtn: {
-    backgroundColor: "#135F25",
-    padding: 14,
+    backgroundColor: "#C9F8D0",
+    padding: 15,
     borderRadius: 12,
     alignItems: "center",
-    marginTop: 14,
+    marginTop: 20,
   },
-  addRowText: { color: "#fff", fontWeight: "700" },
+  addRowText: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#135F25",
+  },
 
 
   finalSubmitBtn: {
@@ -143,6 +147,68 @@ const styles = StyleSheet.create({
     color: '#555',
     marginLeft: 8,
   },
+  issueHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 20,
+  },
+  greenDot: {
+    width: 12,
+    height: 12,
+    backgroundColor: "#2E7D32",
+    borderRadius: 6,
+  },
+  cartContainer: {
+    position: "relative",
+    marginLeft: "auto",
+    alignItems: "center",
+  },
+  cartText: {
+    color: "gray",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  badge: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    backgroundColor: "#FF5722",
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  badgeText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  inputBox: {
+    width: "48%",
+  },
+  subLabel: {
+    fontSize: 14,
+    marginBottom: 8,
+    color: "#555",
+  },
+  purityBox: {
+    backgroundColor: "#F1F3F6",
+    padding: 12,
+    borderRadius: 10,
+    justifyContent: "center",
+    height: 48,
+  },
+  purityText: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -204,5 +270,41 @@ const styles = StyleSheet.create({
     color: "#1E88E5",
     fontSize: 14,
     fontWeight: "600",
+  },
+  productTable: {
+    width: 1400,
+  },
+  productTableHeader: {
+    flexDirection: "row",
+    backgroundColor: "#F8F9FA",
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: "center",
+    borderBottomWidth: 2,
+    borderBottomColor: "#E9ECEF",
+  },
+  productHeaderCell: {
+    width: 140,
+    textAlign: "center",
+    fontWeight: "700",
+    fontSize: 14,
+    color: "#495057",
+  },
+  productTableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderColor: "#eee",
+  },
+  productCell: {
+    width: 140,
+    textAlign: "center",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  actionText: {
+    fontSize: 14,
+    fontWeight: "700",
   },
 });
