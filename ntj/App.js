@@ -44,6 +44,7 @@ import Dealer from "./components/Dealer";
 import PurchaseScreen from "./components/Purchase"
 import DealerBill from "./components/DealerBill";
 
+import SD from "./components/SD";
 
 import ReportScreen from "./components/ReportScreen";
 import EstimateScreen from "./components/Estimate.js";
@@ -79,6 +80,7 @@ export default function App() {
         <Stack.Screen name="SuspenseTransaction" component={SuspenseTransaction} />
         <Stack.Screen name="SuspenseHistoryScreen" component={SuspenseHistoryScreen} />
 
+        <Stack.Screen name="SD" component={SD} />
 
         {/* Users */}
         <Stack.Screen name="EditSuspenseTransaction" component={EditSuspenseTransaction} />
