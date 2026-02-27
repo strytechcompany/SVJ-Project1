@@ -1,7 +1,12 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const path = require('path');  
+const path = require('path');
 const connectDB = require('./DB');
+const { errorHandler } = require('./middleware/errorMiddleware');
+const Login = require('./models/Login');
+
+// Import Routes
 const userRoutes = require('./routes/user');
 const itemRoutes = require('./routes/item');
 const customerRoutes = require('./routes/Customer');
@@ -26,27 +31,26 @@ const upiRoutes = require('./routes/UPI');
 const thirukkuralRoutes = require("./routes/Thirukkural");
 const rateRoutes = require('./routes/Rate');
 const loginRoutes = require('./routes/Login');
-const Login = require('./models/Login');
 const billSummaryRoutes = require('./routes/billSummary');
 
-
+// Initialize App
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
-// Connect to MongoDB
+// Connect to Database
 connectDB();
 
-// ✅ AUTO SEED DEFAULT LOGIN USER
+// Seeding Default User
 const seedDefaultUser = async () => {
   try {
-    const existing = await Login.findOne({ email: 'AkshayaGold@gmail.com' });
+    const existing = await Login.findOne({ email: 'akshayagold@gmail.com' });
     if (!existing) {
       const user = new Login({
-        email: 'AkshayaGold@gmail.com',
-        password: '12345678',
+        email: 'akshayagold@gmail.com',
+        password: '12345678', // Will be hashed by model pre-save hook
       });
       await user.save();
-      console.log('✅ Default user seeded: AkshayaGold@gmail.com / 12345678');
+      console.log('✅ Default user seeded: akshayagold@gmail.com / 12345678');
     } else {
       console.log('✅ Default user already exists in DB');
     }
@@ -58,9 +62,9 @@ const seedDefaultUser = async () => {
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));  
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Routes
+// Routes API
 app.use('/api/users', userRoutes);
 app.use('/api/items', itemRoutes);
 app.use('/api/customers', customerRoutes);
@@ -85,14 +89,18 @@ app.use('/api/upi', upiRoutes);
 app.use("/api/thirukkural", thirukkuralRoutes);
 app.use('/api/rates', rateRoutes);
 app.use('/api/login', loginRoutes);
-app.use('/api/billSummary', billSummaryRoutes); 
+app.use('/api/billSummary', billSummaryRoutes);
 
-
-// Test route
+// Base route
 app.get('/', (req, res) => {
-  res.send('Hello from Node.js backend!');
+  res.send('NTJ Backend API is running...');
 });
 
+// Error Handler Middleware
+app.use(errorHandler);
+
+// Start Server
 app.listen(PORT, async () => {
+  console.log(`Server is running on port ${PORT}`);
   await seedDefaultUser();
 });

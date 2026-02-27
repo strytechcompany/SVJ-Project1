@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const loginSchema = new mongoose.Schema({
   email: {
@@ -34,6 +35,12 @@ loginSchema.methods.matchPassword = async function (enteredPassword) {
     console.error('Bcrypt compare error:', err);
     return false;
   }
+};
+
+loginSchema.methods.generateToken = function () {
+  return jwt.sign({ id: this._id }, process.env.JWT_SECRET, {
+    expiresIn: '30d',
+  });
 };
 
 module.exports = mongoose.model('Login', loginSchema);
