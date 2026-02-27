@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { Feather } from "@expo/vector-icons";
 import { base_url } from "./config";
+import { useFocusEffect } from "@react-navigation/native";
 import { styles } from "./B2CCalculationpageStyles";
 
 export default function CreateTransaction({ navigation, route }) {
@@ -126,21 +127,61 @@ export default function CreateTransaction({ navigation, route }) {
   const [savedGstList, setSavedGstList] = useState([]);
   const [showSavedGstModal, setShowSavedGstModal] = useState(false);
 
-  useEffect(() => {
-    const loadSavedGstList = async () => {
-      try {
-        const stored = await AsyncStorage.getItem("gstSavedList");
-        if (stored) {
-          setSavedGstList(JSON.parse(stored));
+  // ✅ Load latest B2C GST settings from DB whenever page is focused
+  useFocusEffect(
+    useCallback(() => {
+      const fetchLatestGstSettings = async () => {
+        try {
+          const response = await fetch(`${base_url}/gst`);
+          const data = await response.json();
+          const latestB2C = data.filter((item) => item.type === "B2C")[0];
+
+          if (latestB2C) {
+            setGstEnabled(latestB2C.enabled || false);
+            setSgst(latestB2C.sgst || "");
+            setCgst(latestB2C.cgst || "");
+            setIgst(latestB2C.igst || "");
+
+            // ✅ Load saved checkbox states from AsyncStorage
+            const savedSgst = await AsyncStorage.getItem("b2c_sgst_enabled");
+            const savedCgst = await AsyncStorage.getItem("b2c_cgst_enabled");
+            const savedIgst = await AsyncStorage.getItem("b2c_igst_enabled");
+
+            setIsSgstEnabled(
+              savedSgst !== null
+                ? savedSgst === "true"
+                : !!latestB2C.sgst && latestB2C.sgst !== "0",
+            );
+            setIsCgstEnabled(
+              savedCgst !== null
+                ? savedCgst === "true"
+                : !!latestB2C.cgst && latestB2C.cgst !== "0",
+            );
+            setIsIgstEnabled(
+              savedIgst !== null
+                ? savedIgst === "true"
+                : !!latestB2C.igst && latestB2C.igst !== "0",
+            );
+          }
+        } catch (error) {
+          console.error("Failed to fetch GST settings in B2C", error);
         }
-      } catch (error) {
-        console.error("Failed to load saved GST list in B2C", error);
-      }
-    };
+      };
+      fetchLatestGstSettings();
+    }, [])
+  );
+
+  // ✅ Auto-calculate Total GST %
+  useEffect(() => {
     if (gstEnabled) {
-      loadSavedGstList();
+      const s = parseFloat(sgst) || 0;
+      const c = parseFloat(cgst) || 0;
+      const i = parseFloat(igst) || 0;
+      setGstPercentage((s + c + i).toString());
+    } else {
+      setGstPercentage("0");
     }
-  }, [gstEnabled]);
+  }, [gstEnabled, sgst, cgst, igst]);
 
   // Load gold rate from AsyncStorage
   // Load gold rate from navigation or AsyncStorage
@@ -516,6 +557,22 @@ export default function CreateTransaction({ navigation, route }) {
       setWastage("");
     }
   }, [weight, touch]);
+
+  // ✅ Auto-calculate GST Amount for the current item
+  useEffect(() => {
+    if (gstEnabled) {
+      const wt = parseFloat(weight) || 0;
+      const w = parseFloat(wastage) || 0;
+      const r = parseFloat(rate) || 0;
+      const p = parseFloat(gstPercentage) || 0;
+
+      const total = (wt + w) * r;
+      const gst = total * (p / 100);
+      setGstAmount(gst.toFixed(2));
+    } else {
+      setGstAmount("0.00");
+    }
+  }, [weight, wastage, rate, gstPercentage, gstEnabled]);
 
   // 🔢 Auto calculate Receipt Pure = Weight × Result × Touch
   useEffect(() => {
@@ -1124,20 +1181,27 @@ export default function CreateTransaction({ navigation, route }) {
     try {
       const customer = b2cCustomers.find(c => (c.customerName === customerName || c.name === customerName) && (c.phone === phone || c.customerNumber === phone));
 
+      // Pre-calculate all values at top level so they are in scope for transactionRecord
+      const ob = parseFloat(customer?.oldBalance || 0);
+      const ab = parseFloat(customer?.advanceBalance || 0);
+      const issuePureTotal = items.reduce((sum, it) => sum + ((parseFloat(it.weight || 0) * parseFloat(it.touch || 0)) / 100), 0);
+      const issueTotalWeight = items.reduce((sum, it) => sum + parseFloat(it.weight || 0), 0);
+      const receiptPureValue = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
+      const goldRateValue = parseFloat(passedGoldRate || rate || 0) || 1;
+      const cashPureVal = parseFloat(reportData.cash || 0) / goldRateValue;
+      let finalBalanceForRecord = 0;
+      const savedCustomerId = customer?.id || customer?._id || "N/A";
+
       // 1. Update Customer Balance
       if (customer) {
-        const ob = parseFloat(customer.oldBalance || 0);
-        const ab = parseFloat(customer.advanceBalance || 0);
         const currentNet = ob - ab;
-        const issueWeight = parseFloat(reportData.totalReceiptPure);
-        const receiptPureValue = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
-        const goldRateValue = parseFloat(passedGoldRate || 0) || 1;
-        const cashPureVal = parseFloat(reportData.cash) / goldRateValue;
-        const newNet = currentNet + issueWeight - receiptPureValue - cashPureVal;
+        const newNet = currentNet + issuePureTotal - receiptPureValue - cashPureVal;
 
         let newCustomerOB = 0, newCustomerAB = 0;
         if (newNet >= 0) { newCustomerOB = newNet; newCustomerAB = 0; }
         else { newCustomerOB = 0; newCustomerAB = Math.abs(newNet); }
+
+        finalBalanceForRecord = newNet;
 
         const updateResponse = await fetch(`${base_url}/customersB2C/${customer.id}`, {
           method: "PUT",
@@ -1152,14 +1216,23 @@ export default function CreateTransaction({ navigation, route }) {
         console.log("✅ Customer balance updated successfully");
       }
 
-      // 2. Save Transaction History
+      // 2. Save Transaction History — all required schema fields included
       const transactionRecord = {
         customerName,
-        customerId: currentCustomer?.id || currentCustomer?._id || "N/A",
+        customerId: savedCustomerId,
         customerType: 'B2C',
         type: 'B2C',
+        // Required by Transaction MongoDB schema:
+        issueTotal: Number(issueTotalWeight.toFixed(3)),
+        issuePure: Number(issuePureTotal.toFixed(3)),
+        oldBalance: Number(ob.toFixed(3)),
+        receiptPure: Number(receiptPureValue.toFixed(3)),
+        cashPure: Number(cashPureVal.toFixed(3)),
+        balance: Number(finalBalanceForRecord.toFixed(3)),
+        advBal: Number(ab.toFixed(3)),
+        // Extra B2C fields:
         date: date.split("/").reverse().join("-"),
-        totalAmount: parseFloat(reportData.cash),
+        totalAmount: parseFloat(reportData.cash || 0),
         items: items,
         receiptItems: b2cReceiptItems,
         gst: gstEnabled ? {
@@ -1177,7 +1250,10 @@ export default function CreateTransaction({ navigation, route }) {
         body: JSON.stringify(transactionRecord),
       });
 
-      if (!saveResponse.ok) throw new Error("Failed to save transaction history.");
+      if (!saveResponse.ok) {
+        const errText = await saveResponse.text();
+        throw new Error(`Failed to save transaction history: ${errText}`);
+      }
       const savedTxn = await saveResponse.json();
 
       // 3. Save Full Bill Summary
@@ -1269,7 +1345,12 @@ export default function CreateTransaction({ navigation, route }) {
         cgst: isCgstEnabled ? cgst : "0",
         igst: isIgstEnabled ? igst : "0",
         showInBill: true,
-      } : null,
+      } : {
+        enabled: false,
+        sgst: "0",
+        cgst: "0",
+        igst: "0"
+      },
       summary: (() => {
         const customer = b2cCustomers.find(c => c.customerName === customerName && c.phone === phone);
         const ob = parseFloat(customer?.oldBalance || 0);
@@ -1605,7 +1686,16 @@ export default function CreateTransaction({ navigation, route }) {
                   <View style={styles.rowBetween}>
                     <View style={{ width: "48%" }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                        <TouchableOpacity onPress={() => setIsSgstEnabled(!isSgstEnabled)}>
+                        <TouchableOpacity
+                          onPress={async () => {
+                            const newState = !isSgstEnabled;
+                            setIsSgstEnabled(newState);
+                            await AsyncStorage.setItem(
+                              "b2c_sgst_enabled",
+                              newState.toString(),
+                            );
+                          }}
+                        >
                           <Icon
                             name={isSgstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
                             size={20}
@@ -1632,7 +1722,16 @@ export default function CreateTransaction({ navigation, route }) {
 
                     <View style={{ width: "48%" }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                        <TouchableOpacity onPress={() => setIsCgstEnabled(!isCgstEnabled)}>
+                        <TouchableOpacity
+                          onPress={async () => {
+                            const newState = !isCgstEnabled;
+                            setIsCgstEnabled(newState);
+                            await AsyncStorage.setItem(
+                              "b2c_cgst_enabled",
+                              newState.toString(),
+                            );
+                          }}
+                        >
                           <Icon
                             name={isCgstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
                             size={20}
@@ -1661,7 +1760,16 @@ export default function CreateTransaction({ navigation, route }) {
                   <View style={styles.rowBetween}>
                     <View style={{ width: "48%" }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                        <TouchableOpacity onPress={() => setIsIgstEnabled(!isIgstEnabled)}>
+                        <TouchableOpacity
+                          onPress={async () => {
+                            const newState = !isIgstEnabled;
+                            setIsIgstEnabled(newState);
+                            await AsyncStorage.setItem(
+                              "b2c_igst_enabled",
+                              newState.toString(),
+                            );
+                          }}
+                        >
                           <Icon
                             name={isIgstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
                             size={20}
