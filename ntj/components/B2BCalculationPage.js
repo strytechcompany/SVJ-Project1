@@ -153,31 +153,80 @@ export default function CreateTransaction({ navigation }) {
     setShowDropdown(false);
   };
 
-  useEffect(() => {
-    const loadSavedGstList = async () => {
-      try {
-        const stored = await AsyncStorage.getItem("gstSavedList");
-        if (stored) {
-          setSavedGstList(JSON.parse(stored));
-        }
-      } catch (error) {
-        console.error("Failed to load saved GST list in B2B", error);
-      }
-    };
-    if (gstEnabled) {
-      loadSavedGstList();
-    }
-  }, [gstEnabled]);
+  // ✅ Load latest B2B GST settings from DB whenever page is focused
+  useFocusEffect(
+    useCallback(() => {
+      const fetchLatestGstSettings = async () => {
+        try {
+          const response = await fetch(`${base_url}/gst`);
+          const data = await response.json();
+          const latestB2B = data.filter((item) => item.type === "B2B")[0];
 
-  // Auto-calculate Total GST % based on selections
+          if (latestB2B) {
+            setGstEnabled(latestB2B.enabled || false);
+            setSgst(latestB2B.sgst || "");
+            setCgst(latestB2B.cgst || "");
+            setIgst(latestB2B.igst || "");
+
+            // ✅ Load saved checkbox states from AsyncStorage
+            const savedSgst = await AsyncStorage.getItem("b2b_sgst_enabled");
+            const savedCgst = await AsyncStorage.getItem("b2b_cgst_enabled");
+            const savedIgst = await AsyncStorage.getItem("b2b_igst_enabled");
+
+            setIsSgstEnabled(
+              savedSgst !== null
+                ? savedSgst === "true"
+                : !!latestB2B.sgst && latestB2B.sgst !== "0",
+            );
+            setIsCgstEnabled(
+              savedCgst !== null
+                ? savedCgst === "true"
+                : !!latestB2B.cgst && latestB2B.cgst !== "0",
+            );
+            setIsIgstEnabled(
+              savedIgst !== null
+                ? savedIgst === "true"
+                : !!latestB2B.igst && latestB2B.igst !== "0",
+            );
+          }
+        } catch (error) {
+          console.error("Failed to fetch GST settings in B2B", error);
+        }
+      };
+      fetchLatestGstSettings();
+    }, [])
+  );
+
   useEffect(() => {
     if (gstEnabled) {
-      const s = isSgstEnabled ? parseFloat(sgst) || 0 : 0;
-      const c = isCgstEnabled ? parseFloat(cgst) || 0 : 0;
-      const i = isIgstEnabled ? parseFloat(igst) || 0 : 0;
-      setGstPercentage((s + c + i).toString());
+      // 1. Calculate Total Percentage using parseNum for robustness
+      const s = isSgstEnabled ? parseNum(sgst) : 0;
+      const c = isCgstEnabled ? parseNum(cgst) : 0;
+      const i = isIgstEnabled ? parseNum(igst) : 0;
+      const totalPct = s + c + i;
+      const pctString = totalPct.toFixed(2);
+
+      if (gstPercentage !== pctString) {
+        setGstPercentage(pctString);
+      }
+
+      // 2. Calculate Rupee Amount using parseNum for rate
+      const rate = parseNum(goldRate);
+      const pure = Number(totalIssuePure || 0);
+      const calculatedAmount = (pure * rate * totalPct) / 100;
+
+      // Update amount state if different
+      const amountString = calculatedAmount.toFixed(2);
+      if (gstAmount !== amountString) {
+        setGstAmount(amountString);
+      }
+
+      console.log(
+        `📊 B2B GST Sync: Pure=${pure.toFixed(3)}, Rate=${rate}, Pct=${totalPct}% -> Amt=₹${amountString}`,
+      );
     } else {
-      setGstPercentage("0");
+      if (gstPercentage !== "0.00") setGstPercentage("0.00");
+      if (gstAmount !== "0.00") setGstAmount("0.00");
     }
   }, [
     gstEnabled,
@@ -187,20 +236,10 @@ export default function CreateTransaction({ navigation }) {
     sgst,
     cgst,
     igst,
+    goldRate,
+    issueItems,
+    totalIssuePure,
   ]);
-
-  // Auto-calculate GST amount in rupees
-  useEffect(() => {
-    if (gstEnabled) {
-      const percentage = parseFloat(gstPercentage) || 0;
-      const rate = parseFloat(goldRate) || 0;
-      const pure = totalIssuePure;
-      const amount = (pure * rate * percentage) / 100;
-      setGstAmount(amount.toFixed(2));
-    } else {
-      setGstAmount("0");
-    }
-  }, [gstEnabled, gstPercentage, goldRate, totalIssuePure]);
 
   // Handler for stock update on receipt weight blur
   const updateReceiptStock = async (newWeight) => {
@@ -1201,17 +1240,17 @@ export default function CreateTransaction({ navigation }) {
         cashTable: cashTable,
         gst: gstEnabled
           ? {
-              enabled: true,
-              percentage: (
-                (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
-                (isCgstEnabled ? parseFloat(cgst) || 0 : 0) +
-                (isIgstEnabled ? parseFloat(igst) || 0 : 0)
-              ).toString(),
-              amount: gstAmount,
-              sgst: isSgstEnabled ? sgst : "0",
-              cgst: isCgstEnabled ? cgst : "0",
-              igst: isIgstEnabled ? igst : "0",
-            }
+            enabled: true,
+            percentage: (
+              (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
+              (isCgstEnabled ? parseFloat(cgst) || 0 : 0) +
+              (isIgstEnabled ? parseFloat(igst) || 0 : 0)
+            ).toString(),
+            amount: gstAmount,
+            sgst: isSgstEnabled ? sgst : "0",
+            cgst: isCgstEnabled ? cgst : "0",
+            igst: isIgstEnabled ? igst : "0",
+          }
           : null,
       };
 
@@ -1260,19 +1299,24 @@ export default function CreateTransaction({ navigation }) {
         cashTable: cashTable,
         gst: gstEnabled
           ? {
-              enabled: gstEnabled,
-              percentage: (
-                (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
-                (isCgstEnabled ? parseFloat(cgst) || 0 : 0) +
-                (isIgstEnabled ? parseFloat(igst) || 0 : 0)
-              ).toString(),
-              amount: gstAmount,
-              sgst: isSgstEnabled ? sgst : "0",
-              cgst: isCgstEnabled ? cgst : "0",
-              igst: isIgstEnabled ? igst : "0",
-              showInBill: true,
-            }
-          : null,
+            enabled: gstEnabled,
+            percentage: (
+              (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
+              (isCgstEnabled ? parseFloat(cgst) || 0 : 0) +
+              (isIgstEnabled ? parseFloat(igst) || 0 : 0)
+            ).toString(),
+            amount: gstAmount,
+            sgst: isSgstEnabled ? sgst : "0",
+            cgst: isCgstEnabled ? cgst : "0",
+            igst: isIgstEnabled ? igst : "0",
+            showInBill: true,
+          }
+          : {
+            enabled: false,
+            sgst: "0",
+            cgst: "0",
+            igst: "0"
+          },
         summary: {
           ob: fmt(oldBalance),
           issue: fmt(totalIssuePure),
@@ -2052,7 +2096,14 @@ export default function CreateTransaction({ navigation }) {
                       }}
                     >
                       <TouchableOpacity
-                        onPress={() => setIsSgstEnabled(!isSgstEnabled)}
+                        onPress={async () => {
+                          const newState = !isSgstEnabled;
+                          setIsSgstEnabled(newState);
+                          await AsyncStorage.setItem(
+                            "b2b_sgst_enabled",
+                            newState.toString(),
+                          );
+                        }}
                       >
                         <Icon
                           name={
@@ -2100,7 +2151,14 @@ export default function CreateTransaction({ navigation }) {
                       }}
                     >
                       <TouchableOpacity
-                        onPress={() => setIsCgstEnabled(!isCgstEnabled)}
+                        onPress={async () => {
+                          const newState = !isCgstEnabled;
+                          setIsCgstEnabled(newState);
+                          await AsyncStorage.setItem(
+                            "b2b_cgst_enabled",
+                            newState.toString(),
+                          );
+                        }}
                       >
                         <Icon
                           name={
@@ -2150,7 +2208,14 @@ export default function CreateTransaction({ navigation }) {
                       }}
                     >
                       <TouchableOpacity
-                        onPress={() => setIsIgstEnabled(!isIgstEnabled)}
+                        onPress={async () => {
+                          const newState = !isIgstEnabled;
+                          setIsIgstEnabled(newState);
+                          await AsyncStorage.setItem(
+                            "b2b_igst_enabled",
+                            newState.toString(),
+                          );
+                        }}
                       >
                         <Icon
                           name={
@@ -2203,10 +2268,12 @@ export default function CreateTransaction({ navigation }) {
                   GST Amount (₹)
                 </Text>
                 <TextInput
-                  style={styles.input}
-                  value={gstAmount}
-                  onChangeText={setGstAmount}
-                  keyboardType="decimal-pad"
+                  style={[
+                    styles.input,
+                    { backgroundColor: "#e0e0e0", color: "#000" },
+                  ]}
+                  value={gstAmount || "0.00"}
+                  editable={false}
                   placeholder="0.00"
                 />
               </View>
