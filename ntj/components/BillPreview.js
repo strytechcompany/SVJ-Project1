@@ -36,6 +36,8 @@ export default function BillPreview({ route, navigation }) {
   const [upiAmount, setUpiAmount] = useState('');
   const [showUpi, setShowUpi] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const isSharingRef = useRef(false);
 
   const [upiId, setUpiId] = useState("kaliyamoorthirengaraj@okaxis");
   const [additionalPhone, setAdditionalPhone] = useState('');
@@ -98,11 +100,12 @@ export default function BillPreview({ route, navigation }) {
   const currentAB = b2bCurrentBalance < 0 ? Math.abs(b2bCurrentBalance).toFixed(3) : (customer.advanceBalance || "0.000");
 
   useEffect(() => {
-    if (route.params?.customer?.autoShare || route.params?.autoShare) {
+    if ((route.params?.customer?.autoShare || route.params?.autoShare) && !isSharingRef.current) {
       // Small delay to ensure layout is ready
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         handleWhatsAppShare();
       }, 1000);
+      return () => clearTimeout(timer);
     }
   }, [route.params?.customer?.autoShare, route.params?.autoShare]);
 
@@ -139,6 +142,7 @@ export default function BillPreview({ route, navigation }) {
             <h1>ESTIMATE BILL</h1>
             <div>
               <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+              <p><strong>GST No:</strong> ${estimate.gstin || 'N/A'}</p>
             </div>
             <h2>ESTIMATE DETAILS:</h2>
             <table>
@@ -183,6 +187,40 @@ export default function BillPreview({ route, navigation }) {
                 <td>\u20b9${Math.round(grandTotal)}</td>
               </tr>
             </table>
+
+            ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
           </body>
         </html>
       `;
@@ -219,7 +257,6 @@ export default function BillPreview({ route, navigation }) {
                 <p><strong>Date:</strong> ${order.date || '-'}</p>
               </div>
             </div>
-
             <div style="border: 1px solid #000; margin-top: 10px; padding: 10px;">
                <p><strong>ORDER DETAILS :</strong></p>
                <div style="margin-top: 5px;">
@@ -231,6 +268,40 @@ export default function BillPreview({ route, navigation }) {
                </div>
             </div>
 
+            ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+
             <div class="footer" style="text-align: center; margin-top: 20px;">
               <p>${thirukkural}</p>
               <p>Thank you for choosing NJT Jewellery!</p>
@@ -240,7 +311,7 @@ export default function BillPreview({ route, navigation }) {
       `;
     } else if (suspense) {
       return `
-        < html >
+        <html>
           <head>
             <style>
               @page { size: 72mm 210mm; margin: 0; }
@@ -332,12 +403,46 @@ export default function BillPreview({ route, navigation }) {
                 <td>₹${suspense.netAmount.toFixed(2)}</td>
               </tr>
             </table>
+
+            ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
           </body>
         </html >
     `;
     } else if (isB2C) {
       return `
-    < html >
+    <html>
           <head>
             <style>
               @page { size: 72mm 210mm; margin: 0; }
@@ -424,6 +529,40 @@ export default function BillPreview({ route, navigation }) {
         }</p>
             <h2>TOTAL:</h2>
             <p><strong>Total Amount:</strong> ${report ? report.cash : 'N/A'}</p>
+            ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+
             ${cashAmount ? `<p><strong>Cash Amount:</strong> ₹${cashAmount}</p>` : ''}
             ${upiAmount && parseFloat(upiAmount) > 0 ? `
               <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
@@ -440,12 +579,12 @@ export default function BillPreview({ route, navigation }) {
   <p style="font-weight: bold; font-style: italic; margin-top: 10px;">${thirukkural}</p>
     <p>Thank you for your visit. Please visit again.</p>
   </div>
-          </body >
-        </html >
+          </body>
+        </html>
     `;
     } else {
       return `
-    < html >
+    <html>
           <head>
             <style>
               @page { size: 72mm 210mm; margin: 0; }
@@ -515,6 +654,40 @@ export default function BillPreview({ route, navigation }) {
           ? cashTable.map(c => `${c.rupees} / ${c.goldRate} → ${c.pure}`).join('<br/>')
           : 'N/A'
         }</p>
+            ${gst && (gst.enabled || (parseFloat(gst.amount) > 0)) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+
             <h2>SUMMARY:</h2>
             <table>
               ${customer.oldBalance && parseFloat(customer.oldBalance) !== 0 ? `
@@ -522,6 +695,7 @@ export default function BillPreview({ route, navigation }) {
                 <tr>
                   <th>Old Balance</th>
                   <th>ISSUE</th>
+                  <th>GST (g)</th>
                   <th>RECEIPT</th>
                   <th>CASH</th>
                   <th>Old Balance</th>
@@ -529,12 +703,14 @@ export default function BillPreview({ route, navigation }) {
                 <tr>
                   <td>${customer?.oldBalance || 'N/A'}</td>
                   <td>${summary ? summary.issue : 'N/A'}</td>
+                  <td>${summary?.gstPure && parseFloat(summary.gstPure) !== 0 ? summary.gstPure : '0.000'}</td>
                   <td>${summary ? summary.receipt : 'N/A'}</td>
                   <td>${summary ? summary.cash : 'N/A'}</td>
                   <td>${summary ? summary.current : 'N/A'}</td>
                 </tr>
                 <tr>
-                  <td>${customer?.oldBalance ? (parseFloat(customer.oldBalance) + parseFloat(summary?.issue || 0)).toFixed(3) : 'N/A'}</td>
+                  <td>${customer?.oldBalance ? (parseFloat(customer.oldBalance) + parseFloat(summary?.issue || 0) + parseFloat(summary?.gstPure || 0)).toFixed(3) : 'N/A'}</td>
+                  <td>-</td>
                   <td>-</td>
                   <td>${summary ? summary.receiptPlusCash : 'N/A'}</td>
                   <td>=</td>
@@ -544,6 +720,7 @@ export default function BillPreview({ route, navigation }) {
                 <!-- AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | Advance Balance -->
                 <tr>
                   <th>ISSUE</th>
+                  <th>GST (g)</th>
                   <th>Advance Balance</th>
                   <th>RECEIPT</th>
                   <th>CASH</th>
@@ -551,21 +728,22 @@ export default function BillPreview({ route, navigation }) {
                 </tr>
                 <tr>
                   <td>${summary ? summary.issue : 'N/A'}</td>
+                  <td>${summary?.gstPure && parseFloat(summary.gstPure) !== 0 ? summary.gstPure : '0.000'}</td>
                   <td>${customer.advanceBalance && parseFloat(customer.advanceBalance) !== 0 ? customer.advanceBalance : '0.000'}</td>
                   <td>${summary ? summary.receipt : 'N/A'}</td>
                   <td>${summary ? summary.cash : 'N/A'}</td>
-                  <td>${summary && customer.advanceBalance ? (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - parseFloat(summary.issue)).toFixed(3) : (summary?.current || 'N/A')}</td>
+                  <td>${summary && customer.advanceBalance ? (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - (parseFloat(summary.issue) + parseFloat(summary.gstPure || 0))).toFixed(3) : (summary?.current || 'N/A')}</td>
                 </tr>
                 <tr>
-                  <td colspan="3" style="text-align: right; padding-right: 10px;">${customer.advanceBalance || '0.000'} + ${summary?.receipt || '0.000'} + ${summary?.cash || '0.000'} - ${summary?.issue || '0.000'}</td>
+                  <td colspan="4" style="text-align: right; padding-right: 10px;">${customer.advanceBalance || '0.000'} + ${summary?.receipt || '0.000'} + ${summary?.cash || '0.000'} - (${summary?.issue || '0.000'} + ${summary?.gstPure || '0.000'})</td>
                   <td>=</td>
-                  <td>${summary && customer.advanceBalance ? (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - parseFloat(summary.issue)).toFixed(3) : (summary?.current || 'N/A')}</td>
+                  <td>${summary && customer.advanceBalance ? (parseFloat(customer.advanceBalance) + parseFloat(summary.receipt) + parseFloat(summary.cash) - (parseFloat(summary.issue) + parseFloat(summary.gstPure || 0))).toFixed(3) : (summary?.current || 'N/A')}</td>
                 </tr>
               `}
             </table>
             ${cashAmount ? `<p><strong>Cash Amount:</strong> ₹${cashAmount}</p>` : ''}
           </body>
-        </html >
+        </html>
     `;
     }
   }
@@ -638,7 +816,12 @@ export default function BillPreview({ route, navigation }) {
   };
 
   async function handleWhatsAppShare() {
+    if (isSharingRef.current) return;
+
     try {
+      isSharingRef.current = true;
+      setIsSharing(true);
+
       const html = generateHTML();
       const { uri } = await Print.printToFileAsync({
         html,
@@ -652,11 +835,13 @@ export default function BillPreview({ route, navigation }) {
         dialogTitle: 'Share Bill',
         UTI: 'com.adobe.pdf',
       });
-      setIsPrinting(false);
     } catch (error) {
-      setIsPrinting(false);
       console.error(error);
       Alert.alert("Error", "Failed to share bill");
+    } finally {
+      setIsSharing(false);
+      isSharingRef.current = false;
+      setIsPrinting(false);
     }
   }
 
@@ -773,15 +958,27 @@ export default function BillPreview({ route, navigation }) {
             </View>
 
             <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.actionIcon} onPress={openDirectWhatsApp}>
+              <TouchableOpacity
+                style={[styles.actionIcon, isSharing && { opacity: 0.5 }]}
+                onPress={openDirectWhatsApp}
+                disabled={isSharing}
+              >
                 <Icon name="whatsapp" size={24} color="#25D366" />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.actionIcon} onPress={handleWhatsAppShare}>
+              <TouchableOpacity
+                style={[styles.actionIcon, isSharing && { opacity: 0.5 }]}
+                onPress={handleWhatsAppShare}
+                disabled={isSharing}
+              >
                 <Icon name="share-variant" size={24} color="#1E88E5" />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.actionIcon} onPress={handleDownload}>
+              <TouchableOpacity
+                style={[styles.actionIcon, isSharing && { opacity: 0.5 }]}
+                onPress={handleDownload}
+                disabled={isSharing}
+              >
                 <Icon name="download" size={24} color="#1E88E5" />
               </TouchableOpacity>
             </View>
@@ -1276,9 +1473,9 @@ export default function BillPreview({ route, navigation }) {
               </View>
 
               {/* GST */}
-              {gst && gst.enabled && gst.showInBill !== false && (
+              {gst && gst.enabled && gst.showInBill !== false && (gst.igst > 0 || gst.cgst > 0 || gst.sgst > 0) && (
                 <View style={styles.cashBox}>
-                  <Text style={styles.sectionTitle}>GST :</Text>
+                  <Text style={styles.sectionTitle}>GST BREAKDOWN :</Text>
 
                   {/* Dynamic Display Logic */}
                   {parseFloat(gst.igst) > 0 ? (
