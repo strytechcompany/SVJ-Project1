@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   View,
   Text,
@@ -106,7 +107,7 @@ export default function HomeScreen() {
     }
   };
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const b2bResponse = await fetch(`${base_url}/transactions`);
@@ -115,12 +116,22 @@ export default function HomeScreen() {
       const b2cResponse = await fetch(`${base_url}/retail`);
       const b2cData = b2cResponse.ok ? await b2cResponse.json() : [];
 
+      // Correctly map types and handle customer name variations
       const b2bMapped = b2bData
         .filter((t) => t.customerName || t.name)
-        .map((t) => ({ ...t, type: "B2B" }));
+        .map((t) => ({
+          ...t,
+          type: t.type || t.customerType || "B2B",
+          displayName: t.customerName || t.name
+        }));
+
       const b2cMapped = b2cData
         .filter((t) => t.customerName || t.name)
-        .map((t) => ({ ...t, type: "B2C" }));
+        .map((t) => ({
+          ...t,
+          type: "B2C",
+          displayName: t.customerName || t.name
+        }));
 
       const merged = [...b2bMapped, ...b2cMapped].sort((a, b) => {
         const dateA = new Date(a.createdAt || a.date || 0);
@@ -132,7 +143,7 @@ export default function HomeScreen() {
       const seenCustomers = new Set();
 
       for (const txn of merged) {
-        const name = txn.customerName || txn.name;
+        const name = txn.displayName;
         if (!seenCustomers.has(name)) {
           seenCustomers.add(name);
           uniqueLatestTransactions.push(txn);
@@ -145,7 +156,20 @@ export default function HomeScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    loadRates();
+  }, [fetchData]);
+
+  // Refresh data when screen focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+      loadRates();
+    }, [fetchData])
+  );
 
   const openMenu = () => {
     setMenuOpen(true);
@@ -241,6 +265,14 @@ export default function HomeScreen() {
         >
           <Icon name="view-dashboard-outline" size={25} color="#fff" />
           <Text style={styles.menuText}>Dashboard</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => handleMenuNavigation("SD")}
+        >
+          <Icon name="view-dashboard-outline" size={25} color="#fff" />
+          <Text style={styles.menuText}>SD</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -452,34 +484,42 @@ export default function HomeScreen() {
             </Text>
           }
           renderItem={({ item }) => {
-            const isB2C =
-              item.type === "B2C" || item.customerType === "B2C";
-            const name = item.customerName || item.name;
+            const isB2C = item.type === "B2C";
+            const name = item.displayName;
 
             let balanceLabel = "Old Balance";
             let balanceValue = 0;
             let balanceColor = "#D32F2F";
-            let unit = isB2C ? "₹" : "g";
+            let unit = "g";
 
             if (isB2C) {
+              // B2C logic: check newBalance or balance (transaction level)
               const val = parseFloat(item.newBalance || item.balance || 0);
               if (val < 0) {
                 balanceLabel = "Advance Balance";
                 balanceValue = Math.abs(val);
                 balanceColor = "#2E7D32";
-              } else {
+              } else if (val > 0) {
                 balanceLabel = "Old Balance";
                 balanceValue = val;
                 balanceColor = "#D32F2F";
+              } else {
+                // If transaction doesn't have balance, maybe it's just a cash transaction?
+                // Show 0 or handle accordingly
+                balanceValue = 0;
               }
             } else {
-              if (item.balance > 0) {
+              // B2B logic: Final Net = (oldBalance - advBal) + balance (where balance is net change including GST)
+              const initialNet = (item.oldBalance || 0) - (item.advBal || 0);
+              const finalNet = initialNet + (item.balance || 0);
+
+              if (finalNet > 0) {
                 balanceLabel = "Old Balance";
-                balanceValue = item.balance;
+                balanceValue = finalNet;
                 balanceColor = "#D32F2F";
-              } else if (item.advBal > 0) {
+              } else if (finalNet < 0) {
                 balanceLabel = "Advance Balance";
-                balanceValue = item.advBal;
+                balanceValue = Math.abs(finalNet);
                 balanceColor = "#2E7D32";
               } else {
                 balanceValue = 0;
