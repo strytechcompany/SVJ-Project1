@@ -819,6 +819,7 @@ export default function CreateTransaction({ navigation, route }) {
         total,
         gst,
         final,
+        pure: Number(((wt * t) / 100).toFixed(3)),
         modifiedWeight: parseFloat(modifiedWeight || 0),
         gstEnabled,
       };
@@ -1045,15 +1046,20 @@ export default function CreateTransaction({ navigation, route }) {
   // ---------------- ITEM NAME HANDLING ----------------
   const handleItemNameChange = (text) => {
     setItemName(text);
+    // Only show items marked as 'issue' type in the Item Entry list
+    const issueStockNames = new Set(
+      itemEntryItems.filter((e) => e.issue === true).map((e) => e.stockName)
+    );
+    const issueOnlyItems = itemList.filter((item) => issueStockNames.has(item.itemName));
+
     if (text) {
-      const filtered = itemList.filter((item) =>
+      const filtered = issueOnlyItems.filter((item) =>
         item.itemName.toLowerCase().includes(text.toLowerCase())
       );
       setFilteredItems(filtered);
       setShowItemDropdown(true);
     } else {
-
-      setFilteredItems(itemList);
+      setFilteredItems(issueOnlyItems);
       setShowItemDropdown(true);
       setSelectedItem(null);
       setModifiedWeight("");
@@ -1544,7 +1550,22 @@ export default function CreateTransaction({ navigation, route }) {
 
           {showItems && (
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Add Item</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+                <Text style={[styles.cardTitle, { marginBottom: 0 }]}>Add Item</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ position: 'relative' }}>
+                    <Icon name="cart" size={26} color="#000" />
+                    {items.length > 0 && (
+                      <View style={{ position: 'absolute', top: -8, right: -8, backgroundColor: 'red', borderRadius: 10, width: 18, height: 18, justifyContent: 'center', alignItems: 'center' }}>
+                        <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{items.length}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={{ marginLeft: 12, fontSize: 12, fontWeight: 'bold', color: '#555' }}>
+                    {items.reduce((sum, item) => sum + (parseFloat(item.pure) || 0), 0).toFixed(3)}g
+                  </Text>
+                </View>
+              </View>
 
               {/* ITEM NAME */}
               <Text style={styles.label}>Item</Text>
@@ -1554,9 +1575,12 @@ export default function CreateTransaction({ navigation, route }) {
                 value={itemName}
                 onChangeText={handleItemNameChange}
                 onFocus={() => {
-                  // Show all items when focused
+                  // Only show issue-type items in the dropdown
                   if (itemList.length > 0) {
-                    setFilteredItems(itemList);
+                    const issueStockNames = new Set(
+                      itemEntryItems.filter((e) => e.issue === true).map((e) => e.stockName)
+                    );
+                    setFilteredItems(itemList.filter((item) => issueStockNames.has(item.itemName)));
                     setShowItemDropdown(true);
                   }
                 }}
