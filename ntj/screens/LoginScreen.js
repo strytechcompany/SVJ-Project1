@@ -39,7 +39,21 @@ export default function LoginScreen({ navigation }) {
       const data = await response.json();
 
       if (response.ok) {
-        navigation.navigate("Home");
+        // Fetch full user details (name, role) from /users list using the logged-in email
+        let fullUser = { email: data.email, token: data.token };
+        try {
+          const usersRes = await fetch(`${base_url}/users`);
+          if (usersRes.ok) {
+            const users = await usersRes.json();
+            const matched = users.find(
+              (u) => u.email?.toLowerCase().trim() === data.email?.toLowerCase().trim()
+            );
+            if (matched) fullUser = { ...fullUser, ...matched };
+          }
+        } catch (_) {
+          // Non-critical — proceed with partial user data
+        }
+        navigation.navigate("Home", { user: fullUser });
       } else {
         Alert.alert("Login Failed", data.message || "Invalid credentials");
       }
