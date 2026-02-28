@@ -123,150 +123,148 @@ export default function AddOrder({ navigation }) {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={100}
     >
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={{ flex: 1, backgroundColor: "#fff" }}>
+      <View style={{ flex: 1, backgroundColor: "#fff" }}>
 
-          {/* HEADER */}
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()}>
-              <Ionicons name="arrow-back" size={26} color="#fff" style={{ top: 25 }} />
+        {/* HEADER */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={26} color="#fff" style={{ top: 25 }} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Add New Order</Text>
+        </View>
+
+        {/* SCROLL CONTENT */}
+        <ScrollView
+          contentContainerStyle={{ padding: 20, paddingBottom: 80 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.label}>Image</Text>
+          <View style={{ flexDirection: 'row', gap: 15, marginTop: 10 }}>
+            <TouchableOpacity style={styles.imageButton} onPress={pickImage}>
+              <Ionicons name="images" size={24} color="#fff" />
+              <Text style={{ color: '#fff', fontSize: 10 }}>Gallery</Text>
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Add New Order</Text>
+            <TouchableOpacity style={styles.imageButton} onPress={takePhoto}>
+              <Ionicons name="camera" size={24} color="#fff" />
+              <Text style={{ color: '#fff', fontSize: 10 }}>Camera</Text>
+            </TouchableOpacity>
+          </View>
+          {selectedImage && (
+            <Image source={{ uri: selectedImage }} style={styles.selectedImage} />
+          )}
+
+          <Text style={styles.label}>Order Date</Text>
+          <TextInput
+            placeholder="YYYY-MM-DD"
+            style={styles.input}
+            value={date}
+            onChangeText={setDate}
+          />
+
+          <Text style={styles.label}>Item Name</Text>
+          <TextInput
+            placeholder="Enter item name"
+            style={styles.input}
+            value={itemName}
+            onChangeText={setItemName}
+          />
+
+          <Text style={styles.label}>Item Weight (GMS)</Text>
+          <TextInput
+            placeholder="Enter item weight"
+            style={styles.input}
+            value={weight}
+            keyboardType="numeric"
+            onChangeText={setWeight}
+          />
+
+          <Text style={styles.label}>Customer Name</Text>
+          <TextInput
+            placeholder="Enter customer name"
+            style={styles.input}
+            value={customerName}
+            onChangeText={setCustomerName}
+          />
+
+          <Text style={styles.label}>Mobile Number</Text>
+          <TextInput
+            placeholder="Enter mobile number"
+            style={styles.input}
+            value={mobile}
+            keyboardType="phone-pad"
+            onChangeText={setMobile}
+          />
+
+          <Text style={styles.label}>Amount</Text>
+          <TextInput
+            placeholder="Enter amount"
+            style={styles.input}
+            value={amount}
+            keyboardType="numeric"
+            onChangeText={setAmount}
+          />
+
+          <Text style={styles.label}>Balance Amount</Text>
+          <TextInput
+            placeholder="Enter balance amount"
+            style={styles.input}
+            value={balanceAmount}
+            keyboardType="numeric"
+            onChangeText={setBalanceAmount}
+          />
+
+          <Text style={styles.label}>Payment Type</Text>
+          <View style={styles.paymentRow}>
+            {paymentOptions.map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={[styles.payBtn, paymentType === option && styles.payBtnActive]}
+                onPress={() => setPaymentType(option)}
+              >
+                <Text style={[styles.payText, paymentType === option && styles.payTextActive]}>
+                  {option}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
-          {/* SCROLL CONTENT */}
-          <ScrollView
-            contentContainerStyle={{ padding: 20, paddingBottom: 80 }}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
+          <TouchableOpacity
+            style={[styles.saveButton, loading && { opacity: 0.6 }]}
+            onPress={saveOrder}
+            disabled={loading}
           >
-            <Text style={styles.label}>Image</Text>
-            <View style={{ flexDirection: 'row', gap: 15, marginTop: 10 }}>
-              <TouchableOpacity style={styles.imageButton} onPress={pickImage}>
-                <Ionicons name="images" size={24} color="#fff" />
-                <Text style={{ color: '#fff', fontSize: 10 }}>Gallery</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.imageButton} onPress={takePhoto}>
-                <Ionicons name="camera" size={24} color="#fff" />
-                <Text style={{ color: '#fff', fontSize: 10 }}>Camera</Text>
-              </TouchableOpacity>
-            </View>
-            {selectedImage && (
-              <Image source={{ uri: selectedImage }} style={styles.selectedImage} />
-            )}
+            <Text style={styles.saveText}>{loading ? "Saving..." : "Save Order"}</Text>
+          </TouchableOpacity>
 
-            <Text style={styles.label}>Order Date</Text>
-            <TextInput
-              placeholder="YYYY-MM-DD"
-              style={styles.input}
-              value={date}
-              onChangeText={setDate}
-            />
-
-            <Text style={styles.label}>Item Name</Text>
-            <TextInput
-              placeholder="Enter item name"
-              style={styles.input}
-              value={itemName}
-              onChangeText={setItemName}
-            />
-
-            <Text style={styles.label}>Item Weight (GMS)</Text>
-            <TextInput
-              placeholder="Enter item weight"
-              style={styles.input}
-              value={weight}
-              keyboardType="numeric"
-              onChangeText={setWeight}
-            />
-
-            <Text style={styles.label}>Customer Name</Text>
-            <TextInput
-              placeholder="Enter customer name"
-              style={styles.input}
-              value={customerName}
-              onChangeText={setCustomerName}
-            />
-
-            <Text style={styles.label}>Mobile Number</Text>
-            <TextInput
-              placeholder="Enter mobile number"
-              style={styles.input}
-              value={mobile}
-              keyboardType="phone-pad"
-              onChangeText={setMobile}
-            />
-
-            <Text style={styles.label}>Amount</Text>
-            <TextInput
-              placeholder="Enter amount"
-              style={styles.input}
-              value={amount}
-              keyboardType="numeric"
-              onChangeText={setAmount}
-            />
-
-            <Text style={styles.label}>Balance Amount</Text>
-            <TextInput
-              placeholder="Enter balance amount"
-              style={styles.input}
-              value={balanceAmount}
-              keyboardType="numeric"
-              onChangeText={setBalanceAmount}
-            />
-
-            <Text style={styles.label}>Payment Type</Text>
-            <View style={styles.paymentRow}>
-              {paymentOptions.map((option) => (
-                <TouchableOpacity
-                  key={option}
-                  style={[styles.payBtn, paymentType === option && styles.payBtnActive]}
-                  onPress={() => setPaymentType(option)}
-                >
-                  <Text style={[styles.payText, paymentType === option && styles.payTextActive]}>
-                    {option}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <TouchableOpacity
-              style={[styles.saveButton, loading && { opacity: 0.6 }]}
-              onPress={saveOrder}
-              disabled={loading}
-            >
-              <Text style={styles.saveText}>{loading ? "Saving..." : "Save Order"}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.saveButton, { backgroundColor: '#007bff', marginTop: 15 }]}
-              onPress={() => {
-                if (!itemName || !weight || !customerName || !mobile) {
-                  Alert.alert("Missing Fields", "Please fill all fields before printing.");
-                  return;
+          <TouchableOpacity
+            style={[styles.saveButton, { backgroundColor: '#007bff', marginTop: 15 }]}
+            onPress={() => {
+              if (!itemName || !weight || !customerName || !mobile) {
+                Alert.alert("Missing Fields", "Please fill all fields before printing.");
+                return;
+              }
+              const orderNo = `A202601${Math.floor(1000 + Math.random() * 9000)}`;
+              navigation.navigate("BillPreview", {
+                order: {
+                  orderNo,
+                  customer: customerName,
+                  phone: mobile,
+                  type: itemName,
+                  weight,
+                  payment: paymentType,
+                  date,
+                  balance: balanceAmount || "0",
+                  image: selectedImage,
                 }
-                const orderNo = `A202601${Math.floor(1000 + Math.random() * 9000)}`;
-                navigation.navigate("BillPreview", {
-                  order: {
-                    orderNo,
-                    customer: customerName,
-                    phone: mobile,
-                    type: itemName,
-                    weight,
-                    payment: paymentType,
-                    date,
-                    balance: balanceAmount || "0",
-                    image: selectedImage,
-                  }
-                });
-              }}
-            >
-              <Text style={styles.saveText}>Print Bill</Text>
-            </TouchableOpacity>
+              });
+            }}
+          >
+            <Text style={styles.saveText}>Print Bill</Text>
+          </TouchableOpacity>
 
-          </ScrollView>
-        </View>
-      </TouchableWithoutFeedback>
+        </ScrollView>
+      </View>
     </KeyboardAvoidingView>
   );
 }
