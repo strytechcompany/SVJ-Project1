@@ -18,7 +18,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { base_url } from "./config";
 
 export default function Order({ navigation }) {
-  const [selectedTab, setSelectedTab] = useState("Pending");
+  const [selectedTab, setSelectedTab] = useState("All");
   const [orders, setOrders] = useState([]);
   const [dealers, setDealers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -51,8 +51,8 @@ export default function Order({ navigation }) {
               order.status === "Completed"
                 ? "Completed"
                 : order.assignedDealer
-                ? "Assigned"
-                : "Pending",
+                  ? "Assigned"
+                  : "Pending",
             dealerName: order.assignedDealerName || "",
             dealerId: order.assignedDealer || "",
             image: order.image || null,  // base64 string
@@ -94,7 +94,24 @@ export default function Order({ navigation }) {
               : o
           )
         );
-        Alert.alert("Assigned", `Order assigned to ${dealer.customerName}`);
+
+        const order = orders.find(o => o.id === orderId);
+
+        if (order && dealer.mobileNumber) {
+          const message = `*New Order Assigned*\n\n*Item Name:* ${order.type}\n*Weight:* ${order.weight} GMS\n*Ethan List:* Included in App`;
+          const phone = dealer.mobileNumber.replace(/[^0-9]/g, '');
+
+          // Silently trigger backend notification instead of navigating the frontend away to WhatsApp
+          fetch(`${base_url}/orders/${orderId}/whatsapp`, {
+            method: 'POST',
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone, message })
+          }).catch(e => console.log('Silent share failed/mocked', e));
+
+          Alert.alert("Success", `Order assigned to ${dealer.customerName}`);
+        } else {
+          Alert.alert("Assigned", `Order assigned to ${dealer.customerName}. No mobile number found.`);
+        }
       } else {
         Alert.alert("Error", "Failed to assign dealer");
       }
@@ -221,9 +238,11 @@ export default function Order({ navigation }) {
       ) : (
         <ScrollView
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          keyboardShouldPersistTaps="handled"
         >
           <FlatList
             data={filteredOrders}
+            keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => (
               <OrderCard
                 item={item}
@@ -333,7 +352,7 @@ const OrderCard = ({ item, dealers, onAssign, onDelete, onEdit, onView, onComple
                 value={searchQuery}
                 onChangeText={setSearchQuery}
               />
-              <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 120 }}>
+              <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 120 }} keyboardShouldPersistTaps="handled">
                 {filteredDealers.map((dealer) => (
                   <TouchableOpacity
                     key={dealer._id}
