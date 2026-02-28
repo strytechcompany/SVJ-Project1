@@ -4,7 +4,8 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal, Alert } fr
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { base_url } from "./config";
 
-export default function SettingsScreen({ navigation }) {
+export default function SettingsScreen({ navigation, route }) {
+  const user = route?.params?.user || null;
   const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
 
   const handleDeleteAll = async () => {
@@ -41,7 +42,7 @@ export default function SettingsScreen({ navigation }) {
         {/* General */}
         <Text style={styles.sectionTitle}>General</Text>
 
-        <TouchableOpacity style={styles.item} onPress={() => navigation.navigate('PersonalUser')}>
+        <TouchableOpacity style={styles.item} onPress={() => navigation.navigate('PersonalUser', { user })}>
           <Icon name="account-circle-outline" size={24} color="#1B4D1B" />
           <Text style={styles.itemText}>Profile</Text>
         </TouchableOpacity>
