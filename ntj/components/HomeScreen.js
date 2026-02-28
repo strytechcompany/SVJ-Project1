@@ -21,8 +21,9 @@ import { Foundation } from "@expo/vector-icons";
 import { AntDesign } from "@expo/vector-icons";
 import { base_url } from "./config";
 
-export default function HomeScreen() {
+export default function HomeScreen({ route }) {
   const navigation = useNavigation();
+  const user = route?.params?.user || null;
 
   const getCurrentDate = () => {
     const d = new Date();
@@ -202,7 +203,11 @@ export default function HomeScreen() {
   };
 
   const handleMenuNavigation = (screenName) => {
-    navigation.navigate(screenName);
+    if (screenName === "Settings") {
+      navigation.navigate(screenName, { user });
+    } else {
+      navigation.navigate(screenName);
+    }
     closeMenu();
   };
 
@@ -607,7 +612,7 @@ export default function HomeScreen() {
           />
         </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => navigation.navigate("Settings")}>
+        <TouchableOpacity onPress={() => navigation.navigate("Settings", { user })}>
           <FontAwesome
             name="cog"
             color="#555"
