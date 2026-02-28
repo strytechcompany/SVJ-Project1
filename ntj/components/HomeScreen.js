@@ -110,20 +110,33 @@ export default function HomeScreen() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const b2bResponse = await fetch(`${base_url}/transactions`);
-      const b2bData = b2bResponse.ok ? await b2bResponse.json() : [];
+      const [b2bResponse, b2cResponse, dealersRes, customersRes] = await Promise.all([
+        fetch(`${base_url}/transactions`),
+        fetch(`${base_url}/retail`),
+        fetch(`${base_url}/customersDealer`),
+        fetch(`${base_url}/customers`),
+      ]);
 
-      const b2cResponse = await fetch(`${base_url}/retail`);
+      const b2bData = b2bResponse.ok ? await b2bResponse.json() : [];
       const b2cData = b2cResponse.ok ? await b2cResponse.json() : [];
+      const dealers = dealersRes.ok ? await dealersRes.json() : [];
+      const customers = customersRes.ok ? await customersRes.json() : [];
+
+      const customerMap = {};
+      dealers.forEach(d => { customerMap[d.customerName] = d.customerType || 'Dealer'; });
+      customers.forEach(c => { customerMap[c.customerName] = c.customerType || 'B2B'; });
 
       // Correctly map types and handle customer name variations
       const b2bMapped = b2bData
         .filter((t) => t.customerName || t.name)
-        .map((t) => ({
-          ...t,
-          type: t.type || t.customerType || "B2B",
-          displayName: t.customerName || t.name
-        }));
+        .map((t) => {
+          const name = t.customerName || t.name;
+          return {
+            ...t,
+            type: t.type || t.customerType || customerMap[name] || "B2B",
+            displayName: name
+          };
+        });
 
       const b2cMapped = b2cData
         .filter((t) => t.customerName || t.name)
@@ -542,23 +555,25 @@ export default function HomeScreen() {
                   </Text>
                 </View>
 
-                <View
-                  style={[
-                    styles.customerTag,
-                    {
-                      backgroundColor: isB2C ? "#E3F2FD" : "#E2FBE8",
-                      marginLeft: 10,
-                    },
-                  ]}
-                >
-                  <Text
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View
                     style={[
-                      styles.customerText,
-                      { color: isB2C ? "#1565C0" : "#1B4D1B" },
+                      styles.customerTag,
+                      {
+                        backgroundColor: item.type === "B2C" ? "#E3F2FD" : item.type === "B2B" ? "#E2FBE8" : "#FFF3E0",
+                        marginLeft: 10,
+                      },
                     ]}
                   >
-                    {isB2C ? "B2C" : "B2B"}
-                  </Text>
+                    <Text
+                      style={[
+                        styles.customerText,
+                        { color: item.type === "B2C" ? "#1565C0" : item.type === "B2B" ? "#1B4D1B" : "#E65100" },
+                      ]}
+                    >
+                      {item.type}
+                    </Text>
+                  </View>
                 </View>
               </View>
             );
