@@ -43,22 +43,36 @@ export default function EditOrder({ route, navigation }) {
     }
   };
 
-  const saveChanges = () => {
-    const updatedOrder = {
-      ...order,
-      customer,
-      worker,
-      date,
-      phone,
-      type,
-      status,
-      image,
-      weight: parseFloat(weight) || 0,
-      payment: payment,
-      balanceAmount: parseFloat(balance) || 0,
-    };
+  const saveChanges = async () => {
+    try {
+      const response = await fetch(`${base_url}/orders/${order.id}`, {
+        method: 'PUT',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerName: customer,
+          mobileNumber: phone,
+          itemName: type,
+          itemWeight: parseFloat(weight) || 0,
+          paymentType: payment,
+          status: status,
+          amount: parseFloat(order.amount) || 0,
+          balanceAmount: parseFloat(balance) || 0,
+          deliveryDate: date,
+          image: image,
+        }),
+      });
 
-    navigation.navigate("Order", { updatedOrder });
+      if (response.ok) {
+        Alert.alert("Success", "Order updated successfully");
+        navigation.goBack();
+      } else {
+        const data = await response.json();
+        Alert.alert("Error", data.message || "Failed to update order");
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", "Server not reachable");
+    }
   };
 
   return (
