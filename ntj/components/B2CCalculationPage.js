@@ -1909,17 +1909,6 @@ export default function CreateTransaction({ navigation, route }) {
               <View style={[styles.card, { marginTop: 20 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <Text style={styles.cardTitle}>Receipt Entry (Old Gold)</Text>
-                  <TouchableOpacity
-                    style={{
-                      backgroundColor: "#1B4D1B",
-                      paddingHorizontal: 15,
-                      paddingVertical: 8,
-                      borderRadius: 8,
-                    }}
-                    onPress={() => navigation.navigate("Payments", { receiptItems: b2cReceiptItems })}
-                  >
-                    <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>Move to Payments</Text>
-                  </TouchableOpacity>
                 </View>
 
                 <View style={styles.inputRow}>
