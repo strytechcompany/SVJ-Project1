@@ -27,12 +27,13 @@ export default function Users({ navigation }) {
     email: "",
     phone: "",
     role: "Admin",
+    password: "",
   });
 
   // Additional states for roles, edit, delete
   const [roleOptions] = useState(["Admin", "Super Admin", "Worker"]);
   const [showRoleModal, setShowRoleModal] = useState(false);
-  const [currentRoleSetter, setCurrentRoleSetter] = useState(() => {});
+  const [currentRoleSetter, setCurrentRoleSetter] = useState(() => { });
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editUser, setEditUser] = useState({
     id: "",
@@ -74,8 +75,8 @@ export default function Users({ navigation }) {
 
   // Add user to backend
   const handleAddUser = async () => {
-    if (!newUser.name || !newUser.email || !newUser.phone) {
-      Alert.alert("Error", "Please fill all fields");
+    if (!newUser.name || !newUser.email || !newUser.phone || !newUser.password) {
+      Alert.alert("Error", "Please fill all fields including password");
       return;
     }
 
@@ -95,7 +96,7 @@ export default function Users({ navigation }) {
         { id: addedUser.id || addedUser._id, ...addedUser },
       ]);
       setModalVisible(false);
-      setNewUser({ name: "", email: "", phone: "", role: "Admin" });
+      setNewUser({ name: "", email: "", phone: "", role: "Admin", password: "" });
     } catch (err) {
       Alert.alert("Error", err.message);
     }
@@ -284,6 +285,13 @@ export default function Users({ navigation }) {
               value={newUser.phone}
               onChangeText={(text) => setNewUser({ ...newUser, phone: text })}
               style={styles.input}
+            />
+            <TextInput
+              placeholder="Password"
+              value={newUser.password}
+              onChangeText={(text) => setNewUser({ ...newUser, password: text })}
+              style={styles.input}
+              secureTextEntry
             />
             <TouchableOpacity
               style={styles.input}
