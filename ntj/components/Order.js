@@ -16,6 +16,9 @@ import {
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { Ionicons } from "@expo/vector-icons";
 import { base_url } from "./config";
+import { useFocusEffect } from "@react-navigation/native";
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 
 export default function Order({ navigation }) {
   const [selectedTab, setSelectedTab] = useState("All");
@@ -58,6 +61,7 @@ export default function Order({ navigation }) {
             image: order.image || null,  // base64 string
             balanceAmount: order.balanceAmount || 0,
             amount: order.amount || 0,
+            assignedAt: order.assignedAt || null,
           }))
         );
       }
@@ -73,6 +77,12 @@ export default function Order({ navigation }) {
   useEffect(() => {
     fetchOrders();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchOrders();
+    }, [])
+  );
 
   const handleAssignDealer = async (orderId, dealer) => {
     try {
@@ -90,25 +100,65 @@ export default function Order({ navigation }) {
         setOrders(prev =>
           prev.map(o =>
             o.id === orderId
-              ? { ...o, dealerName: dealer.customerName, dealerId: dealer._id, status: 'Assigned' }
+              ? { ...o, dealerName: dealer.customerName, dealerId: dealer._id, status: 'Assigned', assignedAt: new Date().toISOString() }
               : o
           )
         );
 
         const order = orders.find(o => o.id === orderId);
+        const phone = dealer.mobileNumber ? dealer.mobileNumber.replace(/[^0-9]/g, '') : null;
 
-        if (order && dealer.mobileNumber) {
-          const message = `*New Order Assigned*\n\n*Item Name:* ${order.type}\n*Weight:* ${order.weight} GMS\n*Ethan List:* Included in App`;
-          const phone = dealer.mobileNumber.replace(/[^0-9]/g, '');
+        const caption = `*New Order Assigned*\n\n*Item Name:* ${order.type}\n*Weight:* ${order.weight} GMS`;
 
-          // Silently trigger backend notification instead of navigating the frontend away to WhatsApp
-          fetch(`${base_url}/orders/${orderId}/whatsapp`, {
-            method: 'POST',
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ phone, message })
-          }).catch(e => console.log('Silent share failed/mocked', e));
+        if (order && order.image && phone) {
+          try {
+            // Check if we can share files
+            const isSharingAvailable = await Sharing.isAvailableAsync();
+            if (!isSharingAvailable) {
+              throw new Error("Sharing is not available on this device");
+            }
 
-          Alert.alert("Success", `Order assigned to ${dealer.customerName}`);
+            // Create a temporary file path
+            const filename = `order_${orderId}.jpg`;
+            const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+
+            // Clean the base64 string (remove data prefix if present)
+            const base64Data = order.image.includes('base64,')
+              ? order.image.split('base64,')[1]
+              : order.image;
+
+            // Write the file
+            await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+
+            // Share the file
+            // Note: On Android, WhatsApp doesn't always accept the message param with a file share via expo-sharing
+            await Sharing.shareAsync(fileUri, {
+              dialogTitle: caption,
+              mimeType: 'image/jpeg',
+              UTI: 'public.jpeg',
+            });
+
+          } catch (error) {
+            console.error("Sharing error:", error);
+            // Fallback to text matching the user's request as best as possible
+            const whatsappUrl = `whatsapp://send?phone=91${phone}&text=${encodeURIComponent(caption)}`;
+            const supported = await Linking.canOpenURL(whatsappUrl);
+            if (supported) {
+              await Linking.openURL(whatsappUrl);
+            } else {
+              Alert.alert("Success", `Order assigned to ${dealer.customerName}. Photo share failed.`);
+            }
+          }
+        } else if (phone) {
+          const whatsappUrl = `whatsapp://send?phone=91${phone}&text=${encodeURIComponent(caption)}`;
+          const supported = await Linking.canOpenURL(whatsappUrl);
+          if (supported) {
+            await Linking.openURL(whatsappUrl);
+          } else {
+            Alert.alert("Success", `Order assigned to ${dealer.customerName}`);
+          }
         } else {
           Alert.alert("Assigned", `Order assigned to ${dealer.customerName}. No mobile number found.`);
         }
@@ -328,6 +378,27 @@ const OrderCard = ({ item, dealers, onAssign, onDelete, onEdit, onView, onComple
             <Icon name="calendar-clock" size={14} color="#666" />
             <Text style={styles.infoText}> {item.date}</Text>
           </View>
+          {item.balanceAmount > 0 && (
+            <View style={[styles.infoRow, { marginTop: 4 }]}>
+              <Icon name="cash" size={14} color="#c0392b" />
+              <Text style={[styles.infoText, { color: "#c0392b", fontWeight: "700" }]}>
+                {" "}Balance: ₹{Number(item.balanceAmount).toFixed(2)}
+              </Text>
+            </View>
+          )}
+          {item.status === 'Assigned' && item.assignedAt && (
+            <View style={[styles.infoRow, { marginTop: 4 }]}>
+              <Icon name="clock-outline" size={14} color="#007bff" />
+              <Text style={[styles.infoText, { color: "#007bff", fontSize: 11 }]}>
+                {" "}Assigned: {new Date(item.assignedAt).toLocaleString('en-IN', {
+                  day: '2-digit',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </Text>
+            </View>
+          )}
         </View>
       </View>
 
