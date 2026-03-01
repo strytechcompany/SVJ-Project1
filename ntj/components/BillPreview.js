@@ -268,6 +268,13 @@ export default function BillPreview({ route, navigation }) {
                </div>
             </div>
 
+            ${order.image ? `
+              <div class="photo-container">
+                <p><strong>Item Photo:</strong></p>
+                <img src="${order.image.startsWith('data:') ? order.image : `${base_url}/${order.image}`}" style="width: 100%; border-radius: 5px;" />
+              </div>
+            ` : ''}
+
             ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
               <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
               <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
@@ -1187,7 +1194,7 @@ export default function BillPreview({ route, navigation }) {
                   {order.image && (
                     <View style={{ width: 120, height: 120, borderRadius: 10, overflow: 'hidden', backgroundColor: '#f9f9f9', borderWidth: 1, borderColor: '#eee' }}>
                       <Image
-                        source={{ uri: order.image.startsWith('http') ? order.image : `${base_url}/${order.image}` }}
+                        source={{ uri: order.image.startsWith('data:') || order.image.startsWith('http') ? order.image : `${base_url}/${order.image}` }}
                         style={{ width: '100%', height: '100%' }}
                         resizeMode="cover"
                       />
