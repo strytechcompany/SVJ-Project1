@@ -21,20 +21,35 @@ export default function Dealer({ navigation, route }) {
   const [dealerSearchQuery, setDealerSearchQuery] = useState({});
   const [dropdownOpen, setDropdownOpen] = useState({});
   const [itemEntryItems, setItemEntryItems] = useState([]);
+  const [stocks, setStocks] = useState([]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       fetchDealers();
       fetchTransfers();
       fetchItems();
+      fetchStocks();
     });
 
     fetchDealers();
     fetchTransfers();
     fetchItems();
+    fetchStocks();
 
     return unsubscribe;
   }, [navigation]);
+
+  const fetchStocks = async () => {
+    try {
+      const response = await fetch(`${base_url}/stockMaster`);
+      if (response.ok) {
+        const data = await response.json();
+        setStocks(data);
+      }
+    } catch (error) {
+      console.error('Error fetching stocks:', error);
+    }
+  };
 
   const fetchTransfers = async () => {
     try {
@@ -123,38 +138,48 @@ export default function Dealer({ navigation, route }) {
   };
 
   const handleSaveWeight = async (item) => {
-    const w = parseFloat(dealerWeights[item._id || item.id]);
-    const selectedType = dealerDropdowns[item._id || item.id];
+    const dealerId = item._id || item.id;
+    const w = parseFloat(dealerWeights[dealerId]);
+    const selectedItemName = dealerDropdowns[dealerId];
 
     if (!w || w <= 0) {
       Alert.alert("Error", "Please enter a valid weight");
       return;
     }
-    if (!selectedType) {
+    if (!selectedItemName) {
       Alert.alert("Error", "Please select an item type from the dropdown");
       return;
     }
 
     try {
       // 1. Update StockMaster
-      const stockRes = await fetch(`${base_url}/stockMaster`);
-      const stocks = await stockRes.json();
-      const stockItem = stocks.find(s => s.itemName === selectedType);
+      const stockItem = stocks.find(s => s.itemName === selectedItemName);
 
       if (stockItem) {
-        const updatedWeight = parseFloat(stockItem.weight || 0) + w;
+        // DEDUCT from stock
+        const currentStockWeight = parseFloat(stockItem.weight || 0);
+        if (currentStockWeight < w) {
+          Alert.alert("Warning", `Insufficient stock! Available: ${currentStockWeight}g. You are trying to transfer ${w}g.`);
+          // We still allow it if needed, or we can return. Let's return for safety as per "deducted" requirement.
+          return;
+        }
+
+        const updatedWeight = currentStockWeight - w;
         await fetch(`${base_url}/stockMaster/${stockItem._id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...stockItem, weight: updatedWeight })
         });
+      } else {
+        Alert.alert("Error", "Selected item not found in stock master");
+        return;
       }
 
       // 2. Add to Transfer History 
       const transferData = {
         date: new Date().toISOString(),
         selectedDealer: item.customerName,
-        selectedItems: [selectedType],
+        selectedItems: [selectedItemName],
         totalSelectedWeight: w,
         weightSubtraction: 0,
         transferWeight: w,
@@ -168,12 +193,12 @@ export default function Dealer({ navigation, route }) {
       });
 
       // 3. Update Dealer Balance
+      // Logic for Issue: Shop Gold decreases (-), Dealer Debt increases (+)
       let ob = parseFloat(item.oldBalance || 0);
       let ab = parseFloat(item.advanceBalance || 0);
       let currentNetBalance = ob - ab;
 
-      // "subtracted from the current balance"
-      let newNetBalance = currentNetBalance - w;
+      let newNetBalance = currentNetBalance + w;
 
       let newOb = 0;
       let newAb = 0;
@@ -185,7 +210,7 @@ export default function Dealer({ navigation, route }) {
         newAb = Math.abs(newNetBalance);
       }
 
-      const updateResponse = await fetch(`${base_url}/customersDealer/${item._id || item.id}`, {
+      const updateResponse = await fetch(`${base_url}/customersDealer/${dealerId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -196,16 +221,17 @@ export default function Dealer({ navigation, route }) {
       });
 
       if (updateResponse.ok) {
-        Alert.alert("Success", "Weight added to stock, balance updated, and recorded in history.");
+        Alert.alert("Success", "Weight deducted from stock and added to dealer balance.");
 
         // Clear inputs for this dealer
-        setDealerWeights((prev) => ({ ...prev, [item._id || item.id]: "" }));
-        setDealerDropdowns((prev) => ({ ...prev, [item._id || item.id]: "" }));
-        setDealerSearchQuery((prev) => ({ ...prev, [item._id || item.id]: "" }));
+        setDealerWeights((prev) => ({ ...prev, [dealerId]: "" }));
+        setDealerDropdowns((prev) => ({ ...prev, [dealerId]: "" }));
+        setDealerSearchQuery((prev) => ({ ...prev, [dealerId]: "" }));
 
         // Reload data
         fetchDealers();
         fetchTransfers();
+        fetchStocks();
       } else {
         Alert.alert("Error", "Failed to update dealer balance");
       }
@@ -329,6 +355,12 @@ export default function Dealer({ navigation, route }) {
                                 setDealerDropdowns((prev) => ({ ...prev, [item._id || item.id]: entryItem.value }));
                                 setDealerSearchQuery((prev) => ({ ...prev, [item._id || item.id]: entryItem.label }));
                                 setDropdownOpen((prev) => ({ ...prev, [item._id || item.id]: false }));
+
+                                // Fetch corresponding weight from stockMaster
+                                const matchingStock = stocks.find(s => s.itemName === entryItem.value);
+                                if (matchingStock) {
+                                  // Pre-fill weight or just show it (we will show it in a label below)
+                                }
                               }}
                             >
                               <Text style={styles.dropdownOptionText}>{entryItem.label}</Text>
@@ -338,6 +370,18 @@ export default function Dealer({ navigation, route }) {
                     </View>
                   )}
                 </View>
+
+                {/* Display Available Stock Weight */}
+                {dealerDropdowns[item._id || item.id] && (
+                  <View style={styles.stockStatusContainer}>
+                    <Text style={styles.stockStatusLabel}>
+                      Available in Stock:
+                      <Text style={styles.stockStatusValue}>
+                        {" "}{stocks.find(s => s.itemName === dealerDropdowns[item._id || item.id])?.weight || 0} g
+                      </Text>
+                    </Text>
+                  </View>
+                )}
               </View>
 
               {/* Weight Input Field */}
@@ -641,5 +685,23 @@ const styles = StyleSheet.create({
   dropdownOptionText: {
     fontSize: 14,
     color: "#333",
+  },
+  stockStatusContainer: {
+    marginTop: 8,
+    backgroundColor: "#E3F2FD",
+    padding: 10,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: "#1976D2",
+  },
+  stockStatusLabel: {
+    fontSize: 13,
+    color: "#1565C0",
+    fontWeight: "600",
+  },
+  stockStatusValue: {
+    fontSize: 14,
+    color: "#0D47A1",
+    fontWeight: "bold",
   },
 });
