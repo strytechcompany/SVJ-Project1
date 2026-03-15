@@ -419,17 +419,14 @@ export default function EstimateScreen({ navigation, route }) {
           <TouchableOpacity
             style={styles.transferBtn}
             onPress={() => {
-              if (!itemName || !weight || !goldRate) {
-                Alert.alert("Error", "Please fill Item Name, Weight, and Gold Rate");
+              const estimateData = buildCurrentEstimateData();
+              const hasItems = estimateData.items && estimateData.items.length > 0;
+              if (!hasItems && (!estimateData.itemName || !estimateData.weight || !estimateData.goldRate)) {
+                Alert.alert("Error", "Please fill Item Name, Weight, and Gold Rate, or add items to your list before transferring.");
                 return;
               }
               navigation.navigate("B2CCalculationPage", {
-                estimate: {
-                  itemName,
-                  weight: parseFloat(weight),
-                  wastagePercent: parseFloat(wastagePercent),
-                  goldRate: parseFloat(goldRate),
-                },
+                estimate: estimateData,
               });
             }}
           >
@@ -438,27 +435,6 @@ export default function EstimateScreen({ navigation, route }) {
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.transferBtn, { backgroundColor: "#1e3d59", marginTop: 10 }]}
-            onPress={() => {
-              if (!itemName || !weight || !goldRate) {
-                Alert.alert("Error", "Please fill Item Name, Weight, and Gold Rate");
-                return;
-              }
-              navigation.navigate("B2BCalculationPage", {
-                previewData: {
-                  itemName,
-                  weight: parseFloat(weight),
-                  touch: parseFloat(wastagePercent), // In B2B, wastage/touch is used
-                  ftRate: goldRate,
-                },
-              });
-            }}
-          >
-            <Text style={{ color: "#fff", fontWeight: "bold" }}>
-              Transfer to B2B
-            </Text>
-          </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.billHistoryBtn}
