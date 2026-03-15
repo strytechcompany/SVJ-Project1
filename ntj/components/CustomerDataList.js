@@ -12,6 +12,7 @@ import {
   Platform,
   Animated,
   Image,
+  Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
@@ -168,9 +169,10 @@ const getRowImageRaw = (row) =>
     handleEdit,
     handleDelete,
     isOverdue,
+    handleImageClick,
   }) => {
   const opacityValue = useRef(new Animated.Value(1)).current;
-  const isDealerCard = String(item.customerType || "").toUpperCase() === "DEALER";
+  const isDealerCard = ["DEALER", "SUPPLIER"].includes(String(item.customerType || "").toUpperCase());
 
   const oldBalance = Number(item.oldBalance || 0);
   const advanceBalance = Number(item.advanceBalance || 0);
@@ -225,11 +227,11 @@ const getRowImageRaw = (row) =>
 
   const customerId = item.customerId || item.id;
   const phoneNumber = item.customerNumber || item.phone || "";
-  const imageUri = "";
+  const imageUri = normalizeImageUri(getRowImageRaw(item));
 
   // 🔍 Debug: show imageUri for dealer card
   if (isDealerCard) {
-    console.log(`📷 CustomerCard "${item.customerName || item.name}" imageUri length: ${imageUri?.length || 0} | item.image: ${item.image?.length || 0} | item.receiptImage: ${item.receiptImage?.length || 0}`);
+    console.log(`📷 CustomerCard "${item.customerName || item.name}" imageUri length: ${imageUri?.length || 0}`);
   }
 
   if (isDealerCard) {
@@ -305,6 +307,19 @@ const getRowImageRaw = (row) =>
                     </Animated.Text>
                   </View>
                 </View>
+              </View>
+
+              {/* Dealer Image Display */}
+              <View style={styles.customerDataRightImageWrap}>
+                {imageUri ? (
+                  <TouchableOpacity onPress={() => handleImageClick?.(imageUri)}>
+                    <Image source={{ uri: imageUri }} style={styles.customerDataRightImage} />
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.customerDataRightImagePlaceholder}>
+                    <Icon name="image-off-outline" size={32} color="#ccc" />
+                  </View>
+                )}
               </View>
             </View>
 
@@ -422,6 +437,11 @@ export default function CustomerMasterList({ navigation, route }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ALL");
   const [reminderCount, setReminderCount] = useState(0);
+  const [selectedImage, setSelectedImage] = useState(null);
+
+  const handleImageClick = (uri) => {
+    setSelectedImage(uri);
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -616,9 +636,16 @@ export default function CustomerMasterList({ navigation, route }) {
           dealer.advanceBalance,
           0,
         );
+        const latestImageRow = matchedRows.find(
+          (row) => row.receiptImage || row.image || row.proofImage,
+        );
+
         return {
           oldBalance: Number.isFinite(resolvedOB) ? resolvedOB : 0,
           advanceBalance: Number.isFinite(resolvedAB) ? resolvedAB : 0,
+          latestTransactionImage: latestImageRow
+            ? latestImageRow.receiptImage || latestImageRow.image || latestImageRow.proofImage
+            : "",
           updatedAt:
             latestBalanceRow.updatedAt ||
             latestBalanceRow.createdAt ||
@@ -707,6 +734,7 @@ export default function CustomerMasterList({ navigation, route }) {
           shopName: dealer.shopName || "No Shop Name",
           oldBalance: resolvedOldBalance.toFixed(3),
           advanceBalance: resolvedAdvanceBalance.toFixed(3),
+          latestTransactionImage: latestSnapshot.latestTransactionImage,
           updatedAt: latestSnapshot.updatedAt || dealer.updatedAt || new Date().toISOString(),
         });
       });
@@ -845,6 +873,7 @@ export default function CustomerMasterList({ navigation, route }) {
         handleEdit={handleEdit}
         handleDelete={handleDelete}
         isOverdue={Boolean(item.isOverdueReminder)}
+        handleImageClick={handleImageClick}
       />
     );
   };
@@ -929,8 +958,32 @@ export default function CustomerMasterList({ navigation, route }) {
 
       {/* FLOATING ADD BUTTON */}
       <TouchableOpacity style={styles.addBtn} onPress={handleAdd}>
-        <Icon name="plus" size={28} color="#fff" />
+        <Icon name="plus" size={32} color="#fff" />
       </TouchableOpacity>
+
+      {/* Full Screen Image Modal */}
+      {selectedImage && (
+        <Modal
+          visible={!!selectedImage}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setSelectedImage(null)}
+        >
+          <View style={styles.dealerImagePreviewOverlay}>
+            <Image
+              source={{ uri: selectedImage }}
+              style={styles.dealerImagePreviewImage}
+              resizeMode="contain"
+            />
+            <TouchableOpacity
+              style={styles.dealerImagePreviewCloseBtn}
+              onPress={() => setSelectedImage(null)}
+            >
+              <Icon name="close" size={32} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
