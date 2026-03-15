@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
@@ -136,14 +135,14 @@ export default function CreateTransaction({ navigation, route }) {
   const [savedGstList, setSavedGstList] = useState([]);
   const [showSavedGstModal, setShowSavedGstModal] = useState(false);
 
-  // ✅ Load latest B2C GST settings from DB whenever page is focused
+  // âœ… Load latest B2C GST settings from DB whenever page is focused
   useFocusEffect(
     useCallback(() => {
       const fetchLatestGstSettings = async () => {
         try {
           const response = await fetch(`${base_url}/gst`);
           const data = await response.json();
-          const latestB2C = data.filter((item) => item.type === "B2C")[0];
+          const latestB2C = data.find((item) => item.type === "B2C");
 
           if (latestB2C) {
             setGstEnabled(latestB2C.enabled || false);
@@ -151,7 +150,7 @@ export default function CreateTransaction({ navigation, route }) {
             setCgst(latestB2C.cgst || "");
             setIgst(latestB2C.igst || "");
 
-            // ✅ Load saved checkbox states from AsyncStorage
+            // âœ… Load saved checkbox states from AsyncStorage
             const savedSgst = await AsyncStorage.getItem("b2c_sgst_enabled");
             const savedCgst = await AsyncStorage.getItem("b2c_cgst_enabled");
             const savedIgst = await AsyncStorage.getItem("b2c_igst_enabled");
@@ -176,11 +175,27 @@ export default function CreateTransaction({ navigation, route }) {
           console.error("Failed to fetch GST settings in B2C", error);
         }
       };
+
+      const fetchNextInvoiceNo = async () => {
+        try {
+          const res = await fetch(`${base_url}/billSummary/nextBillNo?billType=B2C`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.nextBillNo) {
+              setInvoiceNo(data.nextBillNo);
+            }
+          }
+        } catch (error) {
+          console.error("Failed to fetch next invoice number:", error);
+        }
+      };
+
       fetchLatestGstSettings();
+      fetchNextInvoiceNo();
     }, [])
   );
 
-  // ✅ Auto-calculate Total GST %
+  // âœ… Auto-calculate Total GST %
   useEffect(() => {
     if (gstEnabled) {
       const s = parseFloat(sgst) || 0;
@@ -199,7 +214,7 @@ export default function CreateTransaction({ navigation, route }) {
       try {
         // Priority 1: Use rate passed from navigation
         if (passedGoldRate) {
-          console.log("✅ Using gold rate from HomeScreen:", passedGoldRate);
+          console.log("âœ… Using gold rate from HomeScreen:", passedGoldRate);
           setRate(passedGoldRate);
           return;
         }
@@ -207,7 +222,7 @@ export default function CreateTransaction({ navigation, route }) {
         // Priority 2: Load from AsyncStorage
         const storedRate = await AsyncStorage.getItem("goldRate");
         if (storedRate) {
-          console.log("✅ Using stored gold rate:", storedRate);
+          console.log("âœ… Using stored gold rate:", storedRate);
           setRate(storedRate);
         }
       } catch (error) {
@@ -221,7 +236,7 @@ export default function CreateTransaction({ navigation, route }) {
   const [items, setItems] = useState([]);
 
   useEffect(() => {
-    console.log("🟢 ITEMS STATE:", items);
+    console.log("ðŸŸ¢ ITEMS STATE:", items);
   }, [items]);
 
   // ---------------- ITEM LIST STATES ----------------
@@ -242,7 +257,7 @@ export default function CreateTransaction({ navigation, route }) {
     const unsubscribe = navigation.addListener('focus', () => {
       const estimate = route?.params?.estimate;
       if (estimate) {
-        console.log("📥 Received estimate:", estimate);
+        console.log("ðŸ“¥ Received estimate:", estimate);
 
         if (estimate.items && Array.isArray(estimate.items) && estimate.items.length > 0) {
           // Handle multiple items
@@ -300,7 +315,7 @@ export default function CreateTransaction({ navigation, route }) {
         }
 
         setShowItems(true);
-        console.log("✅ Estimate items handled");
+        console.log("âœ… Estimate items handled");
       }
     });
     return unsubscribe;
@@ -312,7 +327,7 @@ export default function CreateTransaction({ navigation, route }) {
       const t = route.params.editTransaction;
       const c = route.params.editCustomer;
 
-      console.log("📝 Editing Transaction:", t);
+      console.log("ðŸ“ Editing Transaction:", t);
 
       // Populate Customer
       if (c) {
@@ -402,13 +417,13 @@ export default function CreateTransaction({ navigation, route }) {
     }
   }, [route.params?.editTransaction]);
 
-  // ✅ Fetch B2C customers from API
+  // âœ… Fetch B2C customers from API
   useEffect(() => {
     fetchB2CCustomers();
     fetchRecentNames();
   }, []);
 
-  // ✅ Handle navigation params to update customers list after creating new customer
+  // âœ… Handle navigation params to update customers list after creating new customer
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       const updatedCustomers = route.params?.customers;
@@ -421,7 +436,7 @@ export default function CreateTransaction({ navigation, route }) {
 
   const fetchB2CCustomers = async () => {
     try {
-      console.log("🔍 Fetching from:", `${base_url}/customersB2C`);
+      console.log("ðŸ” Fetching from:", `${base_url}/customersB2C`);
 
       const response = await fetch(`${base_url}/customersB2C`);
 
@@ -442,9 +457,9 @@ export default function CreateTransaction({ navigation, route }) {
       }));
 
       setB2cCustomers(formattedCustomers);
-      console.log("✅ Fetched B2C Customers:", formattedCustomers);
+      console.log("âœ… Fetched B2C Customers:", formattedCustomers);
     } catch (error) {
-      console.error("❌ Error fetching B2C customers:", error);
+      console.error("âŒ Error fetching B2C customers:", error);
       Alert.alert(
         "Error",
         `Failed to load customers: ${error.message}\n\nMake sure:\n1. Backend server is running\n2. Check base_url in config.js`
@@ -481,16 +496,16 @@ export default function CreateTransaction({ navigation, route }) {
   };
 
   const handleRefresh = async () => {
-    console.log("🔄 Refreshing data...");
+    console.log("ðŸ”„ Refreshing data...");
     await fetchB2CCustomers();
     await fetchRecentNames();
     console.log("Success", "Data refreshed from database");
   };
 
-  // ✅ Fetch Stock Master from API
+  // âœ… Fetch Stock Master from API
   const fetchStockMaster = async () => {
     try {
-      console.log("🔍 Fetching stock from:", `${base_url}/stockMaster`);
+      console.log("ðŸ” Fetching stock from:", `${base_url}/stockMaster`);
 
       const response = await fetch(`${base_url}/stockMaster`);
 
@@ -511,9 +526,9 @@ export default function CreateTransaction({ navigation, route }) {
       }));
 
       setItemList(formattedStock);
-      console.log("✅ Fetched Stock Master:", formattedStock);
+      console.log("âœ… Fetched Stock Master:", formattedStock);
     } catch (error) {
-      console.error("❌ Error fetching stock master:", error);
+      console.error("âŒ Error fetching stock master:", error);
       Alert.alert("Error", `Failed to load stock: ${error.message}`);
     }
   };
@@ -526,10 +541,10 @@ export default function CreateTransaction({ navigation, route }) {
     }
   }, [showItems]);
 
-  // ✅ Fetch Item Entry Items from API
+  // âœ… Fetch Item Entry Items from API
   const fetchItemEntryItems = async () => {
     try {
-      console.log("🔍 Fetching item entry items from:", `${base_url}/items`);
+      console.log("ðŸ” Fetching item entry items from:", `${base_url}/items`);
 
       const response = await fetch(`${base_url}/items`);
 
@@ -552,14 +567,14 @@ export default function CreateTransaction({ navigation, route }) {
       }));
 
       setItemEntryItems(formattedItems);
-      console.log("✅ Fetched Item Entry Items:", formattedItems);
+      console.log("âœ… Fetched Item Entry Items:", formattedItems);
     } catch (error) {
-      console.error("❌ Error fetching item entry items:", error);
+      console.error("âŒ Error fetching item entry items:", error);
       Alert.alert("Error", `Failed to load item entry items: ${error.message}`);
     }
   };
 
-  // ✅ AUTO CALCULATE MODIFIED WEIGHT - Runs when weight changes
+  // âœ… AUTO CALCULATE MODIFIED WEIGHT - Runs when weight changes
   useEffect(() => {
     if (selectedItem && weight) {
       const wt = parseFloat(weight) || 0;
@@ -570,7 +585,7 @@ export default function CreateTransaction({ navigation, route }) {
     }
   }, [weight, selectedItem]);
 
-  // 🔢 Auto calculate W/M = Weight × Touch
+  // ðŸ”¢ Auto calculate W/M = Weight Ã— Touch
   useEffect(() => {
     const wt = parseFloat(weight) || 0;
     const t = parseFloat(touch) || 0;
@@ -583,7 +598,7 @@ export default function CreateTransaction({ navigation, route }) {
     }
   }, [weight, touch]);
 
-  // ✅ Auto-calculate GST Amount for the current item
+  // âœ… Auto-calculate GST Amount for the current item
   useEffect(() => {
     if (gstEnabled) {
       const wt = parseFloat(weight) || 0;
@@ -599,7 +614,7 @@ export default function CreateTransaction({ navigation, route }) {
     }
   }, [weight, wastage, rate, gstPercentage, gstEnabled]);
 
-  // 🔢 Auto calculate Receipt Pure = Weight × Result × Touch
+  // ðŸ”¢ Auto calculate Receipt Pure = Weight Ã— Result Ã— Touch
   useEffect(() => {
     const wt = parseFloat(receiptWeight) || 0;
     const r = parseFloat(receiptResult) || 0;
@@ -748,8 +763,8 @@ export default function CreateTransaction({ navigation, route }) {
 
   // ---------------- ADD ITEM (FIXED VERSION) ----------------
   const addRow = async () => {
-    console.log("🔵 ADD ITEM - Function called");
-    console.log("🔍 Current values:", {
+    console.log("ðŸ”µ ADD ITEM - Function called");
+    console.log("ðŸ” Current values:", {
       itemName,
       weight,
       rate,
@@ -757,28 +772,28 @@ export default function CreateTransaction({ navigation, route }) {
       wastage,
     });
 
-    // ✅ FIX 1: Better validation
+    // âœ… FIX 1: Better validation
     if (!itemName || !itemName.trim()) {
-      console.log("❌ ADD ITEM - Missing item name");
+      console.log("âŒ ADD ITEM - Missing item name");
       Alert.alert("Required", "Enter Item Name");
       return;
     }
 
     if (!weight || parseFloat(weight) <= 0) {
-      console.log("❌ ADD ITEM - Invalid weight");
+      console.log("âŒ ADD ITEM - Invalid weight");
       Alert.alert("Required", "Enter valid Weight");
       return;
     }
 
     if (!rate || parseFloat(rate) <= 0) {
-      console.log("❌ ADD ITEM - Invalid rate");
+      console.log("âŒ ADD ITEM - Invalid rate");
       Alert.alert("Required", "Enter valid Rate");
       return;
     }
 
-    // ✅ FIX 2: Check if item is selected
+    // âœ… FIX 2: Check if item is selected
     if (!selectedItem) {
-      console.log("❌ ADD ITEM - No item selected from stock");
+      console.log("âŒ ADD ITEM - No item selected from stock");
       Alert.alert("Error", "Please select an item from the stock list");
       return;
     }
@@ -793,7 +808,7 @@ export default function CreateTransaction({ navigation, route }) {
     const gst = calcGST(total, gstPercentage, gstEnabled);
     const final = calcFinal(total, gst);
 
-    console.log("📊 ADD ITEM - Calculated values:", {
+    console.log("ðŸ“Š ADD ITEM - Calculated values:", {
       weight: wt,
       touch: t,
       wastage: w,
@@ -803,11 +818,11 @@ export default function CreateTransaction({ navigation, route }) {
       final,
     });
 
-    console.log("🔍 ADD ITEM - Selected item:", selectedItem);
+    console.log("ðŸ” ADD ITEM - Selected item:", selectedItem);
 
     if (selectedItem.weight < wt) {
       console.log(
-        `❌ ADD ITEM - Insufficient stock. Available: ${selectedItem.weight}, Required: ${wt}`
+        `âŒ ADD ITEM - Insufficient stock. Available: ${selectedItem.weight}, Required: ${wt}`
       );
       Alert.alert(
         "Insufficient Stock",
@@ -820,14 +835,14 @@ export default function CreateTransaction({ navigation, route }) {
 
     const newWeight = selectedItem.weight - wt;
     console.log(
-      `📉 ADD ITEM - Stock will be updated from ${selectedItem.weight
+      `ðŸ“‰ ADD ITEM - Stock will be updated from ${selectedItem.weight
       }g to ${newWeight.toFixed(3)}g`
     );
 
     try {
-      console.log("🚀 ADD ITEM - Starting API calls...");
+      console.log("ðŸš€ ADD ITEM - Starting API calls...");
 
-      // 1️⃣ SAVE ITEM TO AddItem DATABASE
+      // 1ï¸âƒ£ SAVE ITEM TO AddItem DATABASE
       const addItemPayload = {
         customerName: customerName,
         invoiceNo: invoiceNo || "N/A",
@@ -844,7 +859,7 @@ export default function CreateTransaction({ navigation, route }) {
         date: date.split("/").reverse().join("-"),
       };
 
-      console.log("📤 ADD ITEM - Saving to AddItem DB:", addItemPayload);
+      console.log("ðŸ“¤ ADD ITEM - Saving to AddItem DB:", addItemPayload);
 
       const addItemResponse = await fetch(`${base_url}/addItem`, {
         method: "POST",
@@ -857,7 +872,7 @@ export default function CreateTransaction({ navigation, route }) {
       if (!addItemResponse.ok) {
         const errorText = await addItemResponse.text();
         console.error(
-          `❌ ADD ITEM - Failed to save. Status: ${addItemResponse.status}`,
+          `âŒ ADD ITEM - Failed to save. Status: ${addItemResponse.status}`,
           errorText
         );
         throw new Error(
@@ -866,9 +881,9 @@ export default function CreateTransaction({ navigation, route }) {
       }
 
       const savedItem = await addItemResponse.json();
-      console.log("✅ ADD ITEM - Item saved to AddItem DB:", savedItem);
+      console.log("âœ… ADD ITEM - Item saved to AddItem DB:", savedItem);
 
-      // 2️⃣ UPDATE STOCK IN DATABASE
+      // 2ï¸âƒ£ UPDATE STOCK IN DATABASE
       const stockUpdatePayload = {
         itemName: selectedItem.itemName,
         weight: parseFloat(newWeight.toFixed(3)),
@@ -878,7 +893,7 @@ export default function CreateTransaction({ navigation, route }) {
         pure: selectedItem.pure,
       };
 
-      console.log("📤 ADD ITEM - Updating stock:", stockUpdatePayload);
+      console.log("ðŸ“¤ ADD ITEM - Updating stock:", stockUpdatePayload);
 
       const stockResponse = await fetch(
         `${base_url}/stockMaster/${selectedItem.id}`,
@@ -894,7 +909,7 @@ export default function CreateTransaction({ navigation, route }) {
       if (!stockResponse.ok) {
         const errorText = await stockResponse.text();
         console.error(
-          `❌ ADD ITEM - Failed to update stock. Status: ${stockResponse.status}`,
+          `âŒ ADD ITEM - Failed to update stock. Status: ${stockResponse.status}`,
           errorText
         );
         throw new Error(
@@ -903,7 +918,7 @@ export default function CreateTransaction({ navigation, route }) {
       }
 
       const updatedStock = await stockResponse.json();
-      console.log("✅ ADD ITEM - Stock updated in DB:", updatedStock);
+      console.log("âœ… ADD ITEM - Stock updated in DB:", updatedStock);
 
       const newItem = {
         itemName,
@@ -920,15 +935,15 @@ export default function CreateTransaction({ navigation, route }) {
         gstEnabled,
       };
 
-      console.log("📝 ADD ITEM - Adding to local state:", newItem);
+      console.log("ðŸ“ ADD ITEM - Adding to local state:", newItem);
 
       setItems((prev) => {
         const updated = [...prev, newItem];
         console.log(
-          "✅ ADD ITEM - Items state updated. Total items:",
+          "âœ… ADD ITEM - Items state updated. Total items:",
           updated.length
         );
-        console.log("✅ ADD ITEM - Current items:", updated);
+        console.log("âœ… ADD ITEM - Current items:", updated);
         return updated;
       });
 
@@ -940,8 +955,8 @@ export default function CreateTransaction({ navigation, route }) {
         )
       );
 
-      // 4️⃣ CLEAR FORM - ✅ FIX 3: Keep previous rate
-      console.log("🧹 ADD ITEM - Clearing form fields");
+      // 4ï¸âƒ£ CLEAR FORM - âœ… FIX 3: Keep previous rate
+      console.log("ðŸ§¹ ADD ITEM - Clearing form fields");
       setItemName("");
       setDisplayItemName("");
       setWeight("");
@@ -955,11 +970,11 @@ export default function CreateTransaction({ navigation, route }) {
       // Save the rate to AsyncStorage so HomeScreen reflects it
       await AsyncStorage.setItem("goldRate", r.toString());
 
-      console.log("✅ ADD ITEM - Process completed successfully!");
+      console.log("âœ… ADD ITEM - Process completed successfully!");
       console.log("Success", "Item added successfully!");
     } catch (error) {
-      console.error("❌ ADD ITEM - Error occurred:", error);
-      console.error("❌ ADD ITEM - Error details:", {
+      console.error("âŒ ADD ITEM - Error occurred:", error);
+      console.error("âŒ ADD ITEM - Error details:", {
         message: error.message,
         stack: error.stack,
       });
@@ -1027,7 +1042,7 @@ export default function CreateTransaction({ navigation, route }) {
                 }
               }
             } catch (error) {
-              console.error("❌ Error deleting item:", error);
+              console.error("âŒ Error deleting item:", error);
               Alert.alert("Error", "Failed to delete item");
             }
           },
@@ -1142,1268 +1157,4 @@ export default function CreateTransaction({ navigation, route }) {
   // ---------------- ITEM NAME HANDLING ----------------
   const handleItemNameChange = (text) => {
     setItemName(text);
-    // Only show items marked as 'issue' type in the Item Entry list
-    const issueStockNames = new Set(
-      itemEntryItems.filter((e) => e.issue === true).map((e) => e.stockName)
-    );
-    const issueOnlyItems = itemList.filter((item) => issueStockNames.has(item.itemName));
-
-    if (text) {
-      const filtered = issueOnlyItems.filter((item) =>
-        item.itemName.toLowerCase().includes(text.toLowerCase())
-      );
-      setFilteredItems(filtered);
-      setShowItemDropdown(true);
-    } else {
-      setFilteredItems(issueOnlyItems);
-      setShowItemDropdown(true);
-      setSelectedItem(null);
-      setModifiedWeight("");
-      setTouch("");
-    }
-  };
-
-  const selectItem = (item) => {
-    setItemName(item.itemName);
-    setSelectedItem({ ...item, weight: Number(item.weight) });
-    setWeight("");
-
-    // Find matching item in itemEntryItems by stockName
-    const matchingItemEntry = itemEntryItems.find(
-      (entry) => entry.stockName === item.itemName
-    );
-
-    // Auto-fill TOUCH with percentage from ItemEntry if found, else use pure value
-    const touchValue = matchingItemEntry
-      ? matchingItemEntry.percentage.toString()
-      : item.pure.toString();
-
-    const detailValue = matchingItemEntry ? matchingItemEntry.itemDetails : item.itemName;
-
-    setTouch(touchValue);
-    setDisplayItemName(detailValue);
-    setModifiedWeight("");
-    setShowItemDropdown(false);
-  };
-
-  const handleAddFromDropdown = async (item) => {
-    // Determine touch for this specific item
-    const matchingItemEntry = itemEntryItems.find(
-      (entry) => entry.stockName === item.itemName
-    );
-    const touchVal = matchingItemEntry
-      ? matchingItemEntry.percentage
-      : parseFloat(item.pure || 0);
-
-    // Basic validation for weight and rate as they are external to the item object
-    if (!weight || parseFloat(weight) <= 0) {
-      Alert.alert("Required", "Please enter weight first");
-      return;
-    }
-    if (!rate || parseFloat(rate) <= 0) {
-      Alert.alert("Required", "Please enter rate");
-      return;
-    }
-
-    // Set states so addRow can proceed with correct item context
-    setItemName(item.itemName);
-    setSelectedItem({ ...item, weight: Number(item.weight) });
-    setTouch(touchVal.toString());
-    setDisplayItemName(matchingItemEntry ? matchingItemEntry.itemDetails : item.itemName);
-
-    // Since setState is async, we call addRow with a small delay or refactor it.
-    // To keep it simple and reliable, we'll trigger it next tick.
-    setTimeout(() => {
-      addRow();
-    }, 100);
-  };
-
-  // ---------------- CUSTOMER SUBMIT ----------------
-  const handleCustomerSubmit = async () => {
-    if (!customerName || !phone) {
-      Alert.alert("Required", "Enter Customer Name & Phone");
-      return;
-    }
-
-    try {
-      console.log("Submitting customer...", {
-        customerName,
-        phone,
-        address,
-        date,
-        invoiceNo,
-      });
-
-      const response = await fetch(`${base_url}/B2Ccal`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          customerName,
-          Address: address,
-          Phone: phone,
-          Date: date.split("/").reverse().join("-"),
-          InvoiceNumber: invoiceNo || "N/A",
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`);
-      }
-
-      const savedCustomer = await response.json();
-      console.log("✅ Customer saved:", savedCustomer);
-
-      // Show items section after successful save
-      setShowItems(true);
-    } catch (error) {
-      console.error("❌ Error saving customer:", error);
-      Alert.alert("Error", `Failed to save customer: ${error.message}`);
-    }
-  };
-
-  const calculateReport = () => {
-    let totalReceipt = 0;
-    let totalReceiptPure = 0;
-
-    items.forEach((item) => {
-      totalReceipt += Number(item.weight || 0);
-      totalReceiptPure +=
-        (Number(item.weight || 0) * Number(item.touch || 0)) / 100;
-    });
-
-    const totalOldGoldAmount = b2cReceiptItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const totalItemFinal = items.reduce((sum, i) => sum + Number(i.final || 0), 0);
-    const totalCashAmount = cashTable.reduce((sum, c) => sum + Number(c.rupees || 0), 0);
-    const totalCashPure = cashTable.reduce((sum, c) => sum + Number(c.pure || 0), 0);
-
-    return {
-      totalIssue: "0.000",
-      totalIssuePure: "0.000",
-      totalReceipt: totalReceipt.toFixed(3),
-      totalReceiptPure: totalReceiptPure.toFixed(3),
-      cash: (totalItemFinal - totalOldGoldAmount).toFixed(2), // bill amount
-      cashReceived: totalCashAmount.toFixed(2),
-      cashPure: totalCashPure.toFixed(3),
-      oldGoldAmount: totalOldGoldAmount.toFixed(2), // Added for reference
-    };
-  };
-
-  const formatTransactions = () => {
-    const txns = items.map((item) => ({
-      date,
-      issue: "0.000",
-      issuePure: "0.000",
-      receipt: item.weight.toFixed(3),
-      receiptPure: ((item.weight * item.touch) / 100).toFixed(3),
-      cashPure: "0.000",
-    }));
-
-    cashTable.forEach((cash) => {
-      txns.push({
-        date,
-        issue: "0.000",
-        issuePure: "0.000",
-        receipt: "0.000",
-        receiptPure: "0.000",
-        cashPure: Number(cash.pure || 0).toFixed(3),
-      });
-    });
-
-    return txns;
-  };
-
-  // ---------------- FINAL SUBMIT ----------------
-  const handleFinalSubmit = async () => {
-    if (items.length === 0) {
-      Alert.alert("Error", "No items added");
-      return;
-    }
-
-    const reportData = calculateReport();
-    const transactionData = formatTransactions();
-    let generatedBillNo = invoiceNo;
-
-    console.log("FINAL ITEMS 👉", items);
-    console.log("FINAL REPORT 👉", reportData);
-    console.log("FINAL TXNS 👉", transactionData);
-
-    // Unified Transactional Save
-    try {
-      const editBill = route.params?.editTransaction;
-      const isEditMode = Boolean(editBill?._id);
-      const customer = b2cCustomers.find(
-        (c) =>
-          (c.customerName === customerName || c.name === customerName) &&
-          (c.phone === phone || c.customerNumber === phone)
-      );
-      const resolvedCustomer =
-        customer ||
-        selectedCust ||
-        b2cCustomers.find((c) => c.phone === phone) ||
-        b2cCustomers.find((c) => c.customerName === customerName || c.name === customerName) ||
-        null;
-
-      // Pre-calculate all values at top level so they are in scope for transactionRecord
-      const ob = parseFloat(resolvedCustomer?.oldBalance || 0);
-      const ab = parseFloat(resolvedCustomer?.advanceBalance || 0);
-      const issuePureTotal = items.reduce((sum, it) => sum + ((parseFloat(it.weight || 0) * parseFloat(it.touch || 0)) / 100), 0);
-      const issueTotalWeight = items.reduce((sum, it) => sum + parseFloat(it.weight || 0), 0);
-      const receiptPureValue = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
-      const cashPureVal = cashTable.reduce((sum, row) => sum + parseFloat(row.pure || 0), 0);
-      const cashReceivedAmount = cashTable.reduce((sum, row) => sum + parseFloat(row.rupees || 0), 0);
-      let finalBalanceForRecord = 0;
-      const savedCustomerId =
-        resolvedCustomer?.id ||
-        resolvedCustomer?._id ||
-        resolvedCustomer?.customerId ||
-        "";
-
-      // 1. Update Customer Balance
-      if (resolvedCustomer?.id) {
-        const currentNet = ob - ab;
-        const newNet = currentNet + issuePureTotal - receiptPureValue - cashPureVal;
-
-        let newCustomerOB = 0, newCustomerAB = 0;
-        if (newNet >= 0) { newCustomerOB = newNet; newCustomerAB = 0; }
-        else { newCustomerOB = 0; newCustomerAB = Math.abs(newNet); }
-
-        finalBalanceForRecord = newNet;
-
-        const updateResponse = await fetch(`${base_url}/customersB2C/${resolvedCustomer.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            oldBalance: newCustomerOB.toFixed(3),
-            advanceBalance: newCustomerAB.toFixed(3),
-          }),
-        });
-
-        if (!updateResponse.ok) throw new Error("Failed to update customer balance.");
-        console.log("✅ Customer balance updated successfully");
-      }
-
-      // 2. Save Transaction History — all required schema fields included
-      const transactionRecord = {
-        customerName,
-        customerId: savedCustomerId,
-        customerType: 'B2C',
-        type: 'B2C',
-        // Required by Transaction MongoDB schema:
-        issueTotal: Number(issueTotalWeight.toFixed(3)),
-        issuePure: Number(issuePureTotal.toFixed(3)),
-        oldBalance: Number(ob.toFixed(3)),
-        receiptPure: Number(receiptPureValue.toFixed(3)),
-        cashPure: Number(cashPureVal.toFixed(3)),
-        balance: Number(finalBalanceForRecord.toFixed(3)),
-        advBal: Number(ab.toFixed(3)),
-        // Extra B2C fields:
-        date: date.split("/").reverse().join("-"),
-        totalAmount: parseFloat(reportData.cash || 0),
-        items: items,
-        receiptItems: b2cReceiptItems,
-        cashTable: cashTable,
-        gst: gstEnabled ? {
-          sgst, cgst, igst,
-          total: ((isSgstEnabled ? parseFloat(sgst) || 0 : 0) + (isCgstEnabled ? parseFloat(cgst) || 0 : 0) + (isIgstEnabled ? parseFloat(igst) || 0 : 0)).toString(),
-          amount: items.reduce((sum, item) => sum + (parseFloat(item.gst) || 0), 0).toFixed(2)
-        } : null,
-        description: `B2C Bill - ${items.length} items`
-      };
-
-      if (!isEditMode) {
-        const saveResponse = await fetch(`${base_url}/transactions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(transactionRecord),
-        });
-
-        if (!saveResponse.ok) {
-          const errText = await saveResponse.text();
-          throw new Error(`Failed to save transaction history: ${errText}`);
-        }
-        await saveResponse.json();
-      }
-
-      // 3. Save Full Bill Summary
-      const billSummaryData = {
-        customerId: savedCustomerId,
-        customerName: customerName,
-        customerType: "B2C",
-        date: date,
-        items: items,
-        ob: ob,
-        advBal: ab,
-        issuePure: parseFloat(reportData.totalReceiptPure),
-        receiptPure: b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0),
-        cashPure: cashPureVal,
-        currentBalance: (() => {
-          const issue = parseFloat(reportData.totalReceiptPure);
-          const receipt = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
-          return (ob - ab) + issue - receipt - cashPureVal;
-        })(),
-        issueItems: items.map(it => ({
-          name: it.displayItemName || it.itemName,
-          itemName: it.itemName,
-          displayItemName: it.displayItemName || it.itemName,
-          weight: it.weight,
-          touch: it.touch,
-          wastage: it.wastage,
-          rate: it.rate,
-          total: it.total,
-          gst: it.gst,
-          final: it.final,
-          gross: it.weight,
-          m: it.wastage ?? '-',
-          net: it.weight,
-          calc: it.touch,
-          pure: it.pure,
-        })),
-        receiptItems: b2cReceiptItems.map(it => ({
-          name: it.name,
-          weight: it.weight,
-          sub: it.sub,
-          netWeight: it.netWeight,
-          rate: it.rate,
-          amount: it.amount,
-          // Keep legacy B2B-style keys for backward compatibility
-          result: it.netWeight,
-          calc: it.touch ?? 0,
-          pure: it.netWeight,
-        })),
-        cashTable: cashTable,
-        gst: gstEnabled ? {
-          enabled: true,
-          percentage: (transactionRecord.gst?.total || "0"),
-          amount: (transactionRecord.gst?.amount || "0"),
-          sgst, cgst, igst
-        } : null,
-      };
-
-      if (isEditMode) {
-        billSummaryData.billNo = editBill.billNo || editBill.invoiceNo || "";
-        billSummaryData.invoiceNo = editBill.billNo || editBill.invoiceNo || "";
-      }
-
-      const billEndpoint = isEditMode
-        ? `${base_url}/billSummary/${editBill._id}?billType=B2C`
-        : `${base_url}/billSummary`;
-      const billMethod = isEditMode ? "PUT" : "POST";
-
-      const billRes = await fetch(billEndpoint, {
-        method: billMethod,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(billSummaryData),
-      });
-
-      if (!billRes.ok) throw new Error("Failed to save full bill summary.");
-      const savedBillSummary = await billRes.json();
-      generatedBillNo = savedBillSummary?.billNo || savedBillSummary?.invoiceNo || generatedBillNo;
-      setInvoiceNo(generatedBillNo);
-      console.log("✅ Entire B2C bill saved successfully");
-
-    } catch (error) {
-      console.error("❌ Error during final save:", error);
-      Alert.alert("Save Error", error.message);
-      return;
-    }
-
-    const currentCustomer = b2cCustomers.find(c => c.customerName === customerName && c.phone === phone);
-
-    navigation.navigate("BillPreview", {
-      customer: {
-        name: customerName,
-        shop: "Easy-gold",
-        id: currentCustomer?.id || currentCustomer?._id || "-",
-        customerId: currentCustomer?.id || currentCustomer?._id || "-",
-        billNo: generatedBillNo || "-",
-        invoiceNo: generatedBillNo || "-",
-        phone,
-        oldBalance: currentCustomer ? (parseFloat(currentCustomer.oldBalance) || 0).toFixed(3) : "0.000",
-        advanceBalance: currentCustomer ? (parseFloat(currentCustomer.advanceBalance) || 0).toFixed(3) : "0.000",
-        type: transactionType,
-        email: "-",
-        date: date,
-        goldRate: rate,
-        autoShare: true,
-      },
-      report: reportData,
-      transactions: transactionData,
-      items: items, // Pass items for B2C bill preview
-      receiptItems: b2cReceiptItems, // Pass Old Gold items
-      cashTable: cashTable,
-      gst: gstEnabled ? {
-        enabled: gstEnabled,
-        percentage: (
-          (isSgstEnabled ? (parseFloat(sgst) || 0) : 0) +
-          (isCgstEnabled ? (parseFloat(cgst) || 0) : 0) +
-          (isIgstEnabled ? (parseFloat(igst) || 0) : 0)
-        ).toString(),
-        amount: items.reduce((sum, item) => sum + (parseFloat(item.gst) || 0), 0).toFixed(2),
-        sgst: isSgstEnabled ? sgst : "0",
-        cgst: isCgstEnabled ? cgst : "0",
-        igst: isIgstEnabled ? igst : "0",
-        showInBill: true,
-      } : {
-        enabled: false,
-        sgst: "0",
-        cgst: "0",
-        igst: "0"
-      },
-      summary: (() => {
-        const customer = b2cCustomers.find(c => c.customerName === customerName && c.phone === phone);
-        const ob = parseFloat(customer?.oldBalance || 0);
-        const ab = parseFloat(customer?.advanceBalance || 0);
-        const issue = parseFloat(reportData.totalReceiptPure);
-        const receipt = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
-        const cashPure = cashTable.reduce((sum, row) => sum + parseFloat(row.pure || 0), 0);
-        const current = (ob - ab) + issue - receipt - cashPure;
-
-        return {
-          ob: ob.toFixed(3),
-          ab: ab.toFixed(3),
-          issue: issue.toFixed(3),
-          receipt: receipt.toFixed(3),
-          cash: cashPure.toFixed(3),
-          cashAmount: cashTable.reduce((sum, row) => sum + parseFloat(row.rupees || 0), 0).toFixed(2),
-          current: current.toFixed(3)
-        };
-      })()
-    });
-  };
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#F5F7FA" }}>
-      {/* ✅ HEADER */}
-      <CommonHeader
-        title="B2C Cal Page"
-        backgroundColor="#2E7D32"
-        insideSafeArea
-        left={
-          <TouchableOpacity onPress={() => navigation.navigate("Home")}>
-            <Icon name="arrow-left" size={26} color="#fff" />
-          </TouchableOpacity>
-        }
-        right={
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 15 }}>
-            {route.params?.printAgain && route.params?.lastBill && (
-              <TouchableOpacity
-                onPress={() => navigation.navigate("BillPreview", route.params.lastBill)}
-              >
-                <Icon name="printer-refresh" color="#fff" size={28} />
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity onPress={() => navigation.navigate("Home")}>
-              <Icon name="home-outline" color="#fff" size={28} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() =>
-                navigation.navigate("CreateCustomerMaster", { type: "B2C", customers: b2cCustomers })
-              }
-            >
-              <Feather name="user-plus" color="#fff" size={25} />
-            </TouchableOpacity>
-          </View>
-        }
-      />
-
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
-        <ScrollView
-          contentContainerStyle={{ paddingBottom: 160 }}
-          style={styles.container}
-        >
-          {/* ---------------- CUSTOMER SELECTION (Hide when customer is selected) ---------------- */}
-          {!showItems && (
-            <View style={styles.card}>
-              <View style={styles.sectionHeader}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Icon name="account-group" size={24} />
-                  <Text style={styles.articleTitle}>Customer Details</Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
-                  <View style={{ backgroundColor: '#f0f0f0', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
-                    <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#555' }}>Inv: {invoiceNo}</Text>
-                  </View>
-                  <TouchableOpacity onPress={handleRefresh}>
-                    <Icon name="refresh" color="#000" size={30} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={styles.searchRow}>
-                <TextInput
-                  placeholder="Customers Name and Phone No...."
-                  style={styles.searchBox}
-                  value={cartSearch}
-                  onChangeText={setCartSearch}
-                />
-              </View>
-
-              <ScrollView style={{ maxHeight: 200, marginBottom: 20 }}>
-                {!cartSearch && recentNames.length > 0 && (
-                  <View>
-                    <Text style={{ fontSize: 13, color: '#888', marginBottom: 10, marginLeft: 5, fontWeight: 'bold' }}>RECENT TRANSACTIONS</Text>
-                    {b2cCustomers
-                      .filter(c => recentNames.includes(c.customerName))
-                      .map((cust, index) => {
-                        let currentBalance = Number(cust.oldBalance || 0);
-                        let advanceBalance = Number(cust.advanceBalance || 0);
-                        if (currentBalance < 0) {
-                          advanceBalance += Math.abs(currentBalance);
-                          currentBalance = 0;
-                        }
-                        return (
-                          <TouchableOpacity
-                            key={`recent-${cust.id || index}`}
-                            onPress={() => selectCustomer(cust)}
-                            style={[styles.listItem, { borderLeftWidth: 4, borderLeftColor: '#2E7D32' }]}
-                          >
-                            <View>
-                              <Text style={styles.listItemText}>
-                                <Text style={{ fontWeight: 'bold', color: '#000' }}>{cust.customerName}</Text> | P : {cust.phone}
-                              </Text>
-                              <Text style={styles.balanceText}>
-                                OB: {Number(currentBalance || 0).toFixed(3)}g {advanceBalance > 0 ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g` : ''}
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    <Text style={{ fontSize: 13, color: '#888', marginVertical: 10, marginLeft: 5, fontWeight: 'bold' }}>ALL CUSTOMERS</Text>
-                  </View>
-                )}
-                {filteredCartCustomers.length > 0 ? (
-                  filteredCartCustomers.map((cust, index) => {
-                    let currentBalance = Number(cust.oldBalance || 0);
-                    let advanceBalance = Number(cust.advanceBalance || 0);
-
-                    if (currentBalance < 0) {
-                      advanceBalance += Math.abs(currentBalance);
-                      currentBalance = 0;
-                    }
-
-                    return (
-                      <TouchableOpacity
-                        key={cust.id || index}
-                        onPress={() => selectCustomer(cust)}
-                        style={styles.listItem}
-                      >
-                        <View>
-                          <Text style={styles.listItemText}>
-                            <Text style={{ fontWeight: 'bold', color: '#000' }}>{cust.customerName}</Text> | P : {cust.phone}
-                          </Text>
-                          <Text style={styles.balanceText}>
-                            OB: {Number(currentBalance || 0).toFixed(3)}g {advanceBalance > 0 ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g` : ''}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })
-                ) : (
-                  <Text style={styles.infoText}>No customers found</Text>
-                )}
-              </ScrollView>
-            </View>
-          )}
-
-          {/* ---------------- SELECTED CUSTOMER INFO (Show when customer is selected) ---------------- */}
-          {showItems && (
-            <View style={styles.card}>
-              <View style={styles.sectionHeader}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Icon name="account-check" size={24} color="#2E7D32" />
-                  <Text style={[styles.articleTitle, { color: '#2E7D32' }]}>Selected Customer</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.changeButton}
-                  onPress={() => {
-                    setShowItems(false);
-                    setSelectedCust(null);
-                    setCustomerName("");
-                    setPhone("");
-                    setAddress("");
-                    setOldBalance("");
-                    setAdvanceBalance("");
-                    setCartSearch("");
-                  }}
-                >
-                  <Icon name="account-switch" size={20} color="#1E88E5" />
-                  <Text style={styles.changeButtonText}>Change</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={{ marginVertical: 10 }}>
-                <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{customerName}</Text>
-                <Text style={{ color: '#666', marginTop: 4 }}>Phone: {phone}</Text>
-                {address ? <Text style={{ color: '#666' }}>Address: {address}</Text> : null}
-                {oldBalance ? <Text style={{ color: '#666' }}>OB: {oldBalance}</Text> : null}
-                {advanceBalance ? <Text style={{ color: '#666' }}>AB: {advanceBalance}</Text> : null}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 15, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
-                  <Text style={{ fontWeight: 'bold' }}>Inv: {invoiceNo}</Text>
-                  <Text style={{ fontWeight: 'bold' }}>Date: {date}</Text>
-                  <TouchableOpacity onPress={handleRefresh}>
-                    <Icon name="refresh" color="#000" size={30} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {/* ---------------- ITEM SECTION ---------------- */}
-
-          {showItems && (
-            <View style={styles.card}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-                <Text style={[styles.cardTitle, { marginBottom: 0 }]}>Add Item</Text>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                    <View style={{ position: 'relative', marginRight: 15 }}>
-                      <Icon name="cart" size={26} color="#000" />
-                      {items.length > 0 && (
-                        <View style={{ position: 'absolute', top: -8, right: -8, backgroundColor: 'red', borderRadius: 10, width: 18, height: 18, justifyContent: 'center', alignItems: 'center' }}>
-                          <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>{items.length}</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#2E7D32' }}>
-                      W: {items.reduce((sum, item) => sum + (parseFloat(item.weight) || 0), 0).toFixed(3)}g
-                    </Text>
-                  </View>
-                  <Text style={{ fontSize: 14, fontWeight: 'bold', color: '#000' }}>
-                    Final Amount: ₹ {items.reduce((sum, item) => sum + (parseFloat(item.final || 0)), 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </Text>
-                </View>
-              </View>
-
-                            {/* ITEM NAME */}
-              <View style={styles.itemAutocompleteWrap}>
-                <Text style={styles.label}>Item</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter item name"
-                  value={itemName}
-                  onChangeText={handleItemNameChange}
-                  onFocus={() => {
-                    // Only show issue-type items in the dropdown
-                    if (itemList.length > 0) {
-                      const issueStockNames = new Set(
-                        itemEntryItems.filter((e) => e.issue === true).map((e) => e.stockName)
-                      );
-                      setFilteredItems(itemList.filter((item) => issueStockNames.has(item.itemName)));
-                      setShowItemDropdown(true);
-                    }
-                  }}
-                />
-              </View>
-              {showItemDropdown &&
-                Array.isArray(filteredItems) &&
-                filteredItems.length > 0 && (
-                  <View style={styles.dropdown}>
-                    <ScrollView
-                      style={styles.dropdownScroll}
-                      nestedScrollEnabled
-                      keyboardShouldPersistTaps="handled"
-                      showsVerticalScrollIndicator
-                    >
-                      {filteredItems.map((item, idx) => {
-                        const entry = itemEntryItems.find(e => e.stockName === item.itemName);
-                        const t = entry ? entry.percentage : parseFloat(item.pure || 0);
-                        const r = parseFloat(rate || 0);
-                        const wt = parseFloat(weight || 0);
-
-                        let finalVal = 0;
-                        if (wt > 0 && r > 0) {
-                          const w = (wt * t) / 100;
-                          const total = (wt + w) * r;
-                          const gst = calcGST(total, gstPercentage, gstEnabled);
-                          finalVal = total + gst;
-                        }
-
-                        return (
-                          <View key={item.id || `${item.itemName}-${idx}`} style={styles.dropdownItem}>
-                            <TouchableOpacity onPress={() => selectItem(item)} style={styles.dropdownItemMain}>
-                              <Text style={styles.dropdownItemName}>{item.itemName}</Text>
-                              <Text style={styles.dropdownItemMeta}>
-                                Stock: {Number(item.weight || 0).toFixed(3)} g | Touch: {Number(t || 0).toFixed(2)}%
-                              </Text>
-                              {finalVal > 0 ? (
-                                <Text style={styles.dropdownItemAmount}>Rs {finalVal.toFixed(2)}</Text>
-                              ) : null}
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              onPress={() => handleAddFromDropdown(item)}
-                              style={styles.dropdownAddBtn}
-                            >
-                              <Icon name="plus" size={18} color="#fff" />
-                            </TouchableOpacity>
-                          </View>
-                        );
-                      })}
-                    </ScrollView>
-                  </View>
-                )}
-
-              {/* WEIGHT WITH INLINE MODIFIED WEIGHT */}
-              <Text style={styles.label}>Weight (g)</Text>
-              <View style={styles.weightInputContainer}>
-                <TextInput
-                  style={styles.weightInput}
-                  value={weight}
-                  onChangeText={setWeight}
-                  keyboardType="decimal-pad"
-                  placeholder="Enter weight"
-                />
-                {modifiedWeight && (
-                  <Text style={styles.modifiedWeightText}>
-                    Modified Weight: {modifiedWeight} g
-                  </Text>
-                )}
-              </View>
-
-              {/* TOUCH */}
-              <Text style={styles.label}>Touch</Text>
-              <TextInput
-                style={styles.input}
-                value={touch}
-                onChangeText={setTouch}
-                keyboardType="decimal-pad"
-              />
-
-              {/* WASTAGE */}
-              <Text style={styles.label}>W/M</Text>
-              <TextInput
-                style={styles.input}
-                value={wastage}
-                editable={false}
-                placeholder="Auto"
-              />
-              {/* RATE */}
-              <Text style={styles.label}>Rate</Text>
-              <TextInput
-                style={styles.input}
-                value={rate}
-                onChangeText={setRate}
-                keyboardType="decimal-pad"
-              />
-
-              {/* ITEM NAME (FOR BILL) */}
-
-
-              {/* GST CHECKBOX */}
-              <View style={styles.checkboxContainer}>
-                <TouchableOpacity
-                  style={styles.checkbox}
-                  onPress={async () => {
-                    const newState = !gstEnabled;
-                    setGstEnabled(newState);
-                    if (newState) {
-                      setIsSgstEnabled(true);
-                      setIsCgstEnabled(true);
-                      setIsIgstEnabled(true);
-
-                      // Auto-load last saved GST record
-                      try {
-                        const stored = await AsyncStorage.getItem("gstSavedList");
-                        if (stored) {
-                          const list = JSON.parse(stored);
-                          if (list.length > 0) {
-                            const lastRecord = list[0]; // Assuming newest is first
-                            const s = lastRecord.sgst || "";
-                            const c = lastRecord.cgst || "";
-                            const i = lastRecord.igst || "";
-
-                            setSgst(s);
-                            setCgst(c);
-                            setIgst(i);
-
-                            // Calculate Total GST %
-                            const sVal = parseFloat(s) || 0;
-                            const cVal = parseFloat(c) || 0;
-                            const iVal = parseFloat(i) || 0;
-                            setGstPercentage((sVal + cVal + iVal).toString());
-                          }
-                        }
-                      } catch (error) {
-                        console.error("Failed to auto-load GST record", error);
-                      }
-                    } else {
-                      setIsSgstEnabled(false);
-                      setIsCgstEnabled(false);
-                      setIsIgstEnabled(false);
-                    }
-                  }}
-                >
-                  <Icon
-                    name={gstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
-                    size={24}
-                    color={gstEnabled ? "#2E7D32" : "#ccc"}
-                  />
-                  <Text style={styles.checkboxLabel}>Enable GST</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* GST INPUT FIELDS */}
-              {gstEnabled && (
-                <View>
-                  <View style={styles.rowBetween}>
-                    <View style={{ width: "48%" }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                        <TouchableOpacity
-                          onPress={async () => {
-                            const newState = !isSgstEnabled;
-                            setIsSgstEnabled(newState);
-                            await AsyncStorage.setItem(
-                              "b2c_sgst_enabled",
-                              newState.toString(),
-                            );
-                          }}
-                        >
-                          <Icon
-                            name={isSgstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
-                            size={20}
-                            color={isSgstEnabled ? "#2E7D32" : "#666"}
-                          />
-                        </TouchableOpacity>
-                        <Text style={[styles.label, { marginBottom: 0, marginLeft: 8 }]}>SGST (%)</Text>
-                      </View>
-                      <TextInput
-                        style={[styles.input, !isSgstEnabled && { backgroundColor: '#f0f0f0', color: '#999' }]}
-                        value={sgst}
-                        editable={isSgstEnabled}
-                        onChangeText={(val) => {
-                          setSgst(val);
-                          const s = parseFloat(val) || 0;
-                          const c = parseFloat(cgst) || 0;
-                          const i = parseFloat(igst) || 0;
-                          setGstPercentage((s + c + i).toString());
-                        }}
-                        keyboardType="decimal-pad"
-                        placeholder="0.0"
-                      />
-                    </View>
-
-                    <View style={{ width: "48%" }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                        <TouchableOpacity
-                          onPress={async () => {
-                            const newState = !isCgstEnabled;
-                            setIsCgstEnabled(newState);
-                            await AsyncStorage.setItem(
-                              "b2c_cgst_enabled",
-                              newState.toString(),
-                            );
-                          }}
-                        >
-                          <Icon
-                            name={isCgstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
-                            size={20}
-                            color={isCgstEnabled ? "#2E7D32" : "#666"}
-                          />
-                        </TouchableOpacity>
-                        <Text style={[styles.label, { marginBottom: 0, marginLeft: 8 }]}>CGST (%)</Text>
-                      </View>
-                      <TextInput
-                        style={[styles.input, !isCgstEnabled && { backgroundColor: '#f0f0f0', color: '#999' }]}
-                        value={cgst}
-                        editable={isCgstEnabled}
-                        onChangeText={(val) => {
-                          setCgst(val);
-                          const s = parseFloat(sgst) || 0;
-                          const c = parseFloat(val) || 0;
-                          const i = parseFloat(igst) || 0;
-                          setGstPercentage((s + c + i).toString());
-                        }}
-                        keyboardType="decimal-pad"
-                        placeholder="0.0"
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.rowBetween}>
-                    <View style={{ width: "48%" }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 5 }}>
-                        <TouchableOpacity
-                          onPress={async () => {
-                            const newState = !isIgstEnabled;
-                            setIsIgstEnabled(newState);
-                            await AsyncStorage.setItem(
-                              "b2c_igst_enabled",
-                              newState.toString(),
-                            );
-                          }}
-                        >
-                          <Icon
-                            name={isIgstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
-                            size={20}
-                            color={isIgstEnabled ? "#2E7D32" : "#666"}
-                          />
-                        </TouchableOpacity>
-                        <Text style={[styles.label, { marginBottom: 0, marginLeft: 8 }]}>IGST (%)</Text>
-                      </View>
-                      <TextInput
-                        style={[styles.input, !isIgstEnabled && { backgroundColor: '#f0f0f0', color: '#999' }]}
-                        value={igst}
-                        editable={isIgstEnabled}
-                        onChangeText={(val) => {
-                          setIgst(val);
-                          const s = parseFloat(sgst) || 0;
-                          const c = parseFloat(cgst) || 0;
-                          const i = parseFloat(val) || 0;
-                          setGstPercentage((s + c + i).toString());
-                        }}
-                        keyboardType="decimal-pad"
-                        placeholder="0.0"
-                      />
-                    </View>
-
-                    <View style={{ width: "48%" }}>
-                      <Text style={styles.label}>Total GST %</Text>
-                      <TextInput
-                        style={[styles.input, { backgroundColor: '#e0e0e0' }]}
-                        value={gstPercentage}
-                        editable={false}
-                        placeholder="0.0"
-                      />
-                    </View>
-                  </View>
-
-                  <Text style={[styles.label, { marginTop: 12 }]}>GST Amount (₹)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={gstAmount}
-                    onChangeText={setGstAmount}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                  />
-                </View>
-              )}
-
-              {/* ADD ITEM BUTTON */}
-              <TouchableOpacity style={styles.addRowBtn} onPress={addRow}>
-                <Text style={styles.addRowText}>+ ADD ITEM</Text>
-              </TouchableOpacity>
-
-              {/* ---------------- ITEM LIST TABLE ---------------- */}
-              {items.length > 0 && (
-                <>
-                  <Text style={[styles.cardTitle, { marginTop: 20 }]}>
-                    Item List
-                  </Text>
-
-                  <ScrollView horizontal>
-                    <View>
-                      {/* TABLE HEADER */}
-                      <View style={styles.tableHeader}>
-                        {[
-                          "Item",
-                          "Wt",
-                          "Touch",
-                          "Rate",
-                          "Total",
-                          "GST",
-                          "GST Check",
-                          "Final",
-                          "Mod.Wt",
-                          "X",
-                        ].map((h, i) => (
-                          <Text key={i} style={styles.th}>
-                            {h}
-                          </Text>
-                        ))}
-                      </View>
-
-                      {/* TABLE ROWS */}
-                      {items.map((row, index) => (
-                        <View key={index} style={styles.tableRow}>
-                          <Text style={styles.td}>{row.displayItemName || row.itemName}</Text>
-                          <Text style={styles.td}>{row.weight}</Text>
-                          <Text style={styles.td}>{row.touch}</Text>
-                          <Text style={styles.td}>{row.rate}</Text>
-                          <Text style={styles.td}>{Number(row.total || 0).toFixed(2)}</Text>
-                          <Text style={styles.td}>{Number(row.gst || 0).toFixed(2)}</Text>
-                          <View style={styles.td}>
-                            <Icon
-                              name={row.gstEnabled ? "checkbox-marked" : "checkbox-blank-outline"}
-                              size={20}
-                              color={row.gstEnabled ? "#2E7D32" : "#ccc"}
-                            />
-                          </View>
-                          <Text style={styles.td}>{Number(row.final || 0).toFixed(2)}</Text>
-                          <Text style={styles.td}>{row.modifiedWeight}</Text>
-
-                          <TouchableOpacity onPress={() => deleteRow(index)}>
-                            <Text style={[styles.td, { color: "red" }]}>
-                              ❌
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                      {/* TOTAL WEIGHT ROW */}
-                      <View style={[styles.tableRow, { marginTop: 10, borderTopWidth: 1, borderColor: '#ddd', paddingTop: 10 }]}>
-                        <Text style={{ flex: 1, textAlign: 'right', fontWeight: 'bold', fontSize: 16, color: '#000' }}>
-                          Total Weight: {items.reduce((sum, item) => sum + (parseFloat(item.weight) || 0), 0).toFixed(3)} g
-                        </Text>
-                      </View>
-                    </View>
-                  </ScrollView>
-                </>
-              )}
-
-              {/* ---------------- RECEIPT ENTRY SECTION ---------------- */}
-              <View style={[styles.card, { marginTop: 20 }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <Text style={styles.cardTitle}>Receipt Entry (Old Gold)</Text>
-                  <View style={styles.cartContainer}>
-                    <View style={{ position: "relative" }}>
-                      <Icon name="cart" size={24} color="#000" />
-                      {totalReceiptCartItems > 0 && (
-                        <View style={styles.badge}>
-                          <Text style={styles.badgeText}>{totalReceiptCartItems}</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.cartText}>₹{totalReceiptCartAmount.toFixed(2)}</Text>
-                  </View>
-                </View>
-
-                <View style={styles.inputRow}>
-                  <View style={[styles.inputGroup, { flex: 2, marginRight: 10 }]}>
-                    <Text style={styles.label}>Item Name</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={rName}
-                      onChangeText={setRName}
-                      placeholder="Item Name"
-                    />
-                  </View>
-                  <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
-                    <Text style={styles.label}>Weight</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={rWeight}
-                      onChangeText={setRWeight}
-                      keyboardType="numeric"
-                      placeholder="0.000"
-                    />
-                  </View>
-                  <View style={[styles.inputGroup, { flex: 1 }]}>
-                    <Text style={styles.label}>Sub</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={rSub}
-                      onChangeText={setRSub}
-                      keyboardType="numeric"
-                      placeholder="0.000"
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.inputRow}>
-                  <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
-                    <Text style={styles.label}>Net Wt</Text>
-                    <View style={[styles.input, { backgroundColor: "#eee", justifyContent: "center" }]}>
-                      <Text>{(parseFloat(rWeight || 0) - parseFloat(rSub || 0)).toFixed(3)}</Text>
-                    </View>
-                  </View>
-                  <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
-                    <Text style={styles.label}>Rate</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={rRate}
-                      onChangeText={setRRate}
-                      keyboardType="numeric"
-                      placeholder="Rate"
-                    />
-                  </View>
-                  <View style={[styles.inputGroup, { flex: 1.5 }]}>
-                    <Text style={styles.label}>Amount</Text>
-                    <View style={[styles.input, { backgroundColor: "#eee", justifyContent: "center" }]}>
-                      <Text style={{ fontWeight: "bold" }}>
-                        {((parseFloat(rWeight || 0) - parseFloat(rSub || 0)) * parseFloat(rRate || 0)).toFixed(2)}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                <TouchableOpacity style={styles.addRowBtn} onPress={addB2CReceiptItem}>
-                  <Text style={styles.addRowText}>Add Receipt Item</Text>
-                </TouchableOpacity>
-
-                {/* RECEIPT TABLE */}
-                {b2cReceiptItems.length > 0 && (
-                  <View style={{ marginTop: 20 }}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                      <View style={{ gap: 5 }}>
-                        <View style={styles.tableHeader}>
-                          <Text style={[styles.th, { flex: 0, textAlign: "left" }]}>
-                            Name
-                          </Text>
-                          <Text style={styles.th}>Wt</Text>
-                          <Text style={styles.th}>Sub</Text>
-                          <Text style={styles.th}>NW</Text>
-                          <Text style={styles.th}>Rate</Text>
-                          <Text style={styles.th}>Amt</Text>
-                          <Text style={styles.th}>X</Text>
-                        </View>
-                        {b2cReceiptItems.map((item, index) => (
-                          <View key={index} style={styles.tableRow}>
-                            <Text style={[styles.td, { flex: 0, textAlign: "left" }]}>
-                              {item.name}
-                            </Text>
-                            <Text style={styles.td}>{item.weight}</Text>
-                            <Text style={styles.td}>{item.sub}</Text>
-                            <Text style={styles.td}>{item.netWeight}</Text>
-                            <Text style={styles.td}>{item.rate}</Text>
-                            <Text style={styles.td}>{item.amount}</Text>
-                            <TouchableOpacity onPress={() => deleteB2CReceiptItem(index)}>
-                              <Text style={[styles.td, { color: "red" }]}>❌</Text>
-                            </TouchableOpacity>
-                          </View>
-                        ))}
-                      </View>
-                    </ScrollView>
-                    <View
-                      style={[
-                        styles.tableRow,
-                        {
-                          marginTop: 10,
-                          borderTopWidth: 1,
-                          borderColor: "#ddd",
-                          paddingTop: 10,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={{
-                          flex: 1,
-                          textAlign: "right",
-                          fontWeight: "bold",
-                          fontSize: 16,
-                        }}
-                      >
-                        Total Receipt Amount: ₹
-                        {b2cReceiptItems
-                          .reduce((acc, item) => acc + parseFloat(item.amount), 0)
-                          .toFixed(2)}
-                      </Text>
-                    </View>
-                  </View>
-                )}
-              </View>
-
-              {/* ---------------- CASH RECEIVED SECTION ---------------- */}
-              <View style={[styles.card, { marginTop: 20 }]}>
-                <View style={styles.issueHeader}>
-                  <View style={styles.greenDot} />
-                  <Text style={styles.sectionTitle}>Cash Received</Text>
-                  <View style={styles.cartContainer}>
-                    <Icon name="cash" size={22} color="#4CAF50" />
-                    <Text style={styles.cartText}>
-                      {cashTable.reduce((sum, c) => sum + Number(c.pure || 0), 0).toFixed(3)}g
-                    </Text>
-                    {cashTable.length > 0 && (
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>{cashTable.length}</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-
-                <View style={styles.row}>
-                  <View style={styles.inputBox}>
-                    <Text style={styles.subLabel}>Rupees</Text>
-                    <TextInput
-                      style={styles.input}
-                      keyboardType="decimal-pad"
-                      value={rupees}
-                      onChangeText={(val) => {
-                        setRupees(val);
-                        setCashPureInput(computeCashPure(val, cashGoldRate || 0).toFixed(3));
-                      }}
-                      placeholder="0.00"
-                    />
-                  </View>
-
-                  <View style={styles.inputBox}>
-                    <Text style={styles.subLabel}>Gold Rate</Text>
-                    <TextInput
-                      style={styles.input}
-                      keyboardType="decimal-pad"
-                      value={cashGoldRate}
-                      onChangeText={(val) => {
-                        setCashGoldRate(val);
-                        setCashPureInput(computeCashPure(rupees || 0, val).toFixed(3));
-                      }}
-                      placeholder="Rate"
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.row}>
-                  <View style={styles.inputBox}>
-                    <Text style={styles.subLabel}>Pure</Text>
-                    <View style={styles.purityBox}>
-                      <Text style={styles.purityText}>{cashPureInput} g</Text>
-                    </View>
-                  </View>
-                </View>
-
-                <TouchableOpacity style={styles.addRowBtn} onPress={addCashEntry}>
-                  <Text style={styles.addRowText}>+ Add Cash Entry</Text>
-                </TouchableOpacity>
-
-                {cashTable.length > 0 && (
-                  <View style={{ marginTop: 20 }}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-                      <View style={{ gap: 5 }}>
-                        <View style={styles.tableHeader}>
-                          <Text style={styles.th}>Rupees</Text>
-                          <Text style={styles.th}>FT Rate</Text>
-                          <Text style={styles.th}>Pure</Text>
-                          <Text style={styles.th}>X</Text>
-                        </View>
-                        {cashTable.map((row) => (
-                          <View key={row.id} style={styles.tableRow}>
-                            <Text style={styles.td}>{Number(row.rupees || 0).toFixed(2)}</Text>
-                            <Text style={styles.td}>{Number(row.goldRate || 0).toFixed(2)}</Text>
-                            <Text style={styles.td}>{Number(row.pure || 0).toFixed(3)}</Text>
-                            <TouchableOpacity onPress={() => removeCashEntry(row.id)}>
-                              <Text style={[styles.td, { color: "red" }]}>X</Text>
-                            </TouchableOpacity>
-                          </View>
-                        ))}
-                      </View>
-                    </ScrollView>
-
-                    <View style={[styles.tableRow, { marginTop: 10, borderTopWidth: 1, borderColor: "#ddd", paddingTop: 10 }]}>
-                      <Text style={{ flex: 1, textAlign: "right", fontWeight: "bold", fontSize: 16 }}>
-                        Total Cash Pure: {cashTable.reduce((sum, c) => sum + Number(c.pure || 0), 0).toFixed(3)} g
-                      </Text>
-                    </View>
-                  </View>
-                )}
-              </View>
-              <TouchableOpacity
-                style={[
-                  styles.finalSubmitBtn,
-                  items.length === 0 && { opacity: 0.5 },
-                ]}
-                disabled={items.length === 0}
-                onPress={handleFinalSubmit}
-              >
-                <Text style={styles.finalSubmitText}>
-                  SUBMIT & PREVIEW BILL
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </ScrollView>
-      </KeyboardAvoidingView>
-      {/* BOTTOM FLOATING CART INDICATOR */}
-    </SafeAreaView >
-  );
-}
+    // Only show ite
