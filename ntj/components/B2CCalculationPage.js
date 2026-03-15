@@ -701,7 +701,12 @@ export default function CreateTransaction({ navigation, route }) {
 
   const addCashEntry = async () => {
     const r = rupees || "0";
-    const gr = cashGoldRate || "0";
+    let gr = cashGoldRate || rate || "0";
+    
+    if (parseNum(gr) <= 0 && parseNum(rate) > 0) {
+      gr = rate.toString();
+      setCashGoldRate(gr);
+    }
 
     if (parseNum(r) <= 0) {
       Alert.alert("Invalid Amount", "Please enter rupees greater than 0");
@@ -1324,8 +1329,8 @@ export default function CreateTransaction({ navigation, route }) {
 
   // ---------------- FINAL SUBMIT ----------------
   const handleFinalSubmit = async () => {
-    if (items.length === 0) {
-      Alert.alert("Error", "No items added");
+    if (items.length === 0 && cashTable.length === 0 && b2cReceiptItems.length === 0) {
+      Alert.alert("Error", "No records to submit");
       return;
     }
 
@@ -2402,9 +2407,9 @@ export default function CreateTransaction({ navigation, route }) {
               <TouchableOpacity
                 style={[
                   styles.finalSubmitBtn,
-                  items.length === 0 && { opacity: 0.5 },
+                  (items.length === 0 && cashTable.length === 0 && b2cReceiptItems.length === 0) && { opacity: 0.5 },
                 ]}
-                disabled={items.length === 0}
+                disabled={items.length === 0 && cashTable.length === 0 && b2cReceiptItems.length === 0}
                 onPress={handleFinalSubmit}
               >
                 <Text style={styles.finalSubmitText}>
