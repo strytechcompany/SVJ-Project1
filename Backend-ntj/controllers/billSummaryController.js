@@ -31,35 +31,75 @@ const formatMainBillNo = (value) => {
     return String(n).padStart(5, '0');
 };
 
-const getNextBillNoFromCounter = async () => {
+const formatB2CInvoiceNo = (value) => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    
+    // If it already starts with A2026, extract digits after it
+    if (/^A2026/i.test(raw)) {
+        const digits = raw.replace(/A2026/i, '').replace(/\D/g, '');
+        return `A2026${digits.padStart(2, '0')}`;
+    }
+    
+    // Strip all non-digits
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return '';
+
+    // If it's just digits like 202601, handle it
+    if (digits.startsWith('2026') && digits.length >= 5) {
+        return `A${digits}`;
+    }
+
+    // Default: pad to 2 digits and add A2026
+    return `A2026${digits.padStart(2, '0')}`;
+};
+
+const getNextBillNoFromCounter = async (key = 'global', padLength = 5, prefix = '') => {
     const doc = await BillCounter.findOneAndUpdate(
-        { key: 'global' },
+        { key },
         { $inc: { counter: 1 } },
         { new: true, upsert: true, setDefaultsOnInsert: true }
     );
-    return String(doc.counter).padStart(5, '0');
+    const formattedCounter = String(doc.counter).padStart(padLength, '0');
+    return `${prefix}${formattedCounter}`;
 };
 
-const pickBillNo = (body = {}) => formatMainBillNo(body.billNo || body.invoiceNo);
+const pickBillNo = (body = {}) => {
+    const type = normalizeBillType(body.billType || body.customerType);
+    const raw = body.billNo || body.invoiceNo;
+    if (!raw) return '';
+    if (type === 'B2C') return formatB2CInvoiceNo(raw);
+    return formatMainBillNo(raw);
+};
 
-const getUniqueNextBillNo = async () => {
-    // Global uniqueness across B2B and B2C collections.
+const getUniqueNextBillNo = async (billType = 'B2B') => {
+    const type = normalizeBillType(billType);
+    const isB2C = type === 'B2C';
+    const key = isB2C ? 'b2c_invoice' : 'global';
+    const padLength = isB2C ? 2 : 5;
+    const prefix = isB2C ? 'A2026' : '';
+
     for (let attempts = 0; attempts < 20; attempts += 1) {
-        const next = await getNextBillNoFromCounter();
-        const B2BModel = getBillSummaryModel('B2B');
-        const B2CModel = getBillSummaryModel('B2C');
-        const [existsInB2B, existsInB2C] = await Promise.all([
-            B2BModel.exists({ billNo: next }),
-            B2CModel.exists({ billNo: next }),
-        ]);
-        if (!existsInB2B && !existsInB2C) return next;
+        const next = await getNextBillNoFromCounter(key, padLength, prefix);
+        const BillModel = getBillSummaryModel(type);
+        const exists = await BillModel.exists({ billNo: next });
+        if (!exists) return next;
     }
-    throw new Error('Failed to allocate a unique bill number');
+    throw new Error(`Failed to allocate a unique ${isB2C ? 'invoice' : 'bill'} number`);
 };
 
 const serializeBillForClient = (bill) => {
     const plain = typeof bill?.toObject === 'function' ? bill.toObject() : { ...(bill || {}) };
-    const normalizedBillNo = formatMainBillNo(plain.billNo || plain.invoiceNo) || '00000';
+    const type = normalizeBillType(plain.billType || plain.customerType);
+    const rawNo = plain.billNo || plain.invoiceNo || '';
+    
+    let normalizedBillNo;
+    if (type === 'B2C') {
+        normalizedBillNo = formatB2CInvoiceNo(rawNo) || 'A202600';
+    } else {
+        normalizedBillNo = formatMainBillNo(rawNo) || '00000';
+    }
+
     return {
         ...plain,
         billNo: normalizedBillNo,
@@ -154,13 +194,25 @@ const findCustomerAndUpdateOverview = async (billDoc) => {
     const customerId = toIdString(billDoc.customerId);
     if (!customerId) return null;
 
+    const netBalance = toNumber(billDoc.availableBalance ?? billDoc.currentBalance);
+    const lastAmount = toNumber(billDoc.gst?.finalAmount || billDoc.gst?.amount || billDoc.totalAmount || billDoc.cashAmount || 0);
+    const lastWeight = toNumber(billDoc.totalIssueWeight || billDoc.issuePure || 0);
+    const lastPure = toNumber(billDoc.issuePure || billDoc.totalIssueWeight || 0);
+
     const updatePayload = {
         lastTransactionDate: billDoc.createdAt || new Date(),
         lastTransactionType: billDoc.billType,
-        oldBalance: billDoc.oldBalance,
-        advanceBalance: billDoc.advanceBalance,
-        availableBalance: billDoc.availableBalance,
-        billCurrentBalance: billDoc.availableBalance,
+        oldBalance: netBalance > 0 ? netBalance : 0,
+        advanceBalance: netBalance < 0 ? Math.abs(netBalance) : 0,
+        availableBalance: netBalance,
+        billCurrentBalance: netBalance,
+
+        // Last Bill Tracking
+        lastBillNo: billDoc.billNo || billDoc.invoiceNo || "",
+        lastBillDate: billDoc.date ? new Date(billDoc.date) : (billDoc.createdAt || new Date()),
+        lastBillAmount: lastAmount,
+        lastBillWeight: lastWeight,
+        lastBillPureWeight: lastPure,
     };
 
     let updated = null;
@@ -248,7 +300,7 @@ const createBillSummary = async (req, res) => {
         if (existingForRequestedNo) {
             payload.billNo = requestedBillNo;
         } else {
-            payload.billNo = await getUniqueNextBillNo();
+            payload.billNo = await getUniqueNextBillNo(payload.billType);
         }
         payload.invoiceNo = payload.billNo;
         const saved = await BillSummary.findOneAndUpdate(
@@ -287,21 +339,21 @@ const getBillsByCustomerId = async (req, res) => {
         const BillSummary = getBillSummaryModel(billType);
         const requestedId = toIdString(req.params.customerId);
         const lookupCustomerId = toIdString(req.query.lookupCustomerId);
-        const query = addDateRangeToQuery({ customerId: requestedId }, req.query);
-        const bills = await BillSummary.find(query).sort({ updatedAt: -1, createdAt: -1 });
-        if (bills.length > 0) return res.json((Array.isArray(bills) ? bills : []).map(serializeBillForClient));
 
-        // Backward compatibility: fetch legacy billSummary collection entries.
         const idSet = new Set([requestedId]);
         if (lookupCustomerId) idSet.add(lookupCustomerId);
 
         if (/^[0-9a-fA-F]{24}$/.test(requestedId)) {
             const customerModel = billType === 'B2C' ? CustomerB2C : Customer;
             const customer = await customerModel.findById(requestedId).lean();
-            if (customer?.customerId !== undefined && customer?.customerId !== null) {
+            if (customer && (customer.customerId !== undefined && customer.customerId !== null)) {
                 idSet.add(String(customer.customerId));
             }
         }
+
+        const query = addDateRangeToQuery({ customerId: { $in: Array.from(idSet) } }, req.query);
+        const bills = await BillSummary.find(query).sort({ updatedAt: -1, createdAt: -1 });
+        if (bills.length > 0) return res.json((Array.isArray(bills) ? bills : []).map(serializeBillForClient));
 
         const LegacyBillSummary = getLegacyBillSummaryModel();
         const legacyQuery = addDateRangeToQuery({ customerId: { $in: Array.from(idSet) } }, req.query);
@@ -390,15 +442,29 @@ const deleteBillSummary = async (req, res) => {
 const getNextBillNo = async (req, res) => {
     try {
         const sequence = String(req.query.sequence || 'main').toLowerCase();
-        const key = sequence === 'order' ? 'order' : 'global';
-        const padLength = sequence === 'order' ? 2 : 5;
+        const billType = normalizeBillType(req.query.billType || req.query.customerType);
+        
+        let key, padLength, prefix;
+        if (billType === 'B2C') {
+            key = 'b2c_invoice';
+            padLength = 2;
+            prefix = 'A2026';
+        } else if (sequence === 'order') {
+            key = 'order';
+            padLength = 2;
+            prefix = '';
+        } else {
+            key = 'global';
+            padLength = 5;
+            prefix = '';
+        }
 
         const doc = await BillCounter.findOneAndUpdate(
             { key },
             { $inc: { counter: 1 } },
             { new: true, upsert: true, setDefaultsOnInsert: true }
         );
-        const formatted = String(doc.counter).padStart(padLength, '0');
+        const formatted = `${prefix}${String(doc.counter).padStart(padLength, '0')}`;
         res.json({ billNo: formatted, counter: doc.counter });
     } catch (error) {
         res.status(500).json({ message: 'Failed to get next bill number', error: error.message });
