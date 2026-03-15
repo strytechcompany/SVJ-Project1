@@ -56,6 +56,13 @@ const customerB2CSchema = new mongoose.Schema({
   sgst: { type: String, default: "" },
   cgst: { type: String, default: "" },
   igst: { type: String, default: "" },
+
+  // Last Bill Tracking Fields
+  lastBillNo: { type: String, default: "" },
+  lastBillDate: { type: Date, default: null },
+  lastBillAmount: { type: Number, default: 0 },
+  lastBillWeight: { type: Number, default: 0 },
+  lastBillPureWeight: { type: Number, default: 0 },
 }, 
 { timestamps: true });
 
