@@ -154,10 +154,11 @@ export default function AddOrder({ navigation }) {
               type: savedOrder.itemName,
               weight: savedOrder.itemWeight,
               date: new Date(savedOrder.createdAt || new Date()).toISOString().split('T')[0],
-              image: selectedImage, // Use local URI for immediate preview
+              image: base64Image || selectedImage, 
               balance: "0",
               payment: ""
-            }
+            },
+            autoShare: true
           });
         } else {
           Alert.alert("Success", "Order saved successfully");
