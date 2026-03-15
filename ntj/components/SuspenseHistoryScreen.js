@@ -10,6 +10,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
+import { base_url } from "./config";
 import CommonHeader from "./CommonHeader";
 
 export default function SuspenseHistoryScreen({ navigation }) {
@@ -26,12 +27,23 @@ export default function SuspenseHistoryScreen({ navigation }) {
 
   const loadHistory = async () => {
     try {
+      const response = await fetch(`${base_url}/suspense`);
+      const data = await response.json();
+      if (data.transactions) {
+        // Map _id to id for consistent frontend use
+        const normalized = data.transactions.map(tx => ({
+          ...tx,
+          id: tx._id || tx.id
+        }));
+        setTransactions(normalized);
+      }
+    } catch (e) {
+      console.error("Failed to load suspense history from API", e);
+      // Fallback to AsyncStorage if API fails (for backward compatibility during migration)
       const stored = await AsyncStorage.getItem("suspense_history");
       if (stored) {
         setTransactions(JSON.parse(stored));
       }
-    } catch (e) {
-      console.error("Failed to load suspense history", e);
     }
   };
 
@@ -97,15 +109,17 @@ export default function SuspenseHistoryScreen({ navigation }) {
               <View style={{ marginTop: 10 }}>
                 <Text style={[styles.sectionTitle, { color: '#D32F2F' }]}>Issue Items</Text>
                 <View style={[styles.tableHeader, { backgroundColor: '#FFEBEE' }]}>
-                  <Text style={styles.cell}>Item</Text>
+                  <Text style={[styles.cell, { flex: 2 }]}>Item</Text>
                   <Text style={styles.cell}>Weight</Text>
+                  <Text style={styles.cell}>Qty</Text>
                   <Text style={styles.cell}>Pure</Text>
                 </View>
                 {tx.suspense.issueItems.map((item, i) => (
                   <View key={'issue-' + i} style={styles.tableRow}>
-                    <Text style={styles.cell}>{item.name}</Text>
+                    <Text style={[styles.cell, { flex: 2 }]}>{item.name}</Text>
                     <Text style={styles.cell}>{item.weight}</Text>
-                    <Text style={[styles.cell, { fontWeight: 'bold' }]}>{item.pure.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.count || 1}</Text>
+                    <Text style={[styles.cell, { fontWeight: 'bold' }]}>{(item.pure || 0).toFixed(3)}</Text>
                   </View>
                 ))}
               </View>
@@ -116,15 +130,17 @@ export default function SuspenseHistoryScreen({ navigation }) {
               <View style={{ marginTop: 10 }}>
                 <Text style={[styles.sectionTitle, { color: '#2E7D32' }]}>Receipt Items</Text>
                 <View style={[styles.tableHeader, { backgroundColor: '#E8F5E9' }]}>
-                  <Text style={styles.cell}>Item</Text>
+                  <Text style={[styles.cell, { flex: 2 }]}>Item</Text>
                   <Text style={styles.cell}>Weight</Text>
+                  <Text style={styles.cell}>Qty</Text>
                   <Text style={styles.cell}>Pure</Text>
                 </View>
                 {tx.suspense.receiptItems.map((item, i) => (
                   <View key={'receipt-' + i} style={styles.tableRow}>
-                    <Text style={styles.cell}>{item.name}</Text>
+                    <Text style={[styles.cell, { flex: 2 }]}>{item.name}</Text>
                     <Text style={styles.cell}>{item.weight}</Text>
-                    <Text style={[styles.cell, { fontWeight: 'bold' }]}>{item.pure.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.count || 1}</Text>
+                    <Text style={[styles.cell, { fontWeight: 'bold' }]}>{(item.pure || 0).toFixed(3)}</Text>
                   </View>
                 ))}
               </View>
