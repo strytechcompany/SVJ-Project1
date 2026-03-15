@@ -17,8 +17,11 @@ const toIdString = (value) => {
     return String(value).trim();
 };
 
-const pickCustomerId = (body = {}) =>
-    toIdString(body.customerId || body.customerMongoId || body.id || body.customer?._id || body.customer?.id || body.customer?.customerId);
+const pickCustomerId = (body = {}) => {
+    // Priority: custom numeric ID property, then explicit MongoDB _id, then nested customer props
+    const raw = body.customerId || body.customerMongoId || body.id || body._id || body.customer?._id || body.customer?.id || body.customer?.customerId;
+    return toIdString(raw);
+};
 
 const formatMainBillNo = (value) => {
     const digits = String(value ?? '').replace(/\D/g, '');
@@ -139,7 +142,15 @@ const buildBillPayload = (body = {}) => {
 };
 
 const findCustomerAndUpdateOverview = async (billDoc) => {
-    const customerModel = billDoc.billType === 'B2C' ? CustomerB2C : Customer;
+    // Determine the correct model based on billType and dealerType/customerType
+    const rawType = String(billDoc.dealerType || billDoc.customerType || "").toUpperCase();
+    let customerModel;
+    if (rawType === "DEALER" || rawType === "SUPPLIER") {
+        customerModel = Dealer;
+    } else {
+        customerModel = billDoc.billType === 'B2C' ? CustomerB2C : Customer;
+    }
+
     const customerId = toIdString(billDoc.customerId);
     if (!customerId) return null;
 
@@ -152,14 +163,31 @@ const findCustomerAndUpdateOverview = async (billDoc) => {
         billCurrentBalance: billDoc.availableBalance,
     };
 
-    // Try Mongo _id first, then fallback to custom numeric/string customerId.
     let updated = null;
-    if (/^[0-9a-fA-F]{24}$/.test(customerId)) {
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(customerId);
+
+    // Try Mongo _id first if it looks like one (24-char hex)
+    if (isObjectId) {
         updated = await customerModel.findByIdAndUpdate(customerId, updatePayload, { new: true });
+    } 
+
+    if (!updated && !isObjectId) {
+        // Fallback to custom numeric/string customerId field (only if NOT an ObjectId)
+        // Dealer doesn't have a numeric customerId field, so skip querying it.
+        if (customerModel !== Dealer) {
+            updated = await customerModel.findOneAndUpdate({ customerId: customerId }, updatePayload, { new: true });
+        }
     }
-    if (!updated) {
-        updated = await customerModel.findOneAndUpdate({ customerId: customerId }, updatePayload, { new: true });
+
+    // Final fallback for Dealers by name
+    if (!updated && customerModel === Dealer && billDoc.customerName) {
+        updated = await Dealer.findOneAndUpdate(
+            { customerName: String(billDoc.customerName).trim() },
+            updatePayload,
+            { new: true }
+        );
     }
+
     return updated;
 };
 
@@ -188,7 +216,8 @@ const syncDealerImageFromBill = async (bill = {}) => {
     const customerName = String(bill?.customerName || "").trim();
 
     let updated = null;
-    if (/^[0-9a-fA-F]{24}$/.test(customerId)) {
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(customerId);
+    if (isObjectId) {
         updated = await Dealer.findByIdAndUpdate(customerId, { $set: update }, { new: true });
     }
     if (!updated && customerName) {
