@@ -51,6 +51,27 @@ const dealerSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  billCurrentBalance: {
+    type: Number,
+    default: 0,
+  },
+  availableBalance: {
+    type: Number,
+    default: 0,
+  },
+  lastTransactionDate: {
+    type: Date,
+    default: null,
+  },
+  lastTransactionType: {
+    type: String,
+    default: "",
+  },
+  gstPercentage: { type: String, default: "" },
+  gstAmount: { type: String, default: "" },
+  sgst: { type: String, default: "" },
+  cgst: { type: String, default: "" },
+  igst: { type: String, default: "" },
 }, {
   timestamps: true,
 });
