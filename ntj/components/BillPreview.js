@@ -6,6 +6,7 @@ import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import QRCode from 'react-native-qrcode-svg';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from "axios";
 import { base_url } from "./config";
@@ -588,7 +589,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                   <p><strong>Item:</strong> ${order.type}</p>
                   <p><strong>Weight:</strong> ${order.weight} GMS</p>
                   <p><strong>Payment:</strong> ${order.payment}</p>
-                  <p><strong>Pending Balance:</strong> â‚¹${order.balance}</p>
+                  <p><strong>Pending Balance:</strong> ₹${order.balance}</p>
                </div>
             </div>
 
@@ -1169,6 +1170,22 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     previewTx?.receiptImageShowInBill ??
     customer?.receiptImageShowInBill ??
     true;
+   const normalizePhoneWithCountryCode = (value) => {
+    let digits = String(value || "").replace(/\D/g, "");
+    if (!digits) return "";
+    
+    // Remove leading zeros
+    digits = digits.replace(/^0+/, "");
+
+    // If it's exactly 10 digits, assume it's an Indian number and add 91
+    if (digits.length === 10) {
+      return `91${digits}`;
+    }
+    
+    // If it's 12 digits and starts with 91, it's already correct for India
+    // If it's something else, we return as is (could be international)
+    return digits;
+  };
   const dealerProofImageUri = resolveFirstValidImageUri([
     previewTx?.receiptImage,
     previewTx?.proofImage,
@@ -1177,14 +1194,6 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     customer?.proofImage,
     customer?.image,
   ]);
-
-  const normalizePhoneWithCountryCode = (value) => {
-    const digits = String(value || "").replace(/\D/g, "");
-    if (!digits) return "";
-    if (digits.length === 10) return `91${digits}`;
-    if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
-    return digits;
-  };
 
   const generateBillPdf = async () => {
     const html = generateHTML();
@@ -1226,7 +1235,10 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   };
 
   const prepareBillPdf = async ({ force = false } = {}) => {
-    if (!force && preparedPdfUriRef.current) return preparedPdfUriRef.current;
+    if (!force && preparedPdfUriRef.current) {
+      const check = await FileSystem.getInfoAsync(preparedPdfUriRef.current);
+      if (check.exists) return preparedPdfUriRef.current;
+    }
     const uri = await generateBillPdf();
     preparedPdfUriRef.current = uri;
     return uri;
@@ -1285,21 +1297,40 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	  };
 
 	  const sharePdfViaDeviceWhatsApp = async ({ waPhone, pdfUri, isAuto = false } = {}) => {
-	    const opened = await openWhatsAppChat(waPhone);
-	    if (!opened) {
-	      throw new Error("WhatsApp is not installed on this device.");
-	    }
-
 	    const canShare = await Sharing.isAvailableAsync();
-	    if (canShare) {
-	      await Sharing.shareAsync(pdfUri, {
-	        mimeType: "application/pdf",
-	        dialogTitle: "Send Bill on WhatsApp",
-	        UTI: "com.adobe.pdf",
-	      });
-	    } else if (!isAuto) {
+	    if (!canShare) {
 	      throw new Error("File sharing is not available on this device.");
 	    }
+
+	    // Verify file exists
+	    const fileInfo = await FileSystem.getInfoAsync(pdfUri);
+	    if (!fileInfo.exists) {
+	      throw new Error("Generated PDF file not found. Please try again.");
+	    }
+
+	    // Rename to a meaningful filename for better user experience
+	    let sharingUri = pdfUri;
+	    try {
+	      const billNoHint =
+	        currentBillNo ||
+	        resolveBillNoForDisplay(order?.orderNo, "B2B") ||
+	        Date.now();
+	      const cleanBillNo = String(billNoHint).replace(/[^a-zA-Z0-9]/g, "_");
+	      const newUri = `${FileSystem.cacheDirectory}Bill_${cleanBillNo}.pdf`;
+	      await FileSystem.copyAsync({ from: pdfUri, to: newUri });
+	      sharingUri = newUri;
+	    } catch (e) {
+	      console.warn("Renaming failed, sharing original URI", e);
+	    }
+
+	    // On Android, calling Linking.openURL before Sharing.shareAsync often blocks the share sheet.
+	    // We only open the chat if NOT doing auto-share, or as a fallback.
+	    // For standard PDF sharing, shareAsync is much more reliable.
+	    await Sharing.shareAsync(sharingUri, {
+	      mimeType: "application/pdf",
+	      dialogTitle: "Send Bill on WhatsApp",
+	      UTI: "com.adobe.pdf",
+	    });
 	  };
 
 	  const sendBillPdfViaWhatsAppCloudApi = async ({ waPhone, pdfUri } = {}) => {
@@ -1337,8 +1368,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	      const message =
 	        json?.message ||
 	        (typeof json?.error === "string" ? json.error : "") ||
-	        text ||
-	        "Failed to send bill via WhatsApp.";
+	        text;
 	      const err = new Error(message);
 	      err.status = response.status;
 	      err.payload = json || text;
@@ -1348,30 +1378,103 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	    return json || { ok: true };
 	  };
 
+	  const shareBillPdfOnly = async () => {
+	    if (isSharingRef.current) return;
+	    try {
+	      isSharingRef.current = true;
+	      const pdfUri = await prepareBillPdf();
+	      if (!pdfUri) throw new Error("Could not generate bill PDF.");
+	      
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) throw new Error("Customer phone number not found.");
+
+	      // 1. Try direct Cloud API delivery first (most direct)
+	      let sentViaCloud = false;
+	      try {
+	        const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
+	        if (cloudRes?.ok) {
+	          sentViaCloud = true;
+	          Alert.alert("Success", `Bill PDF sent directly to ${waPhone}`);
+	          await openWhatsAppChat(waPhone); // Open chat to show the sent document
+	          return;
+	        }
+	      } catch (e) {
+	        console.log("Cloud API skipped/failed");
+	      }
+
+	      // 2. Fallback: Open Direct Chat + Trigger Share Sheet
+	      if (!sentViaCloud) {
+	        // Open the specific person's WhatsApp chat directly
+	        await openWhatsAppChat(waPhone);
+	        
+	        // Small delay to allow WhatsApp to open, then show the share sheet
+	        setTimeout(async () => {
+	          await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri, isAuto: false });
+	        }, 1200);
+	      }
+	    } catch (error) {
+	      Alert.alert("Error", error.message || "Failed to share PDF.");
+	    } finally {
+	      isSharingRef.current = false;
+	    }
+	  };
+
+	  const openCustomerChatOnly = async () => {
+	    try {
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) throw new Error("Customer WhatsApp number not found.");
+	      await openWhatsAppChat(waPhone);
+	    } catch (error) {
+	      Alert.alert("Error", error.message || "Could not open WhatsApp chat.");
+	    }
+	  };
+
 	  const shareBillToCustomerWhatsApp = async ({ isAuto = false } = {}) => {
 	    if (isSharingRef.current) return;
-
 	    try {
 	      isSharingRef.current = true;
 	      setIsSharing(true);
 
-	      const waPhone = await resolveCustomerWhatsAppPhone();
-	      if (!waPhone) {
-	        throw new Error("Customer mobile number is missing or invalid.");
+	      // 1. Generate and verify PDF first
+	      const pdfUri = await prepareBillPdf();
+	      if (!pdfUri) {
+	        throw new Error("Could not generate bill PDF.");
 	      }
 
-	      const pdfUri = await prepareBillPdf();
-	      await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri, isAuto });
+	      // 2. Resolve target phone number
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) {
+	        throw new Error("Customer WhatsApp number not found.");
+	      }
+
+	      // 3. Try Background Cloud API Send (Ideal for 'attached in send area' effect)
+	      let cloudSent = false;
+	      try {
+	        const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
+	        if (cloudRes?.ok) {
+	          cloudSent = true;
+	        }
+	      } catch (e) {
+	        console.log("Cloud API skipped or failed");
+	      }
+
+	      // 4. Fallback for Auto/Manual trigger
+	      if (!cloudSent) {
+	        // On auto-share, we prioritize the attachment sheet as it's the main requirement
+	        await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri, isAuto });
+	      } else {
+	        Alert.alert("Success", "Bill sent via WhatsApp Cloud API");
+	      }
 	    } catch (error) {
 	      if (!isAuto || !(error?.message || "").toLowerCase().includes("cancel")) {
-	        Alert.alert("Error", error?.message || "Failed to share bill on WhatsApp.");
+	        Alert.alert("Error", error?.message || "Failed to share bill.");
 	      }
-	      console.error("WhatsApp share error:", error);
-    } finally {
-      setIsSharing(false);
-      isSharingRef.current = false;
-    }
-  };
+	      console.error("WhatsApp share flow error:", error);
+	    } finally {
+	      setIsSharing(false);
+	      isSharingRef.current = false;
+	    }
+	  };
 
   useEffect(() => {
     preparedPdfUriRef.current = "";
@@ -2665,6 +2768,30 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             >
               <Icon name="content-save-outline" size={22} color="#fff" />
               <Text style={styles.homeButtonText}>Save Bill</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* WhatsApp Direct Chat Button */}
+          <View style={{ alignItems: 'center', marginTop: 10 }}>
+            <TouchableOpacity
+              style={[styles.saveButton, { backgroundColor: '#25D366' }]}
+              onPress={openCustomerChatOnly}
+              activeOpacity={0.8}
+            >
+              <Icon name="whatsapp" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>WhatsApp Chat</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Share PDF Button */}
+          <View style={{ alignItems: 'center', marginTop: 10 }}>
+            <TouchableOpacity
+              style={[styles.saveButton, { backgroundColor: '#FF9800' }]}
+              onPress={shareBillPdfOnly}
+              activeOpacity={0.8}
+            >
+              <Icon name="file-pdf-box" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>Share Bill PDF</Text>
             </TouchableOpacity>
           </View>
 
