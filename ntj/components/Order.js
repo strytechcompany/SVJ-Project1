@@ -53,11 +53,13 @@ export default function Order({ navigation }) {
             payment: order.paymentType,
             date: order.deliveryDate ? order.deliveryDate.split("T")[0] : "-",
             status:
-              order.status === "Completed"
-                ? "Completed"
-                : order.assignedDealer
-                  ? "Assigned"
-                  : "Pending",
+              order.status === "Delivery"
+                ? "Delivery"
+                : order.status === "Completed"
+                  ? "Completed"
+                  : order.assignedDealer
+                    ? "Assigned"
+                    : "Pending",
             dealerName: order.assignedDealerName || "",
             dealerId: order.assignedDealer || "",
             image: order.image || null,  // base64 string
@@ -261,6 +263,25 @@ export default function Order({ navigation }) {
     });
   };
 
+  const handleShareBill = (order) => {
+    const orderNo = order.orderNo || "01";
+    navigation.navigate("BillPreview", {
+      order: {
+        orderNo,
+        customer: order.customer,
+        phone: order.phone,
+        type: order.type,
+        weight: order.weight,
+        payment: order.payment,
+        date: order.date,
+        balance: order.balanceAmount,
+        image: order.image,
+        dealer: order.dealerName,
+      },
+      autoShare: true,
+    });
+  };
+
   const handleDealerWhatsApp = (item) => {
     const dealer = dealers.find(d => d._id === item.dealerId);
     if (!dealer || !dealer.phoneNumber) {
@@ -279,6 +300,55 @@ export default function Order({ navigation }) {
     });
   };
 
+  const handleStatusMove = async (order) => {
+    let nextStatus = "";
+    if (order.status === "Pending") {
+      if (!order.dealerId) {
+        Alert.alert("Dealer Required", "Please assign a dealer before moving to Assigned status.");
+        return;
+      }
+      nextStatus = "Assigned";
+    } else if (order.status === "Assigned") {
+      nextStatus = "Completed";
+    } else if (order.status === "Completed") {
+      nextStatus = "Delivery";
+    } else {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${base_url}/orders/${order.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+
+      if (response.ok) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === order.id ? { ...o, status: nextStatus } : o))
+        );
+        Alert.alert("Success", `Order status updated to ${nextStatus}`);
+
+        if (nextStatus === "Completed") {
+          const message = `Hello ${order.customer},\nYour order for ${order.type} has been completed.\nPending balance: ₹${order.balanceAmount}.\nThank you!`;
+          const phone = order.phone.replace(/[^0-9]/g, "");
+          const url = `whatsapp://send?phone=91${phone}&text=${encodeURIComponent(message)}`;
+          Linking.canOpenURL(url).then((supported) => {
+            if (supported) {
+              Linking.openURL(url);
+            }
+          });
+        }
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        Alert.alert("Error", errData.message || "Failed to update status");
+      }
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", "Server error");
+    }
+  };
+ 
   const filteredOrders =
     selectedTab === "All" ? orders : orders.filter((o) => o.status === selectedTab);
 
@@ -293,7 +363,7 @@ export default function Order({ navigation }) {
 
       {/* Tabs */}
       <View style={styles.tabs}>
-        {["All", "Pending", "Assigned", "Completed"].map((tab) => (
+        {["All", "Pending", "Assigned", "Completed", "Delivery"].map((tab) => (
           <TouchableOpacity
             key={tab}
             style={[styles.tab, selectedTab === tab && styles.activeTab]}
@@ -327,6 +397,8 @@ export default function Order({ navigation }) {
                 onComplete={handleComplete}
                 onPrint={handlePrintBill}
                 onDealerWhatsApp={handleDealerWhatsApp}
+                onStatusMove={handleStatusMove}
+                onShareBill={handleShareBill}
               />
             )}
             keyExtractor={(item) => item.id}
@@ -346,7 +418,7 @@ export default function Order({ navigation }) {
   );
 }
 
-const OrderCard = ({ item, dealers, onAssign, onDelete, onEdit, onView, onComplete, onPrint, onDealerWhatsApp }) => {
+const OrderCard = ({ item, dealers, onAssign, onDelete, onEdit, onView, onComplete, onPrint, onDealerWhatsApp, onStatusMove, onShareBill }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -362,6 +434,11 @@ const OrderCard = ({ item, dealers, onAssign, onDelete, onEdit, onView, onComple
           <Text style={styles.statusText}>{item.status}</Text>
         </View>
         <View style={styles.actionIcons}>
+          {item.status !== "Delivery" && (
+            <TouchableOpacity onPress={() => onStatusMove(item)} style={styles.iconBtn}>
+              <Icon name="arrow-right-circle" size={24} color="#1B4D1B" />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity onPress={() => onEdit(item)} style={styles.iconBtn}>
             <Icon name="pencil-outline" size={20} color="#1B4D1B" />
           </TouchableOpacity>
@@ -490,6 +567,12 @@ const OrderCard = ({ item, dealers, onAssign, onDelete, onEdit, onView, onComple
             onPress={() => onView(item)}
           >
             <Icon name="eye-outline" size={18} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.smallActionBtn, { backgroundColor: '#25D366' }]}
+            onPress={() => onShareBill(item)}
+          >
+            <Icon name="whatsapp" size={18} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.smallActionBtn, { backgroundColor: '#007bff' }]}
