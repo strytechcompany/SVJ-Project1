@@ -282,6 +282,7 @@ const normalizeBills = (rows = [], ctxCustomer = {}) => {
       ob: bal.ob,
       advanceBalance: bal.ab,
       advBal: bal.ab,
+      isConvertedToGold: bill.isConvertedToGold || false,
     };
   });
 };
@@ -538,6 +539,7 @@ export default function BillHistory({ navigation, route }) {
             availableBalance: num(t?.balance, 0),
             oldBalance: num(t?.oldBalance, 0),
             advanceBalance: num(t?.advBal, 0),
+            isConvertedToGold: t?.isConvertedToGold || false,
             createdAt: t?.createdAt || t?.date || new Date().toISOString(),
           };
         });
