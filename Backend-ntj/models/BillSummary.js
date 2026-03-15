@@ -75,6 +75,7 @@ const billSummarySchema = new mongoose.Schema(
     proofImage: { type: String, default: null },
     image: { type: String, default: null },
     receiptImageShowInBill: { type: Boolean, default: true },
+    isConvertedToGold: { type: Boolean, default: false },
     gst: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: true, strict: true },
