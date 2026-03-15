@@ -40,6 +40,39 @@ router.post("/", async (req, res) => {
   }
 });
 
+router.put("/:id", async (req, res) => {
+  try {
+    const { expenseName, workerName, phoneNumber, amount, description } = req.body;
+    const parsedAmount = Number(amount);
+
+    if (!expenseName || !workerName || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      return res.status(400).json({
+        message: "expenseName, workerName and valid amount are required",
+      });
+    }
+
+    const updated = await DailyExpense.findByIdAndUpdate(
+      req.params.id,
+      {
+        expenseName: String(expenseName).trim(),
+        workerName: String(workerName).trim(),
+        phoneNumber: String(phoneNumber || "").trim(),
+        amount: parsedAmount,
+        description: String(description || "").trim(),
+      },
+      { new: true },
+    );
+
+    if (!updated) {
+      return res.status(404).json({ message: "Expense not found" });
+    }
+    res.json(updated);
+  } catch (error) {
+    console.error("Error updating daily expense:", error);
+    res.status(500).json({ message: "Failed to update daily expense" });
+  }
+});
+
 router.delete("/:id", async (req, res) => {
   try {
     const deleted = await DailyExpense.findByIdAndDelete(req.params.id);
