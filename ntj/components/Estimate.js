@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import CommonHeader from "./CommonHeader";
 
 export default function EstimateScreen({ navigation, route }) {
   const passedGoldRate = route?.params?.goldRate;
+  const weightInputRef = useRef(null);
 
   const [itemName, setItemName] = useState("");
   const [weight, setWeight] = useState("");
@@ -94,6 +95,10 @@ export default function EstimateScreen({ navigation, route }) {
     setItemName(item.stockName);
     setWastagePercent(item.percentage?.toString() || "");
     setSearch("");
+    // Automatically focus weight field after selection
+    setTimeout(() => {
+      weightInputRef.current?.focus();
+    }, 100);
   };
 
   const buildCurrentEstimateData = () => {
@@ -290,6 +295,7 @@ export default function EstimateScreen({ navigation, route }) {
 
           <View style={styles.row}>
             <TextInput
+              ref={weightInputRef}
               style={styles.input}
               placeholder="Enter weight"
               keyboardType="numeric"
