@@ -1538,7 +1538,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     }
   };
 
-  const handleConvertToGold = () => {
+  const handleConvertToGold = async () => {
     if (!isB2C) return;
 
     const upi = Math.max(0, toNum(upiAmount, 0));
@@ -1568,6 +1568,35 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       }
     } else {
       updatedOB = baseOB + convertedGold;
+    }
+
+    // Persist immediately so BillHistory / CustomerDataList / HomeScreen see fresh values
+    try {
+      const customerId =
+        customer?.id ||
+        customer?._id ||
+        customer?.customerId ||
+        transactions?.[0]?.customerId ||
+        "";
+
+      if (customerId) {
+        const activeBillId = transactions?.[0]?._id || transactions?.[0]?.id || "";
+        const patchRes = await fetch(`${base_url}/customersB2C/${customerId}/balances`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            oldBalance: updatedOB,
+            advanceBalance: updatedAB,
+            billId: activeBillId,
+          }),
+        });
+        if (!patchRes.ok) {
+          const errText = await patchRes.text();
+          console.warn("Convert-to-Gold balance update failed:", errText);
+        }
+      }
+    } catch (err) {
+      console.warn("Convert-to-Gold network error:", err?.message || err);
     }
 
     setB2cConversion({
@@ -1682,6 +1711,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         manualCashAmount: hasManualCashForB2C ? parsedCashAmount.toFixed(2) : "",
         upiAmount: hasManualCashForB2C ? parsedUpiAmount.toFixed(2) : "",
         b2cUpiGoldValue: b2cConversion.applied ? b2cUpiGoldValue.toFixed(3) : "",
+        isConvertedToGold: Boolean(b2cConversion.applied || transactions?.[0]?.isConvertedToGold),
         goldRate: toNum(customer?.goldRate, currentB2CGoldRate),
         advanceBalance: advanceBalanceForSave,
         oldBalance: oldBalanceForSave,
@@ -2258,25 +2288,27 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                   </Text>
                 </View>
 
-                <View style={styles.b2cActionButtonsRow}>
-                  <TouchableOpacity 
-                    style={[styles.b2cActionButton, { backgroundColor: '#2E7D32' }]} 
-                    onPress={handleConvertToGold}
-                  >
-                    <Icon name="swap-horizontal" size={20} color="#fff" />
-                    <Text style={styles.b2cActionButtonText}>Convert to Gold</Text>
-                  </TouchableOpacity>
-
-                  {upiAmount > 0 && (
+                {!(b2cConversion.applied || transactions?.[0]?.isConvertedToGold) && (
+                  <View style={styles.b2cActionButtonsRow}>
                     <TouchableOpacity 
-                      style={[styles.b2cActionButton, { backgroundColor: '#1565C0' }]} 
-                      onPress={() => setShowUpi(true)}
+                      style={[styles.b2cActionButton, { backgroundColor: '#2E7D32' }]} 
+                      onPress={handleConvertToGold}
                     >
-                      <Icon name="qrcode-scan" size={20} color="#fff" />
-                      <Text style={styles.b2cActionButtonText}>Generate QR Code</Text>
+                      <Icon name="swap-horizontal" size={20} color="#fff" />
+                      <Text style={styles.b2cActionButtonText}>Convert to Gold</Text>
                     </TouchableOpacity>
-                  )}
-                </View>
+
+                    {upiAmount > 0 && (
+                      <TouchableOpacity 
+                        style={[styles.b2cActionButton, { backgroundColor: '#1565C0' }]} 
+                        onPress={() => setShowUpi(true)}
+                      >
+                        <Icon name="qrcode-scan" size={20} color="#fff" />
+                        <Text style={styles.b2cActionButtonText}>Generate QR Code</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
               </View>
 
 
