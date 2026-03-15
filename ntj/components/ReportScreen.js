@@ -43,6 +43,7 @@ export default function ReportScreen({ navigation }) {
   const [purchaseData, setPurchaseData] = useState([]);
   const [paymentData, setPaymentData] = useState([]);
   const [cashData, setCashData] = useState([]);
+  const [expenseData, setExpenseData] = useState([]);
   const [stocks, setStocks] = useState([]);
   const [itemTouchMap, setItemTouchMap] = useState({});
   const [loading, setLoading] = useState(false);
@@ -64,6 +65,7 @@ export default function ReportScreen({ navigation }) {
   const [purchaseSearch, setPurchaseSearch] = useState("");
   const [receiptSearch, setReceiptSearch] = useState("");
   const [cashSearch, setCashSearch] = useState("");
+  const [expenseSearch, setExpenseSearch] = useState("");
   const [stockSearch, setStockSearch] = useState("");
 
   const [selectedB2bItem, setSelectedB2bItem] = useState("");
@@ -313,11 +315,14 @@ export default function ReportScreen({ navigation }) {
         fetch(`${base_url}/customers`),
         fetch(`${base_url}/customersB2C`),
         fetch(`${base_url}/customersDealer`),
+        fetch(`${base_url}/dailyExpenses`),
       ]);
 
       if (purchaseRes.ok) setPurchaseData(await purchaseRes.json());
       if (paymentsRes.ok) setPaymentData(await paymentsRes.json());
       if (cashRes.ok) setCashData(await cashRes.json());
+      const dailyRes = await fetch(`${base_url}/dailyExpenses`);
+      if (dailyRes.ok) setExpenseData(await dailyRes.json());
       if (stockRes.ok) {
         const stockRows = await stockRes.json();
         console.log("[ReportScreen] Stock response count:", Array.isArray(stockRows) ? stockRows.length : 0);
@@ -733,6 +738,16 @@ export default function ReportScreen({ navigation }) {
       );
     });
 
+  const getFilteredExpense = () =>
+    filterByDate(expenseData).filter((r) => {
+      const q = expenseSearch.toLowerCase();
+      return (
+        (r.expenseName || "").toLowerCase().includes(q) ||
+        (r.workerName || "").toLowerCase().includes(q) ||
+        (r.phoneNumber || "").includes(q)
+      );
+    });
+
   const getStockItemName = (r = {}) =>
     r.itemName || r.stockName || r.name || "";
 
@@ -874,6 +889,7 @@ export default function ReportScreen({ navigation }) {
     const filteredPurchase = getFilteredPurchase();
     const filteredReceipts = getFilteredReceipt();
     const filteredCash = getFilteredCash();
+    const filteredExpense = getFilteredExpense();
     const filteredStock = getFilteredStock(includeStockAllCategories);
 
     const b2bSummary = {
@@ -899,6 +915,9 @@ export default function ReportScreen({ navigation }) {
       oldBalance: sumBy(filteredB2c, "oldBalance").toFixed(3),
       availableBalance: sumBy(filteredB2c, "balance").toFixed(3),
     };
+    const expenseSummary = {
+      total: sumBy(filteredExpense, "amount").toFixed(2),
+    };
     const dealerSummary = {
       issueTotal: sumBy(filteredDealer, "issueTotal").toFixed(3),
       issuePure: sumBy(filteredDealer, "issuePure").toFixed(3),
@@ -915,6 +934,7 @@ export default function ReportScreen({ navigation }) {
     let purchaseRows = "";
     let receiptRows = "";
     let cashRows = "";
+    let expenseRows = "";
     let stockRows = "";
 
     if (showAll || activeTab === "B2B") {
@@ -980,6 +1000,12 @@ export default function ReportScreen({ navigation }) {
     if (showAll || activeTab === "Cash") {
       cashRows = filteredCash.map(r =>
         `<tr><td>${parseFloat(r.cashAmount || 0).toFixed(2)}</td><td>${parseFloat(r.pureValue || 0).toFixed(3)}</td><td>${r.category || ""}</td><td>${formatDateTime(new Date(r.date || r.createdAt))}</td></tr>`
+      ).join("");
+    }
+
+    if (showAll || activeTab === "Expense") {
+      expenseRows = filteredExpense.map(r =>
+        `<tr><td>${r.expenseName || ""}</td><td>${r.workerName || ""}</td><td>${r.phoneNumber || "-"}</td><td>${parseFloat(r.amount || 0).toFixed(2)}</td><td>${formatDateTime(new Date(r.expenseDate || r.createdAt))}</td></tr>`
       ).join("");
     }
 
@@ -1072,6 +1098,14 @@ export default function ReportScreen({ navigation }) {
           <table>
             <tr><th>Cash Amount</th><th>Pure Value</th><th>Category</th><th>Date & Time</th></tr>
             ${cashRows}
+          </table>` : ""}
+
+        ${expenseRows ? `
+          <p class="section-title">Daily Expenses</p>
+          <p><b>Total Amount:</b> ₹${expenseSummary.total}</p>
+          <table>
+            <tr><th>Expense Name</th><th>Worker</th><th>Phone</th><th>Amount</th><th>Date & Time</th></tr>
+            ${expenseRows}
           </table>` : ""}
 
         ${stockRows ? `
@@ -1340,7 +1374,7 @@ export default function ReportScreen({ navigation }) {
 
         {/* TABS */}
         <View style={styles.tabRow}>
-          {["B2B", "Dealer", "B2C", "Kadai", "Purchase", "Receipt", "Cash", "Stock", "All"].map(t => (
+          {["B2B", "Dealer", "B2C", "Kadai", "Purchase", "Receipt", "Cash", "Expense", "Stock", "All"].map(t => (
             <TouchableOpacity
               key={t}
               style={[styles.tabBtn, activeTab === t && styles.activeTabBtn]}
@@ -1861,14 +1895,62 @@ export default function ReportScreen({ navigation }) {
                 </View>
 
                 {getFilteredCash().map((r, i) => (
-                    <View key={i} style={styles.tableRow}>
-                      <Text style={styles.tCell}>{i + 1}</Text>
-                      <Text style={styles.tCell}>₹{parseFloat(r.cashAmount || 0).toFixed(2)}</Text>
-                      <Text style={styles.tCell}>{parseFloat(r.pureValue || 0).toFixed(3)}</Text>
-                      <Text style={styles.tCell}>{r.category || "-"}</Text>
-                      <Text style={styles.tCell}>{formatDateTime(new Date(r.date || r.createdAt))}</Text>
-                    </View>
-                  ))}
+                  <View key={i} style={styles.tableRow}>
+                    <Text style={styles.tCell}>{i + 1}</Text>
+                    <Text style={styles.tCell}>₹{parseFloat(r.cashAmount || 0).toFixed(2)}</Text>
+                    <Text style={styles.tCell}>{parseFloat(r.pureValue || 0).toFixed(3)}</Text>
+                    <Text style={styles.tCell}>{r.category || "-"}</Text>
+                    <Text style={styles.tCell}>{formatDateTime(new Date(r.date || r.createdAt))}</Text>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+          </>
+        )}
+
+        {/* ================= EXPENSE TABLE ================= */}
+        {(activeTab === "All" || activeTab === "Expense") && (
+          <>
+            <View style={styles.tableHeaderRow}>
+              <Text style={styles.tableTitle}>Daily Expense Report</Text>
+              <TextInput
+                style={styles.tableSearchInput}
+                placeholder="Search expense/worker..."
+                value={expenseSearch}
+                onChangeText={setExpenseSearch}
+              />
+            </View>
+            <ScrollView horizontal>
+              <View>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.tCell, styles.headerCell]}>S.No</Text>
+                  <Text style={[styles.tCell, styles.headerCell]}>Expense Name</Text>
+                  <Text style={[styles.tCell, styles.headerCell]}>Worker</Text>
+                  <Text style={[styles.tCell, styles.headerCell]}>Phone</Text>
+                  <Text style={[styles.tCell, styles.headerCell]}>Amount</Text>
+                  <Text style={[styles.tCell, styles.headerCell]}>Date & Time</Text>
+                </View>
+
+                {getFilteredExpense().map((r, i) => (
+                  <View key={i} style={styles.tableRow}>
+                    <Text style={styles.tCell}>{i + 1}</Text>
+                    <Text style={styles.tCell}>{r.expenseName || "-"}</Text>
+                    <Text style={styles.tCell}>{r.workerName || "-"}</Text>
+                    <Text style={styles.tCell}>{r.phoneNumber || "-"}</Text>
+                    <Text style={[styles.tCell, { fontWeight: 'bold' }]}>₹{parseFloat(r.amount || 0).toFixed(2)}</Text>
+                    <Text style={styles.tCell}>{formatDateTime(new Date(r.expenseDate || r.createdAt))}</Text>
+                  </View>
+                ))}
+                <View style={styles.tableRow}>
+                  <Text style={[styles.tCell, { fontWeight: 'bold' }]}>Total Expense</Text>
+                  <Text style={styles.tCell}></Text>
+                  <Text style={styles.tCell}></Text>
+                  <Text style={styles.tCell}></Text>
+                  <Text style={[styles.tCell, { fontWeight: 'bold' }]}>
+                    ₹{getFilteredExpense().reduce((s, r) => s + parseFloat(r.amount || 0), 0).toFixed(2)}
+                  </Text>
+                  <Text style={styles.tCell}></Text>
+                </View>
               </View>
             </ScrollView>
           </>
