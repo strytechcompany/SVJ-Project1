@@ -18,6 +18,115 @@ import { useFocusEffect } from "@react-navigation/native";
 import { base_url } from './config';
 import CommonHeader from "./CommonHeader";
 
+const EntryForm = ({ 
+  title, name, setName, w, setW, c, setC, p, setP, r, setR, onAdd, color,
+  handleItemSearch, showItemDropdown, issueFilteredStocks, receiptFilteredStocks, selectStockItem
+}) => {
+  const type = title.toLowerCase();
+  return (
+    <View style={[styles.modernCard, { borderTopWidth: 4, borderTopColor: color }]}>
+      <View style={styles.formHeader}>
+        <Ionicons name={title === "Issue" ? "arrow-up-circle" : "arrow-down-circle"} size={24} color={color} />
+        <Text style={[styles.formTitle, { color }]}> Add {title} Item</Text>
+      </View>
+
+      <View style={[styles.inputGroup, { zIndex: type === 'issue' ? 2000 : 1000 }]}>
+        <TextInput
+          style={styles.modernInput}
+          placeholder="Search Item Name (e.g. Ring, Chain)"
+          value={name}
+          onChangeText={(text) => handleItemSearch(text, type)}
+        />
+        {showItemDropdown[type] && (type === 'issue' ? issueFilteredStocks : receiptFilteredStocks).length > 0 && (
+          <View style={styles.stockDropdown}>
+            <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled">
+              {(type === 'issue' ? issueFilteredStocks : receiptFilteredStocks).map((item, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.dropdownItem}
+                  onPress={() => selectStockItem(item, type)}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.dropdownText}>{item.stockName}</Text>
+                    <Text style={{ fontSize: 11, color: '#666' }}>{item.itemDetails}</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={[styles.dropdownType, { backgroundColor: '#E1F5FE', color: '#0277BD' }]}>
+                      {type === 'issue' ? item.sellingTouch : item.buyingTouch}%
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.inputRow}>
+        <View style={styles.flex1}>
+          <Text style={styles.inputLabel}>Weight (g)</Text>
+          <TextInput style={styles.modernInput} placeholder="0.000" value={w} onChangeText={setW} keyboardType="numeric" returnKeyType="next" />
+        </View>
+        <View style={styles.flex1}>
+          <Text style={styles.inputLabel}>Pieces</Text>
+          <TextInput style={styles.modernInput} placeholder="1" value={c} onChangeText={setC} keyboardType="numeric" returnKeyType="next" />
+        </View>
+      </View>
+
+      <TouchableOpacity style={[styles.actionBtn, { backgroundColor: color }]} onPress={onAdd}>
+        <Ionicons name="add" size={20} color="#fff" />
+        <Text style={styles.actionBtnText}>Add to {title} List</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+const DataTable = ({ items, type, color, removeItem }) => {
+  const sectionTotalPure = items.reduce((sum, i) => sum + (i.pure || 0), 0);
+  return (
+    items.length > 0 && (
+      <View style={styles.tableCard}>
+        <View style={[styles.tableSubHeader, { backgroundColor: color + '10' }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Ionicons name="list" size={18} color={color} />
+            <Text style={[styles.tableSubTitle, { color }]}> {type} Summary</Text>
+          </View>
+          <View style={[styles.totalBadge, { backgroundColor: color }]}>
+            <Text style={styles.totalBadgeText}>{sectionTotalPure.toFixed(3)} g</Text>
+          </View>
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View>
+            <View style={styles.modernTableHeader}>
+              <Text style={[styles.mHeaderCell, { width: 40 }]}>#</Text>
+              <Text style={[styles.mHeaderCell, { width: 140 }]}>Item Name</Text>
+              <Text style={[styles.mHeaderCell, { width: 90 }]}>Weight</Text>
+              <Text style={[styles.mHeaderCell, { width: 60 }]}>Qty</Text>
+              <Text style={[styles.mHeaderCell, { width: 50, textAlign: 'center' }]}>Act</Text>
+            </View>
+
+            {items.map((item, idx) => (
+              <View key={item.id} style={[styles.modernTableRow, idx % 2 === 1 && { backgroundColor: '#FBFBFB' }]}>
+                <Text style={[styles.mCell, { width: 40, color: '#999' }]}>{idx + 1}</Text>
+                <Text style={[styles.mCell, { width: 140, fontWeight: '700', color: '#1A1A1A' }]}>{item.name}</Text>
+                <Text style={[styles.mCell, { width: 90 }]}>{Number(item.weight || 0).toFixed(3)}g</Text>
+                <Text style={[styles.mCell, { width: 60 }]}>{item.count}</Text>
+                <TouchableOpacity
+                  style={{ width: 50, alignItems: 'center' }}
+                  onPress={() => removeItem(type.toLowerCase(), item.id)}
+                >
+                  <Ionicons name="close-circle" size={22} color="#FF5252" />
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+      </View>
+    )
+  );
+};
+
 export default function SuspenseTransactionScreen({ navigation, route }) {
 
   // --- ISSUE STATE ---
@@ -181,41 +290,43 @@ export default function SuspenseTransactionScreen({ navigation, route }) {
   };
 
   const addIssueItem = () => {
-    if (!issueName || !issueWeight) {
-      Alert.alert("Error", "Please enter Item Name and Weight");
+    if (!issueWeight || !issueCount) {
+      Alert.alert("Error", "Please enter Weight and Pieces");
       return;
     }
     const newItem = {
       id: Date.now(),
-      name: issueName,
+      name: issueName || "N/A",
       weight: Number(issueWeight),
       count: Number(issueCount || 1),
       pure: Number(issuePure || issueWeight),
-      rate: Number(issueRate || goldRate),
-      amount: Number(issuePure || issueWeight) * Number(issueRate || goldRate)
+      rate: Number(issueRate || goldRate || 0),
+      amount: Number(issuePure || issueWeight) * Number(issueRate || goldRate || 0)
     };
     setIssueItems([...issueItems, newItem]);
     setIssueName(""); setIssueWeight(""); setIssueCount(""); setIssuePure("");
     setSelectedIssueStock(null);
+    Keyboard.dismiss();
   };
 
   const addReceiptItem = () => {
-    if (!receiptName || !receiptWeight) {
-      Alert.alert("Error", "Please enter Item Name and Weight");
+    if (!receiptWeight || !receiptCount) {
+      Alert.alert("Error", "Please enter Weight and Pieces");
       return;
     }
     const newItem = {
       id: Date.now(),
-      name: receiptName,
+      name: receiptName || "N/A",
       weight: Number(receiptWeight),
       count: Number(receiptCount || 1),
       pure: Number(receiptPure || receiptWeight),
-      rate: Number(receiptRate || goldRate),
-      amount: Number(receiptPure || receiptWeight) * Number(receiptRate || goldRate)
+      rate: Number(receiptRate || goldRate || 0),
+      amount: Number(receiptPure || receiptWeight) * Number(receiptRate || goldRate || 0)
     };
     setReceiptItems([...receiptItems, newItem]);
     setReceiptName(""); setReceiptWeight(""); setReceiptCount(""); setReceiptPure("");
     setSelectedReceiptStock(null);
+    Keyboard.dismiss();
   };
 
   const removeItem = (type, id) => {
@@ -256,27 +367,36 @@ export default function SuspenseTransactionScreen({ navigation, route }) {
     };
 
     try {
-      const existingHistory = await AsyncStorage.getItem("suspense_history");
-      let history = existingHistory ? JSON.parse(existingHistory) : [];
-
+      let response;
       if (currentTransactionId) {
-        history = history.map(t => t.id === currentTransactionId ? transactionData : t);
-        Alert.alert("Updated", "Suspense Transaction Updated Successfully");
+        response = await fetch(`${base_url}/suspense/${currentTransactionId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(transactionData),
+        });
       } else {
-        history = [transactionData, ...history];
-        Alert.alert("Saved", "Suspense Transaction Saved Successfully");
+        response = await fetch(`${base_url}/suspense`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(transactionData),
+        });
       }
 
-      await AsyncStorage.setItem("suspense_history", JSON.stringify(history));
-
-      // Clear fields
-      setIssueItems([]);
-      setReceiptItems([]);
-      setCustomerName('');
-      setMobile('');
-      setAddress('');
-      setCurrentTransactionId(null);
-      navigation.setParams({ editTransaction: null }); // Clear params
+      if (response.ok) {
+        Alert.alert("Success", currentTransactionId ? "Updated Successfully" : "Saved Successfully");
+        // Clear fields
+        setIssueItems([]);
+        setReceiptItems([]);
+        setCustomerName('');
+        setMobile('');
+        setAddress('');
+        setCurrentTransactionId(null);
+        navigation.setParams({ editTransaction: null });
+        Keyboard.dismiss();
+      } else {
+        const err = await response.json();
+        Alert.alert("Error", err.error || "Failed to save transaction.");
+      }
     } catch (error) {
       console.error("Error saving suspense transaction:", error);
       Alert.alert("Error", "Failed to save transaction.");
@@ -308,295 +428,214 @@ export default function SuspenseTransactionScreen({ navigation, route }) {
     };
 
     try {
-      const existingHistory = await AsyncStorage.getItem("suspense_history");
-      let history = existingHistory ? JSON.parse(existingHistory) : [];
-
+      let response;
       if (currentTransactionId) {
-        history = history.map(t => t.id === currentTransactionId ? transactionData : t);
+        response = await fetch(`${base_url}/suspense/${currentTransactionId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(transactionData),
+        });
       } else {
-        history = [transactionData, ...history];
+        response = await fetch(`${base_url}/suspense`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(transactionData),
+        });
       }
 
-      await AsyncStorage.setItem("suspense_history", JSON.stringify(history));
+      if (response.ok) {
+        const result = await response.json();
+        const savedData = result.data || result;
+        
+        // Navigate to Preview
+        navigation.navigate("BillPreview", {
+          customer: transactionData.customer,
+          suspense: transactionData.suspense
+        });
 
-      // Navigate to Preview
-      navigation.navigate("BillPreview", {
-        customer: transactionData.customer,
-        suspense: transactionData.suspense
-      });
-
-      // Clear fields
-      setIssueItems([]);
-      setReceiptItems([]);
-      setCustomerName('');
-      setMobile('');
-      setAddress('');
-      setCurrentTransactionId(null);
-      navigation.setParams({ editTransaction: null });
-
+        // Clear fields
+        setIssueItems([]);
+        setReceiptItems([]);
+        setCustomerName('');
+        setMobile('');
+        setAddress('');
+        setCurrentTransactionId(null);
+        navigation.setParams({ editTransaction: null });
+        Keyboard.dismiss();
+      } else {
+        Alert.alert("Error", "Failed to save before printing");
+      }
     } catch (error) {
       console.error("Error processing print/save:", error);
       Alert.alert("Error", "Failed to process transaction.");
     }
   };
 
-  const EntryForm = ({ title, name, setName, w, setW, c, setC, p, setP, r, setR, onAdd, color }) => {
-    const type = title.toLowerCase();
-    return (
-      <View style={[styles.modernCard, { borderTopWidth: 4, borderTopColor: color }]}>
-        <View style={styles.formHeader}>
-          <Ionicons name={title === "Issue" ? "arrow-up-circle" : "arrow-down-circle"} size={24} color={color} />
-          <Text style={[styles.formTitle, { color }]}> Add {title} Item</Text>
-        </View>
-
-        <View style={[styles.inputGroup, { zIndex: type === 'issue' ? 2000 : 1000 }]}>
-          <TextInput
-            style={styles.modernInput}
-            placeholder="Search Item Name (e.g. Ring, Chain)"
-            value={name}
-            onChangeText={(text) => handleItemSearch(text, type)}
-          />
-          {showItemDropdown[type] && (type === 'issue' ? issueFilteredStocks : receiptFilteredStocks).length > 0 && (
-            <View style={styles.stockDropdown}>
-              <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 150 }}>
-                {(type === 'issue' ? issueFilteredStocks : receiptFilteredStocks).map((item, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={styles.dropdownItem}
-                    onPress={() => selectStockItem(item, type)}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.dropdownText}>{item.stockName}</Text>
-                      <Text style={{ fontSize: 11, color: '#666' }}>{item.itemDetails}</Text>
-                    </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={[styles.dropdownType, { backgroundColor: '#E1F5FE', color: '#0277BD' }]}>
-                        {type === 'issue' ? item.sellingTouch : item.buyingTouch}%
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.inputRow}>
-          <View style={styles.flex1}>
-            <Text style={styles.inputLabel}>Weight (g)</Text>
-            <TextInput style={styles.modernInput} placeholder="0.000" value={w} onChangeText={setW} keyboardType="numeric" />
-          </View>
-          <View style={styles.flex1}>
-            <Text style={styles.inputLabel}>Pieces</Text>
-            <TextInput style={styles.modernInput} placeholder="1" value={c} onChangeText={setC} keyboardType="numeric" />
-          </View>
-        </View>
-
-        <View style={styles.inputRow}>
-          <View style={styles.flex1}>
-            <Text style={styles.inputLabel}>Gold Rate (₹)</Text>
-            <TextInput style={styles.modernInput} placeholder="₹ 0" value={r} onChangeText={setR} keyboardType="numeric" />
-          </View>
-          <View style={styles.flex1}>
-            <Text style={styles.inputLabel}>Pure Gold (g)</Text>
-            <TextInput style={styles.modernInput} placeholder="0.000" value={p} onChangeText={setP} keyboardType="numeric" />
-          </View>
-        </View>
-
-        <TouchableOpacity style={[styles.actionBtn, { backgroundColor: color }]} onPress={onAdd}>
-          <Ionicons name="add" size={20} color="#fff" />
-          <Text style={styles.actionBtnText}>Add to {title} List</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
-  const DataTable = ({ items, type, color }) => {
-    const sectionTotalPure = items.reduce((sum, i) => sum + i.pure, 0);
-    return (
-      items.length > 0 && (
-        <View style={styles.tableCard}>
-          <View style={[styles.tableSubHeader, { backgroundColor: color + '10' }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Ionicons name="list" size={18} color={color} />
-              <Text style={[styles.tableSubTitle, { color }]}> {type} Summary</Text>
-            </View>
-            <View style={[styles.totalBadge, { backgroundColor: color }]}>
-              <Text style={styles.totalBadgeText}>{sectionTotalPure.toFixed(3)} g</Text>
-            </View>
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View>
-              <View style={styles.modernTableHeader}>
-                <Text style={[styles.mHeaderCell, { width: 40 }]}>#</Text>
-                <Text style={[styles.mHeaderCell, { width: 140 }]}>Item Name</Text>
-                <Text style={[styles.mHeaderCell, { width: 90 }]}>Weight</Text>
-                <Text style={[styles.mHeaderCell, { width: 60 }]}>Qty</Text>
-                <Text style={[styles.mHeaderCell, { width: 90 }]}>Rate (₹)</Text>
-                <Text style={[styles.mHeaderCell, { width: 90 }]}>Pure Gold</Text>
-                <Text style={[styles.mHeaderCell, { width: 50, textAlign: 'center' }]}>Act</Text>
-              </View>
-
-              {items.map((item, idx) => (
-                <View key={item.id} style={[styles.modernTableRow, idx % 2 === 1 && { backgroundColor: '#FBFBFB' }]}>
-                  <Text style={[styles.mCell, { width: 40, color: '#999' }]}>{idx + 1}</Text>
-                  <Text style={[styles.mCell, { width: 140, fontWeight: '700', color: '#1A1A1A' }]}>{item.name}</Text>
-                  <Text style={[styles.mCell, { width: 90 }]}>{item.weight.toFixed(3)}g</Text>
-                  <Text style={[styles.mCell, { width: 60 }]}>{item.count}</Text>
-                  <Text style={[styles.mCell, { width: 90 }]}>₹{item.rate}</Text>
-                  <Text style={[styles.mCell, { width: 90, color, fontWeight: '800' }]}>{item.pure.toFixed(3)}g</Text>
-                  <TouchableOpacity
-                    style={{ width: 50, alignItems: 'center' }}
-                    onPress={() => removeItem(type.toLowerCase(), item.id)}
-                  >
-                    <Ionicons name="close-circle" size={22} color="#FF5252" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          </ScrollView>
-        </View>
-      )
-    );
-  };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={styles.page}>
-          <CommonHeader
-          title="Suspense Transaction"
-          onBack={() => navigation.goBack()}
-          backgroundColor="#1B4D1B"
-          right={
+    <View style={styles.page}>
+      <CommonHeader
+        title="Suspense Transaction"
+        onBack={() => navigation.goBack()}
+        backgroundColor="#1B4D1B"
+        right={
           <TouchableOpacity onPress={() => navigation.navigate("SuspenseHistoryScreen")}>
-          <Ionicons name="time" size={28} color="#fff" />
+            <Ionicons name="time" size={28} color="#fff" />
           </TouchableOpacity>
-          }
-          />
-
-          <ScrollView showsVerticalScrollIndicator={false}>
-            {/* CUSTOMER & GOLD RATE INFO */}
-            <View style={styles.modernCard}>
-              {/* GOLD RATE SECTION */}
-              <View style={styles.rateModule}>
-                <View style={styles.rateInfo}>
-                  <Ionicons name="trending-up" size={20} color="#F4B400" />
-                  <View style={{ marginLeft: 10 }}>
-                    <Text style={styles.rateLabel}>Today's Gold Rate</Text>
-                    {isEditingRate ? (
-                      <TextInput
-                        style={styles.rateInputSmall}
-                        value={goldRate}
-                        onChangeText={(val) => {
-                          setGoldRate(val);
-                          setIssueRate(val);
-                          setReceiptRate(val);
-                        }}
-                        onBlur={() => setIsEditingRate(false)}
-                        autoFocus
-                        keyboardType="numeric"
-                      />
-                    ) : (
-                      <TouchableOpacity onPress={() => setIsEditingRate(true)}>
-                        <Text style={styles.rateValueText}>₹ {Number(goldRate).toLocaleString()}</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
-                <TouchableOpacity style={styles.editBadge} onPress={() => setIsEditingRate(!isEditingRate)}>
-                  <Ionicons name={isEditingRate ? "checkmark-circle" : "pencil"} size={16} color="#fff" />
-                  <Text style={styles.editBadgeText}>{isEditingRate ? "Save" : "Edit"}</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.divider} />
-
-              {/* CUSTOMER LOOKUP SECTION */}
-              <View style={styles.formHeader}>
-                <Ionicons name="person-circle" size={24} color="#1B4D1B" />
-                <Text style={styles.formTitle}> Customer Information</Text>
-              </View>
-
-              <View style={[styles.inputGroup, { zIndex: 5000 }]}>
-                <Text style={styles.inputLabel}>Search & Select Customer</Text>
-                <TextInput
-                  style={styles.modernInput}
-                  value={customerName}
-                  onChangeText={handleSearch}
-                  placeholder="Type customer name..."
-                />
-
-                {showDropdown && filteredCustomers.length > 0 && (
-                  <View style={styles.dropdown}>
-                    <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200 }}>
-                      {filteredCustomers.map((cust, index) => (
-                        <TouchableOpacity
-                          key={index}
-                          style={styles.dropdownItem}
-                          onPress={() => selectCustomer(cust)}
-                        >
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.dropdownText}>{cust.customerName}</Text>
-                            <Text style={{ fontSize: 12, color: '#666' }}>{cust.phone}</Text>
-                          </View>
-                          <Text style={styles.dropdownType}>{cust.type}</Text>
+        }
+      />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="on-drag"
+          contentContainerStyle={{ flexGrow: 1 }}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+            <View style={{ flex: 1, paddingBottom: 40 }}>
+              {/* CUSTOMER & GOLD RATE INFO */}
+              <View style={styles.modernCard}>
+                {/* GOLD RATE SECTION */}
+                <View style={styles.rateModule}>
+                  <View style={styles.rateInfo}>
+                    <Ionicons name="trending-up" size={20} color="#F4B400" />
+                    <View style={{ marginLeft: 10 }}>
+                      <Text style={styles.rateLabel}>Today's Gold Rate</Text>
+                      {isEditingRate ? (
+                        <TextInput
+                          style={styles.rateInputSmall}
+                          value={goldRate}
+                          onChangeText={(val) => {
+                            setGoldRate(val);
+                            setIssueRate(val);
+                            setReceiptRate(val);
+                          }}
+                          onBlur={() => setIsEditingRate(false)}
+                          autoFocus
+                          keyboardType="numeric"
+                          returnKeyType="done"
+                        />
+                      ) : (
+                        <TouchableOpacity onPress={() => setIsEditingRate(true)}>
+                          <Text style={styles.rateValueText}>₹ {Number(goldRate).toLocaleString()}</Text>
                         </TouchableOpacity>
-                      ))}
-                    </ScrollView>
+                      )}
+                    </View>
                   </View>
-                )}
+                  <TouchableOpacity style={styles.editBadge} onPress={() => setIsEditingRate(!isEditingRate)}>
+                    <Ionicons name={isEditingRate ? "checkmark-circle" : "pencil"} size={16} color="#fff" />
+                    <Text style={styles.editBadgeText}>{isEditingRate ? "Save" : "Edit"}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.divider} />
+
+                {/* CUSTOMER LOOKUP SECTION */}
+                <View style={styles.formHeader}>
+                  <Ionicons name="person-circle" size={24} color="#1B4D1B" />
+                  <Text style={styles.formTitle}> Customer Information</Text>
+                </View>
+
+                <View style={[styles.inputGroup, { zIndex: 5000 }]}>
+                  <Text style={styles.inputLabel}>Search & Select Customer</Text>
+                  <TextInput
+                    style={styles.modernInput}
+                    value={customerName}
+                    onChangeText={handleSearch}
+                    placeholder="Type customer name..."
+                    returnKeyType="next"
+                  />
+
+                  {showDropdown && filteredCustomers.length > 0 && (
+                    <View style={styles.dropdown}>
+                      <ScrollView nestedScrollEnabled={true} style={{ maxHeight: 200 }} keyboardShouldPersistTaps="handled">
+                        {filteredCustomers.map((cust, index) => (
+                          <TouchableOpacity
+                            key={index}
+                            style={styles.dropdownItem}
+                            onPress={() => selectCustomer(cust)}
+                          >
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.dropdownText}>{cust.customerName}</Text>
+                              <Text style={{ fontSize: 12, color: '#666' }}>{cust.phone}</Text>
+                            </View>
+                            <Text style={styles.dropdownType}>{cust.type}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Mobile Number</Text>
+                  <TextInput
+                    style={styles.modernInput}
+                    value={mobile}
+                    onChangeText={setMobile}
+                    placeholder="Mobile number will auto-fill"
+                    keyboardType="numeric"
+                    returnKeyType="next"
+                  />
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Address</Text>
+                  <TextInput
+                    style={styles.modernInput}
+                    value={address}
+                    onChangeText={setAddress}
+                    placeholder="Customer Address"
+                    returnKeyType="next"
+                  />
+                </View>
               </View>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Mobile Number</Text>
-                <TextInput
-                  style={styles.modernInput}
-                  value={mobile}
-                  onChangeText={setMobile}
-                  placeholder="Mobile number will auto-fill"
-                  keyboardType="numeric"
-                />
+              <EntryForm 
+                title="Issue" name={issueName} setName={setIssueName} w={issueWeight} setW={setIssueWeight} c={issueCount} setC={setIssueCount} p={issuePure} setP={setIssuePure} r={issueRate} setR={setIssueRate} onAdd={addIssueItem} color="#D32F2F" 
+                handleItemSearch={handleItemSearch}
+                showItemDropdown={showItemDropdown}
+                issueFilteredStocks={issueFilteredStocks}
+                receiptFilteredStocks={receiptFilteredStocks}
+                selectStockItem={selectStockItem}
+              />
+              <DataTable items={issueItems} type="Issue" color="#D32F2F" removeItem={removeItem} />
+
+              <EntryForm 
+                title="Receipt" name={receiptName} setName={setReceiptName} w={receiptWeight} setW={setReceiptWeight} c={receiptCount} setC={setReceiptCount} p={receiptPure} setP={setReceiptPure} r={receiptRate} setR={setReceiptRate} onAdd={addReceiptItem} color="#2E7D32" 
+                handleItemSearch={handleItemSearch}
+                showItemDropdown={showItemDropdown}
+                issueFilteredStocks={issueFilteredStocks}
+                receiptFilteredStocks={receiptFilteredStocks}
+                selectStockItem={selectStockItem}
+              />
+              <DataTable items={receiptItems} type="Receipt" color="#2E7D32" removeItem={removeItem} />
+
+              {/* SUMMARY */}
+              <View style={styles.totalCard}>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.totalLabel}>Net Pure Gold:</Text>
+                  <Text style={[styles.totalValue, { color: netPure >= 0 ? '#D32F2F' : '#2E7D32' }]}>{netPure.toFixed(3)} g</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.totalLabel}>Grand Total (₹):</Text>
+                  <Text style={styles.totalValue}>₹ {netAmount.toLocaleString()}</Text>
+                </View>
               </View>
 
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Address</Text>
-                <TextInput
-                  style={styles.modernInput}
-                  value={address}
-                  onChangeText={setAddress}
-                  placeholder="Customer Address"
-                />
+              <View style={styles.bottomRow}>
+                <TouchableOpacity style={styles.saveBtn} onPress={handleSave}><Text style={styles.saveText}>Save</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.printBtn} onPress={handlePrint}><Text style={styles.printText}>Save & Print</Text></TouchableOpacity>
               </View>
             </View>
-
-            <EntryForm title="Issue" name={issueName} setName={setIssueName} w={issueWeight} setW={setIssueWeight} c={issueCount} setC={setIssueCount} p={issuePure} setP={setIssuePure} r={issueRate} setR={setIssueRate} onAdd={addIssueItem} color="#D32F2F" />
-            <DataTable items={issueItems} type="Issue" color="#D32F2F" />
-
-            <EntryForm title="Receipt" name={receiptName} setName={setReceiptName} w={receiptWeight} setW={setReceiptWeight} c={receiptCount} setC={setReceiptCount} p={receiptPure} setP={setReceiptPure} r={receiptRate} setR={setReceiptRate} onAdd={addReceiptItem} color="#2E7D32" />
-            <DataTable items={receiptItems} type="Receipt" color="#2E7D32" />
-
-            {/* SUMMARY */}
-            <View style={styles.totalCard}>
-              <View style={styles.summaryRow}>
-                <Text style={styles.totalLabel}>Net Pure Gold:</Text>
-                <Text style={[styles.totalValue, { color: netPure >= 0 ? '#D32F2F' : '#2E7D32' }]}>{netPure.toFixed(3)} g</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.totalLabel}>Grand Total (₹):</Text>
-                <Text style={styles.totalValue}>₹ {netAmount.toLocaleString()}</Text>
-              </View>
-            </View>
-
-            <View style={styles.bottomRow}>
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSave}><Text style={styles.saveText}>Save</Text></TouchableOpacity>
-              <TouchableOpacity style={styles.printBtn} onPress={handlePrint}><Text style={styles.printText}>Save & Print</Text></TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
-      </TouchableWithoutFeedback>
-    </KeyboardAvoidingView>
+          </TouchableWithoutFeedback>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
