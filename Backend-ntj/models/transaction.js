@@ -19,6 +19,7 @@ const TransactionSchema = new mongoose.Schema({
   advBal: { type: Number, required: true },
   date: { type: String, default: "" },
   description: { type: String, default: "" },
+  isConvertedToGold: { type: Boolean, default: false },
 }, { timestamps: true });
 
 module.exports = mongoose.model("Transaction", TransactionSchema);
