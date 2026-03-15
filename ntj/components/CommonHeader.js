@@ -8,6 +8,7 @@ const CONTENT_HEIGHT = 56;
 export default function CommonHeader({
   title,
   subtitle,
+  center,
   onBack,
   left,
   right,
@@ -38,14 +39,18 @@ export default function CommonHeader({
         </View>
 
         <View style={styles.center}> 
-          <Text style={[styles.title, { color: titleColor }]} numberOfLines={1}>
-            {title}
-          </Text>
-          {subtitle ? (
-            <Text style={[styles.subtitle, { color: titleColor }]} numberOfLines={1}>
-              {subtitle}
-            </Text>
-          ) : null}
+          {center ? center : (
+            <>
+              <Text style={[styles.title, { color: titleColor }]} numberOfLines={1}>
+                {title}
+              </Text>
+              {subtitle ? (
+                <Text style={[styles.subtitle, { color: titleColor }]} numberOfLines={1}>
+                  {subtitle}
+                </Text>
+              ) : null}
+            </>
+          )}
         </View>
 
         <View style={[styles.side, styles.sideRight]}> 
