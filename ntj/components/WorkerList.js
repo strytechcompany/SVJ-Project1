@@ -221,7 +221,7 @@ export default function Users({ navigation }) {
     <View style={styles.container}>
       {/* Header */}
       <CommonHeader
-      title="User Management"
+      title={`Hey! ${currentUser?.role || "Super Admin"}`}
       backgroundColor="#1B4D1B"
       left={
       <TouchableOpacity onPress={() => navigation.goBack()}>
