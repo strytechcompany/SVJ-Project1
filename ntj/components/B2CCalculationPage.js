@@ -181,8 +181,8 @@ export default function CreateTransaction({ navigation, route }) {
           const res = await fetch(`${base_url}/billSummary/nextBillNo?billType=B2C`);
           if (res.ok) {
             const data = await res.json();
-            if (data.nextBillNo) {
-              setInvoiceNo(data.nextBillNo);
+            if (data.billNo) {
+              setInvoiceNo(data.billNo);
             }
           }
         } catch (error) {
@@ -454,6 +454,7 @@ export default function CreateTransaction({ navigation, route }) {
         oldBalance: parseFloat(customer.oldBalance || 0),
         advanceBalance: parseFloat(customer.advanceBalance || 0),
         gstin: customer.gstin || "",
+        lastBillNo: customer.lastBillNo || customer.billNo || customer.invoiceNo || "",
       }));
 
       setB2cCustomers(formattedCustomers);
@@ -490,6 +491,20 @@ export default function CreateTransaction({ navigation, route }) {
 
   const handleRefresh = async () => {
     console.log("ðŸ”„ Refreshing data...");
+    
+    // Refresh next invoice number
+    try {
+      const res = await fetch(`${base_url}/billSummary/nextBillNo?billType=B2C`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.billNo) {
+          setInvoiceNo(data.billNo);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to refresh next invoice number:", error);
+    }
+
     await fetchB2CCustomers();
     await fetchRecentNames();
     console.log("Success", "Data refreshed from database");
@@ -1684,7 +1699,7 @@ export default function CreateTransaction({ navigation, route }) {
                                 <Text style={{ fontWeight: 'bold', color: '#000' }}>{cust.customerName}</Text> | P : {cust.phone}
                               </Text>
                               <Text style={styles.balanceText}>
-                                OB: {Number(currentBalance || 0).toFixed(3)}g {advanceBalance > 0 ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g` : ''}
+                                Inv: {cust.lastBillNo || 'None'} | OB: {Number(currentBalance || 0).toFixed(3)}g {advanceBalance > 0 ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g` : ''}
                               </Text>
                             </View>
                           </TouchableOpacity>
@@ -1714,7 +1729,7 @@ export default function CreateTransaction({ navigation, route }) {
                             <Text style={{ fontWeight: 'bold', color: '#000' }}>{cust.customerName}</Text> | P : {cust.phone}
                           </Text>
                           <Text style={styles.balanceText}>
-                            OB: {Number(currentBalance || 0).toFixed(3)}g {advanceBalance > 0 ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g` : ''}
+                            Inv: {cust.lastBillNo || 'None'} | OB: {Number(currentBalance || 0).toFixed(3)}g {advanceBalance > 0 ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g` : ''}
                           </Text>
                         </View>
                       </TouchableOpacity>
@@ -1760,7 +1775,12 @@ export default function CreateTransaction({ navigation, route }) {
                 {oldBalance ? <Text style={{ color: '#666' }}>OB: {oldBalance}</Text> : null}
                 {advanceBalance ? <Text style={{ color: '#666' }}>AB: {advanceBalance}</Text> : null}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 15, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
-                  <Text style={{ fontWeight: 'bold' }}>Inv: {invoiceNo}</Text>
+                  <View>
+                    <Text style={{ fontWeight: 'bold' }}>Inv: {invoiceNo}</Text>
+                    {selectedCust?.lastBillNo ? (
+                      <Text style={{ fontSize: 12, color: '#666', marginTop: 2 }}>Last Inv: {selectedCust.lastBillNo}</Text>
+                    ) : null}
+                  </View>
                   <Text style={{ fontWeight: 'bold' }}>Date: {date}</Text>
                   <TouchableOpacity onPress={handleRefresh}>
                     <Icon name="refresh" color="#000" size={30} />
