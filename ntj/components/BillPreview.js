@@ -592,12 +592,15 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                </div>
             </div>
 
-            ${order.image ? `
-              <div class="photo-container">
-                <p><strong>Item Photo:</strong></p>
-                <img src="${order.image.startsWith('data:') ? order.image : `${base_url}/${order.image}`}" style="width: 100%; border-radius: 5px;" />
-              </div>
-            ` : ''}
+            ${(() => {
+              const orderImg = normalizeImageUri(order.image, base_url);
+              return orderImg ? `
+                <div class="photo-container">
+                  <p><strong>Item Photo:</strong></p>
+                  <img src="${orderImg}" style="width: 100%; border-radius: 5px;" />
+                </div>
+              ` : '';
+            })()}
 
             ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
               <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
@@ -1600,6 +1603,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     }
     setB2cConversion({
       applied: true,
+
       goldWeight: convertedGold,
       updatedOB,
       updatedAB,
