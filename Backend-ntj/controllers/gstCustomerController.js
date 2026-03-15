@@ -10,7 +10,7 @@ const getGstCustomers = async (req, res) => {
 };
 
 const createGstCustomer = async (req, res) => {
-  const { customerName, phoneNumber, address, gstin } = req.body;
+  const { customerName, phoneNumber, address, gstin, date } = req.body;
   try {
     const exists = await GSTCustomer.findOne({
       customerName: String(customerName || "").trim(),
@@ -25,6 +25,7 @@ const createGstCustomer = async (req, res) => {
       phoneNumber,
       address,
       gstin: gstin || "",
+      date: date || "",
     });
     const saved = await customer.save();
     res.status(201).json(saved);
@@ -38,11 +39,12 @@ const updateGstCustomer = async (req, res) => {
     const customer = await GSTCustomer.findById(req.params.id);
     if (!customer) return res.status(404).json({ message: "GST customer not found" });
 
-    const { customerName, phoneNumber, address, gstin } = req.body;
+    const { customerName, phoneNumber, address, gstin, date } = req.body;
     if (customerName !== undefined) customer.customerName = customerName;
     if (phoneNumber !== undefined) customer.phoneNumber = phoneNumber;
     if (address !== undefined) customer.address = address;
     if (gstin !== undefined) customer.gstin = gstin;
+    if (date !== undefined) customer.date = date;
 
     const updated = await customer.save();
     res.json(updated);
