@@ -45,12 +45,13 @@ export default function DailyExpense({ navigation }) {
   const [rows, setRows] = useState([]);
   const [saving, setSaving] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
+  const [editingId, setEditingId] = useState(null);
 
   const workerSuggestions = useMemo(() => {
     const key = workerName.trim().toLowerCase();
     if (!key) return workerNames.slice(0, 8);
     return workerNames
-      .filter((name) => name.toLowerCase().includes(key))
+      .filter((w) => w.name.toLowerCase().includes(key))
       .slice(0, 8);
   }, [workerName, workerNames]);
 
@@ -64,16 +65,38 @@ export default function DailyExpense({ navigation }) {
       const users = usersRes.ok ? await usersRes.json() : [];
       const dealers = dealersRes.ok ? await dealersRes.json() : [];
 
-      const fromUsers = users
-        .filter((u) => String(u.role || "").toLowerCase() === "worker")
-        .map((u) => String(u.name || "").trim())
-        .filter(Boolean);
+      const workerMap = new Map();
 
-      const fromDealers = dealers
-        .map((d) => String(d.workerName || "").trim())
-        .filter(Boolean);
+      // From Users (Role: Worker)
+      users.forEach((u) => {
+        if (String(u.role || "").toLowerCase() === "worker") {
+          const name = String(u.name || "").trim();
+          if (name) {
+            workerMap.set(name.toLowerCase(), {
+              name,
+              phone: String(u.phone || u.phoneNumber || "").trim(),
+            });
+          }
+        }
+      });
 
-      const merged = Array.from(new Set([...fromUsers, ...fromDealers]));
+      // From Dealers (workerName field)
+      dealers.forEach((d) => {
+        const name = String(d.workerName || "").trim();
+        if (name) {
+          const key = name.toLowerCase();
+          if (!workerMap.has(key)) {
+            workerMap.set(key, {
+              name,
+              phone: String(d.phoneNumber || "").trim(),
+            });
+          }
+        }
+      });
+
+      const merged = Array.from(workerMap.values()).sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
       setWorkerNames(merged);
     } catch (error) {
       console.error("Failed to fetch worker list:", error);
@@ -134,6 +157,7 @@ export default function DailyExpense({ navigation }) {
     setAmount("");
     setDescription("");
     setShowWorkerSuggestions(false);
+    setEditingId(null);
   };
 
   const handleSave = async () => {
@@ -163,26 +187,35 @@ export default function DailyExpense({ navigation }) {
 
       let saved = null;
       let saveError = null;
-      for (const endpoint of DAILY_EXPENSE_ENDPOINTS) {
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const body = await res.json().catch(() => ({}));
-        if (res.ok) {
-          saved = body;
-          break;
-        }
+      const method = editingId ? "PUT" : "POST";
+      const baseUrl = editingId ? `${DAILY_EXPENSE_ENDPOINTS[0]}/${editingId}` : DAILY_EXPENSE_ENDPOINTS[0];
+
+      // Note: We use the first endpoint for modifications to be safe
+      const res = await fetch(baseUrl, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => ({}));
+
+      if (res.ok) {
+        saved = body;
+      } else {
         saveError = body?.message || `HTTP ${res.status}`;
       }
+
       if (!saved) {
         throw new Error(saveError || "Failed to save expense");
       }
 
-      setRows((prev) => [saved, ...prev]);
+      if (editingId) {
+        setRows((prev) => prev.map((r) => (r._id === editingId || r.id === editingId ? saved : r)));
+      } else {
+        setRows((prev) => [saved, ...prev]);
+      }
+
       resetForm();
-      Alert.alert("Saved", "Daily expense recorded successfully.");
+      Alert.alert("Success", editingId ? "Expense updated." : "Daily expense recorded successfully.");
     } catch (error) {
       console.error("Save expense error:", error);
       Alert.alert("Error", error.message || "Failed to save expense.");
@@ -191,22 +224,76 @@ export default function DailyExpense({ navigation }) {
     }
   };
 
+  const handleEdit = (item) => {
+    setEditingId(item._id || item.id);
+    setExpenseName(item.expenseName || "");
+    setWorkerName(item.workerName || "");
+    setPhoneNumber(item.phoneNumber || "");
+    setAmount(String(item.amount || ""));
+    setDescription(item.description || "");
+    // Scroll to top
+  };
+
+  const handleDelete = (id) => {
+    Alert.alert("Confirm Delete", "Are you sure you want to delete this expense?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const res = await fetch(`${DAILY_EXPENSE_ENDPOINTS[0]}/${id}`, {
+              method: "DELETE",
+            });
+            if (res.ok) {
+              setRows((prev) => prev.filter((r) => r._id !== id && r.id !== id));
+            } else {
+              const body = await res.json().catch(() => ({}));
+              Alert.alert("Error", body.message || "Failed to delete.");
+            }
+          } catch (error) {
+            console.error("Delete error:", error);
+            Alert.alert("Error", "Unable to delete record.");
+          }
+        },
+      },
+    ]);
+  };
+
   const renderItem = ({ item, index }) => (
     <View style={styles.card}>
-      <View style={styles.cardTopRow}>
-        <Text style={styles.cardTitle}>
-          {index + 1}. {item.expenseName || "-"}
-        </Text>
-        <Text style={styles.amountText}>₹{Number(item.amount || 0).toFixed(2)}</Text>
+      <View style={styles.cardHeader}>
+        <View style={{ flex: 1 }}>
+          <View style={styles.cardTopRow}>
+            <Text style={styles.cardTitle}>
+              {index + 1}. {item.expenseName || "-"}
+            </Text>
+            <Text style={styles.amountText}>₹{Number(item.amount || 0).toFixed(2)}</Text>
+          </View>
+          <Text style={styles.cardLine}>Worker: {item.workerName || "-"}</Text>
+          <Text style={styles.cardLine}>Phone: {item.phoneNumber || "-"}</Text>
+          <Text style={styles.cardLine}>
+            Date: {formatDateTime(item.expenseDate || item.createdAt)}
+          </Text>
+          {!!item.description && (
+            <Text style={styles.cardLine}>Details: {item.description}</Text>
+          )}
+        </View>
+        <View style={styles.actionButtons}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.editActionBtn]}
+            onPress={() => handleEdit(item)}
+          >
+            <Icon name="pencil" size={18} color="#1B4D1B" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.deleteActionBtn]}
+            onPress={() => handleDelete(item._id || item.id)}
+          >
+            <Icon name="delete" size={18} color="#D32F2F" />
+          </TouchableOpacity>
+        </View>
       </View>
-      <Text style={styles.cardLine}>Worker: {item.workerName || "-"}</Text>
-      <Text style={styles.cardLine}>Phone: {item.phoneNumber || "-"}</Text>
-      <Text style={styles.cardLine}>
-        Date & Time: {formatDateTime(item.expenseDate || item.createdAt)}
-      </Text>
-      {!!item.description && (
-        <Text style={styles.cardLine}>Details: {item.description}</Text>
-      )}
     </View>
   );
 
@@ -222,9 +309,16 @@ export default function DailyExpense({ navigation }) {
         }
       />
 
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         <View style={styles.formCard}>
-          <Text style={styles.sectionTitle}>Add Daily Expense</Text>
+          <View style={styles.formHeader}>
+            <Text style={styles.sectionTitle}>{editingId ? "Update Daily Expense" : "Add Daily Expense"}</Text>
+            {editingId && (
+              <TouchableOpacity onPress={resetForm}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
           <Text style={styles.label}>Expense Name / Product Name</Text>
           <TextInput
@@ -243,22 +337,25 @@ export default function DailyExpense({ navigation }) {
               setShowWorkerSuggestions(true);
             }}
             onFocus={() => setShowWorkerSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowWorkerSuggestions(false), 150)}
+            onBlur={() => setTimeout(() => setShowWorkerSuggestions(false), 300)}
             placeholder="Select / type worker name"
           />
 
           {showWorkerSuggestions && workerSuggestions.length > 0 && (
             <View style={styles.suggestionBox}>
-              {workerSuggestions.map((name) => (
+              {workerSuggestions.map((w) => (
                 <TouchableOpacity
-                  key={name}
+                  key={`${w.name}-${w.phone}`}
                   style={styles.suggestionRow}
                   onPress={() => {
-                    setWorkerName(name);
+                    setWorkerName(w.name);
+                    setPhoneNumber(w.phone);
                     setShowWorkerSuggestions(false);
                   }}
                 >
-                  <Text style={styles.suggestionText}>{name}</Text>
+                  <Text style={styles.suggestionText}>
+                    {w.name} {w.phone ? `(${w.phone})` : ""}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -293,16 +390,46 @@ export default function DailyExpense({ navigation }) {
           />
 
           <TouchableOpacity
-            style={[styles.saveBtn, saving && { opacity: 0.7 }]}
+            style={[styles.saveBtn, saving && { opacity: 0.7 }, editingId && { backgroundColor: "#FF9800" }]}
             onPress={handleSave}
             disabled={saving}
           >
-            <Text style={styles.saveBtnText}>{saving ? "Saving..." : "Save Expense"}</Text>
+            <Text style={styles.saveBtnText}>
+              {saving ? "Processing..." : editingId ? "Update Expense" : "Save Expense"}
+            </Text>
           </TouchableOpacity>
         </View>
 
+        {/* <View style={styles.listCard}>
+          <Text style={styles.sectionTitle}>Worker Master / List</Text>
+          <FlatList
+            data={workerNames}
+            keyExtractor={(item, idx) => `worker-${idx}`}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.workerRow}
+                onPress={() => {
+                  setWorkerName(item.name);
+                  setPhoneNumber(item.phone);
+                  Alert.alert("Selected", `Worker ${item.name} selected. Fill the amount and save.`);
+                }}
+              >
+                <View>
+                  <Text style={styles.workerNameText}>{item.name}</Text>
+                  <Text style={styles.workerPhoneText}>{item.phone || "No phone"}</Text>
+                </View>
+                <Icon name="chevron-right" size={20} color="#ccc" />
+              </TouchableOpacity>
+            )}
+            scrollEnabled={false}
+            ListEmptyComponent={
+              <Text style={styles.emptyText}>No workers found in database.</Text>
+            }
+          />
+        </View> */}
+
         <View style={styles.listCard}>
-          <Text style={styles.sectionTitle}>Saved Expenses</Text>
+          <Text style={styles.sectionTitle}>Saved Daily Expenses</Text>
           {loadingList ? (
             <ActivityIndicator size="small" color="#1B4D1B" style={{ marginTop: 12 }} />
           ) : (
@@ -377,6 +504,7 @@ const styles = StyleSheet.create({
     marginTop: -4,
     marginBottom: 10,
     backgroundColor: "#fff",
+    zIndex: 999,
   },
   suggestionRow: {
     paddingHorizontal: 10,
@@ -435,5 +563,48 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#444",
     marginTop: 2,
+  },
+  workerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  workerNameText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#222",
+  },
+  workerPhoneText: {
+    fontSize: 13,
+    color: "#666",
+  },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  actionButtons: {
+    marginLeft: 10,
+    justifyContent: "space-around",
+  },
+  actionBtn: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: "#f0f0f0",
+  },
+  editActionBtn: {
+    marginBottom: 8,
+  },
+  formHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  cancelText: {
+    color: "#D32F2F",
+    fontWeight: "700",
   },
 });
