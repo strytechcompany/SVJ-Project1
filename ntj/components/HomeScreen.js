@@ -605,6 +605,27 @@ export default function HomeScreen({ route }) {
     }).start();
   };
 
+  const handleLogout = () => {
+    Alert.alert("Logout", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await AsyncStorage.removeItem("userSession");
+            navigation.reset({
+              index: 0,
+              routes: [{ name: "Login" }],
+            });
+          } catch (error) {
+            console.error("Logout error", error);
+          }
+        }
+      },
+    ]);
+  };
+
   const closeMenu = () => {
     Animated.timing(slideAnim, {
       toValue: -250,
@@ -617,24 +638,7 @@ export default function HomeScreen({ route }) {
     if (screenName === "Settings") {
       navigation.navigate(screenName, { user });
     } else if (screenName === "Logout") {
-      Alert.alert("Logout", "Are you sure you want to log out?", [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Logout",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await AsyncStorage.removeItem("userSession");
-              navigation.reset({
-                index: 0,
-                routes: [{ name: "Login" }],
-              });
-            } catch (error) {
-              console.error("Logout error", error);
-            }
-          }
-        },
-      ]);
+      handleLogout();
     } else {
       navigation.navigate(screenName);
     }
@@ -926,16 +930,21 @@ export default function HomeScreen({ route }) {
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header */}
         <CommonHeader
-        title="Hey! Super Admin"
+        // title="Hey! Super Admin"
         backgroundColor="#1B4D1B"
+        center={
+          <TouchableOpacity onPress={handleRefresh}>
+            <Text style={styles.menuText}>Hey! Super Admin</Text>
+          </TouchableOpacity>
+        }
         left={
         <TouchableOpacity onPress={openMenu}>
         <Icon name="menu" size={30} color="#fff" />
         </TouchableOpacity>
         }
         right={
-        <TouchableOpacity onPress={handleRefresh}>
-        <Icon name="refresh" size={28} color="#fff" />
+        <TouchableOpacity onPress={handleLogout}>
+        <Icon name="logout" size={28} color="#fff" />
         </TouchableOpacity>
         }
         />
