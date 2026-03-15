@@ -326,8 +326,7 @@ export default function CreateTransaction({ navigation }) {
       const b2bResponse = await fetch(`${base_url}/customers`);
       const b2bData = await b2bResponse.json();
 
-      const b2cResponse = await fetch(`${base_url}/customersB2C`);
-      const b2cData = await b2cResponse.json();
+      
 
       const b2bCustomers = b2bData
         .filter((customer) => customer.customerName) // ✅ filter empty names
@@ -355,34 +354,9 @@ export default function CreateTransaction({ navigation }) {
           updatedAt: customer.updatedAt || new Date().toISOString(),
         }));
 
-      const b2cCustomers = b2cData
-        .filter((customer) => customer.customerName)
-        .map((customer) => ({
-          ...customer,
-          customerType: "B2C",
-          customerNumber: customer.phoneNumber,
-          customerId: customer.customerId || customer._id,
-          id: customer._id || customer.id,
-          // ✅ These are what the UI uses
-          name: customer.customerName,
-          ob: customer.oldBalance || 0,
-          ab: customer.advanceBalance || 0,
-          company: "",
-          phone: customer.phoneNumber || customer.phone || "",
-          email: "",
-          address: customer.address || "",
-          gst: customer.gstin || "",
-          // ✅ Keep these too
-          customerName: customer.customerName,
-          shopName: "No Shop Name",
-          oldBalance: customer.oldBalance || 0,
-          advanceBalance: customer.advanceBalance || 0,
-          billCurrentBalance: customer.billCurrentBalance || 0,
-          updatedAt: customer.updatedAt || new Date().toISOString(),
-        }));
+      
 
-      const allCustomers = [...b2bCustomers, ...b2cCustomers];
-      setCustomers(allCustomers);
+      setCustomers(b2bCustomers);
     } catch (error) {
       console.error("Error fetching customers:", error);
       Alert.alert("Error", "Failed to load customers from database");
@@ -1114,8 +1088,11 @@ export default function CreateTransaction({ navigation }) {
         },
       ]);
 
+      
       setRupees("");
       setCashPureInput("0.000");
+
+      
 
       // Success message removed as per user request
     } catch (error) {
