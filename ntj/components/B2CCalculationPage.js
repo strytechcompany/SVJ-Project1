@@ -470,19 +470,12 @@ export default function CreateTransaction({ navigation, route }) {
   const fetchRecentNames = async () => {
     try {
       setLoadingRecent(true);
-      const [transResp, b2cResp] = await Promise.all([
-        fetch(`${base_url}/transactions`),
-        fetch(`${base_url}/B2Ccal`)
-      ]);
+      const b2cResp = await fetch(`${base_url}/B2Ccal`);
 
       let allData = [];
-      if (transResp.ok) {
-        const transData = await transResp.json();
-        allData = [...allData, ...transData];
-      }
       if (b2cResp.ok) {
         const b2cData = await b2cResp.json();
-        allData = [...allData, ...b2cData];
+        allData = [...b2cData];
       }
 
       // Reverse to get most recent first, then take unique names
