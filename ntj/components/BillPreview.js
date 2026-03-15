@@ -1598,14 +1598,57 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     } catch (err) {
       console.warn("Convert-to-Gold network error:", err?.message || err);
     }
-
     setB2cConversion({
       applied: true,
       goldWeight: convertedGold,
       updatedOB,
       updatedAB,
     });
-    Alert.alert("Converted", `UPI â‚¹${upi.toFixed(2)} = ${convertedGold.toFixed(3)}g`);
+    Alert.alert("Converted", `UPI ₹${upi.toFixed(2)} = ${convertedGold.toFixed(3)}g`);
+  };
+
+  const handleNullifyBalance = async () => {
+    if (!isB2C) return;
+
+    Alert.alert(
+      "Nullify Balance",
+      "Are you sure you want to set the customer balance to zero? This will take effect when the bill is saved.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Yes, Nullify",
+          onPress: async () => {
+             // We update local state so the preview shows 0 and handleSaveBill uses 0.
+             // We also optionally update DB immediately like handleConvertToGold does.
+            try {
+              const customerId = customer?.id || customer?._id || customer?.customerId || transactions?.[0]?.customerId || "";
+              if (customerId) {
+                const activeBillId = transactions?.[0]?._id || transactions?.[0]?.id || "";
+                await fetch(`${base_url}/customersB2C/${customerId}/balances`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    oldBalance: 0,
+                    advanceBalance: 0,
+                    billId: activeBillId,
+                  }),
+                });
+              }
+            } catch (err) {
+              console.warn("Nullify balance network error:", err);
+            }
+
+            setB2cConversion({
+              applied: true,
+              goldWeight: 0,
+              updatedOB: 0,
+              updatedAB: 0,
+            });
+            Alert.alert("Success", "Balance set to zero for this transaction.");
+          }
+        }
+      ]
+    );
   };
 
   const handleSaveBill = async () => {
@@ -2272,13 +2315,21 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
                 <View style={styles.b2cInputWrapper}>
                   <Text style={styles.b2cInputLabel}>Cash Amount</Text>
-                  <TextInput
-                    style={styles.b2cInputField}
-                    placeholder="Enter cash amount"
-                    keyboardType="numeric"
-                    value={cashAmount}
-                    onChangeText={setCashAmount}
-                  />
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TextInput
+                      style={[styles.b2cInputField, { flex: 1 }]}
+                      placeholder="Enter cash amount"
+                      keyboardType="numeric"
+                      value={cashAmount}
+                      onChangeText={setCashAmount}
+                    />
+                    <TouchableOpacity 
+                      style={[styles.b2cActionButton, { backgroundColor: '#37474f', paddingHorizontal: 15, height: 50, marginTop: 0, elevation: 0 }]} 
+                      onPress={() => setCashAmount(toNum(displayB2CTotalAmount).toFixed(2))}
+                    >
+                      <Text style={[styles.b2cActionButtonText, { fontSize: 13 }]}>Balance Amount</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 {/* Conversion Line */}
@@ -2290,13 +2341,23 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
                 {!(b2cConversion.applied || transactions?.[0]?.isConvertedToGold) && (
                   <View style={styles.b2cActionButtonsRow}>
-                    <TouchableOpacity 
-                      style={[styles.b2cActionButton, { backgroundColor: '#2E7D32' }]} 
-                      onPress={handleConvertToGold}
-                    >
-                      <Icon name="swap-horizontal" size={20} color="#fff" />
-                      <Text style={styles.b2cActionButtonText}>Convert to Gold</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <TouchableOpacity 
+                        style={[styles.b2cActionButton, { backgroundColor: '#2E7D32', flex: 1.2 }]} 
+                        onPress={handleConvertToGold}
+                      >
+                        <Icon name="swap-horizontal" size={20} color="#fff" />
+                        <Text style={[styles.b2cActionButtonText, { fontSize: 14 }]}>Convert to Gold</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={[styles.b2cActionButton, { backgroundColor: '#d32f2f', flex: 0.8 }]} 
+                        onPress={handleNullifyBalance}
+                      >
+                        <Icon name="close-circle-outline" size={20} color="#fff" />
+                        <Text style={[styles.b2cActionButtonText, { fontSize: 14 }]}>Null</Text>
+                      </TouchableOpacity>
+                    </View>
 
                     {upiAmount > 0 && (
                       <TouchableOpacity 
