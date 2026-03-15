@@ -698,22 +698,6 @@ export default function HomeScreen({ route }) {
   });
 
   const resolveBalance = (item) => {
-    const itemCurrent = Number(item.currentBalance ?? item.availableBalance ?? item.balance);
-    const itemOb = Number(item.oldBalance ?? item.ob);
-    const itemAb = Number(item.advBal ?? item.advanceBalance);
-    if (Number.isFinite(itemCurrent)) {
-      return {
-        ob: itemCurrent > 0 ? itemCurrent : 0,
-        ab: itemCurrent < 0 ? Math.abs(itemCurrent) : (Number.isFinite(itemAb) ? itemAb : 0),
-      };
-    }
-    if (Number.isFinite(itemOb) || Number.isFinite(itemAb)) {
-      return {
-        ob: Number.isFinite(itemOb) ? itemOb : 0,
-        ab: Number.isFinite(itemAb) ? itemAb : 0,
-      };
-    }
-
     const keys = [
       item.customerId,
       item._id,
@@ -728,14 +712,39 @@ export default function HomeScreen({ route }) {
       .filter(Boolean)
       .map((k) => String(k).toLowerCase());
 
+    // Priority 1: For B2C, always show the latest live customer balance from lookup
+    // so Convert to Gold updates reflect immediately on homescreen.
+    const isB2C = item.type === "B2C" || item.customerType === "B2C" || item.isB2C;
+    if (isB2C) {
+      for (const k of keys) {
+        if (balanceLookup[k]) return balanceLookup[k];
+      }
+    }
+
+    // Priority 2: Use bill's embedded static snapshot balance
+    const itemCurrent = Number(item.currentBalance ?? item.availableBalance ?? item.balance);
+    const itemOb = Number(item.oldBalance ?? item.ob);
+    const itemAb = Number(item.advBal ?? item.advanceBalance);
+    
+    if (Number.isFinite(itemCurrent)) {
+      return {
+        ob: itemCurrent > 0 ? itemCurrent : 0,
+        ab: itemCurrent < 0 ? Math.abs(itemCurrent) : (Number.isFinite(itemAb) ? itemAb : 0),
+      };
+    }
+    if (Number.isFinite(itemOb) || Number.isFinite(itemAb)) {
+      return {
+        ob: Number.isFinite(itemOb) ? itemOb : 0,
+        ab: Number.isFinite(itemAb) ? itemAb : 0,
+      };
+    }
+
+    // Priority 3: Fallback to lookup for non-B2C missing embedded balance
     for (const k of keys) {
       if (balanceLookup[k]) return balanceLookup[k];
     }
 
-    return {
-      ob: 0,
-      ab: 0,
-    };
+    return { ob: 0, ab: 0 };
   };
 
   const buildCustomerForHistory = (item = {}) => {
