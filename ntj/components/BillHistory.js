@@ -837,4 +837,610 @@ export default function BillHistory({ navigation, route }) {
       summary: resolvedSummary,
       report: resolvedReport,
       transactions: [bill],
-      items: b2cIt
+      items: b2cItems,
+      gst: bill.gst || null,
+      estimate: bill.estimate || null,
+      printAgain: true,
+    });
+  };
+
+  // ── SHARE ───────────────────────────────────────────────────────────
+  const getCustomerPhoneForBill = async (bill) => {
+    const fallbackPhone =
+      bill?.phone ||
+      customer?.customerNumber ||
+      customer?.phone ||
+      customer?.phoneNumber ||
+      "";
+    try {
+      const forcedBillType = resolveBillTypeFromContext(bill, customer);
+      const custType = String(
+        customer?.customerType || customer?.type || bill?.dealerType || ""
+      ).toUpperCase();
+      const customerId =
+        customer?._id || customer?.id || customer?.customerId || bill?.customerId || "";
+      if (!customerId) return fallbackPhone;
+      let endpoint = `${base_url}/customers/${customerId}`;
+      if (forcedBillType === "B2C") endpoint = `${base_url}/customersB2C/${customerId}`;
+      else if (custType === "DEALER" || custType === "SUPPLIER") endpoint = `${base_url}/customersDealer/${customerId}`;
+      const res = await fetch(endpoint);
+      if (!res.ok) return fallbackPhone;
+      const data = await res.json();
+      return data?.phoneNumber || data?.phone || data?.customerNumber || fallbackPhone;
+    } catch {
+      return fallbackPhone;
+    }
+  };
+  const handleWhatsAppShare = async (bill) => {
+    setSharingBillId(bill._id);
+    try {
+      const billType = resolveDisplayTypeFromContext(bill, customer);
+      const custName = bill.customerName || customer?.customerName || "Customer";
+      const billNo = formatMainBillNo(bill.billNo || bill.invoiceNo) || "N/A";
+      const date = bill.date || (bill.createdAt ? new Date(bill.createdAt).toLocaleDateString() : "N/A");
+      const bal = getBalanceFromBill(bill);
+      const issue = num(bill.issuePure ?? bill.totalIssueWeight);
+      const receipt = num(bill.receiptPure ?? bill.totalReceiptWeight);
+
+      const balanceLine =
+        bal.label === "OB"
+          ? `Old Balance  : ${bal.value.toFixed(3)} g`
+          : bal.label === "AB"
+            ? `Adv Balance  : ${bal.value.toFixed(3)} g`
+            : "Balance      : 0.000 g";
+
+      const message = [
+        "NTJ Jewellery Bill Summary",
+        `Customer     : ${custName}` ,
+        `Bill No      : ${billNo}` ,
+        `Date         : ${date}` ,
+        `Type         : ${billType}` ,
+        `Issue Pure   : ${issue.toFixed(3)} g` ,
+        `Receipt Pure : ${receipt.toFixed(3)} g` ,
+        balanceLine,
+      ].join("\n");
+
+      const html = `<html><body style="font-family:Arial;padding:20px;font-size:14px;">
+        <h2 style="text-align:center;">NTJ Jewellery Bill Summary</h2>
+        <hr/>
+        <p><b>Customer:</b> ${custName}</p>
+        <p><b>Bill No:</b> ${billNo}</p>
+        <p><b>Date:</b> ${date}</p>
+        <p><b>Type:</b> ${billType}</p>
+        <hr/>
+        <p><b>Issue Pure:</b> ${issue.toFixed(3)} g</p>
+        <p><b>Receipt Pure:</b> ${receipt.toFixed(3)} g</p>
+        <p><b>${balanceLine}</b></p>
+      </body></html>`;
+
+      const { uri } = await Print.printToFileAsync({ html, width: 204, height: 842 });
+      const phone = await getCustomerPhoneForBill(bill);
+      if (!phone) throw new Error("Customer WhatsApp number not found.");
+
+      const cleanPhone = String(phone).replace(/[^0-9]/g, "");
+      const waPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+      const waUrl = `whatsapp://send?phone=${waPhone}&text=${encodeURIComponent(message)}`;
+      await Linking.openURL(waUrl).catch(async () => {
+        const webUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`;
+        await Linking.openURL(webUrl);
+      });
+
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(uri, {
+          mimeType: "application/pdf",
+          dialogTitle: `Bill ${billNo}`,
+          UTI: ".pdf",
+        });
+      } else {
+        await Share.share({ message, title: `Bill ${billNo}` });
+      }
+    } catch (error) {
+      console.error("WhatsApp share failed:", error);
+      Alert.alert("Error", `Failed to open WhatsApp share: ${error.message || "Unknown error"}`);
+    } finally {
+      setSharingBillId(null);
+    }
+  };
+
+  // ── BALANCE DISPLAY HELPER ─────────────────────────────────────────
+  const getBalanceDisplay = (item) => {
+    const bal = getBalanceFromBill(item);
+    return bal.label ? { label: bal.label, value: bal.value } : null;
+  };
+
+  // ── RENDER CARD ─────────────────────────────────────────────────────
+  const renderBillItem = ({ item }) => {
+    const activityDate = item.updatedAt || item.createdAt || null;
+    const activityDateObj = activityDate ? new Date(activityDate) : null;
+    const createdDate = activityDateObj
+      ? activityDateObj.toLocaleDateString()
+      : item.date || "N/A";
+    const createdTime = activityDateObj
+      ? activityDateObj.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true,
+        })
+      : "N/A";
+    const gstBill = isGstBill(item);
+    const itemType = gstBill ? "GST" : resolveDisplayTypeFromContext(item, customer);
+    const billNumber = item.billNo || item.invoiceNo || "00000";
+    const balanceDisplay = getBalanceDisplay(item);
+    const isSharing = sharingBillId === item._id;
+    const displayCustomerName = item.customerName || customer?.customerName || customer?.name || "N/A";
+    const displayPhone = item.phoneNumber || item.phone || customer?.phoneNumber || customer?.phone || "N/A";
+    const displayGstin = item.gstin || customer?.gstin || "N/A";
+    const displayTotalAmount = resolveBillTotalAmount(item);
+
+    return (
+      <View style={styles.billCard}>
+        {/* ── Tappable area (view full bill) ── */}
+        <TouchableOpacity onPress={() => handleViewBill(item)} activeOpacity={0.8}>
+          <View style={styles.billHeader}>
+            <Text style={styles.billDate}>Date: {createdDate}  Time: {createdTime}</Text>
+            <Text style={styles.billType}>{itemType}</Text>
+            <View style={styles.billNoBadge}>
+              <Text style={styles.billNoText}>
+                Bill No: {billNumber}
+              </Text>
+            </View>
+          </View>
+
+          {gstBill ? (
+            <View style={styles.gstInfoBox}>
+              <Text style={styles.gstInfoText}>Customer: {displayCustomerName}</Text>
+              <Text style={styles.gstInfoText}>Phone: {displayPhone}</Text>
+              <Text style={styles.gstInfoText}>GST No: {displayGstin}</Text>
+              <Text style={styles.gstInfoText}>
+                Total Amount: ₹{Number(displayTotalAmount || 0).toFixed(2)}
+              </Text>
+            </View>
+          ) : null}
+
+          {balanceDisplay ? (
+            <View style={styles.balanceRow}>
+              <Text
+                style={[
+                  styles.balanceLabel,
+                  balanceDisplay.label === "OB" ? styles.obLabel : styles.abLabel,
+                ]}
+              >
+                {balanceDisplay.label === "OB" ? "Old Balance" : "Advance Balance"}
+              </Text>
+              <Text
+                style={[
+                  styles.balanceValue,
+                  balanceDisplay.label === "OB" ? styles.obValue : styles.abValue,
+                ]}
+              >
+                {balanceDisplay.value.toFixed(3)} g
+              </Text>
+            </View>
+          ) : null}
+
+          <Text style={styles.billDescription}>
+            {item.description ||
+              (item.issueItems?.length > 0
+                ? `${item.issueItems.length} item(s)`
+                : "Transaction details")}
+          </Text>
+        </TouchableOpacity>
+
+        {/* ── Action Buttons ── */}
+        <View style={styles.actionRow}>
+          {/* View */}
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => handleViewBill(item)}
+          >
+            <Icon name="eye" size={16} color="#2196F3" />
+            <Text style={[styles.actionText, { color: "#2196F3" }]}>View</Text>
+          </TouchableOpacity>
+
+          {/* Delete */}
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => handleDeleteBill(item)}
+          >
+            <Icon name="delete" size={16} color="#F44336" />
+            <Text style={[styles.actionText, { color: "#F44336" }]}>Delete</Text>
+          </TouchableOpacity>
+
+          {/* Print */}
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => handlePrintBill(item)}
+          >
+            <Icon name="printer" size={16} color="#FF6F00" />
+            <Text style={[styles.actionText, { color: "#FF6F00" }]}>Print</Text>
+          </TouchableOpacity>
+
+          {/* Share */}
+          <TouchableOpacity
+            style={[styles.actionButton, isSharing && { opacity: 0.6 }]}
+            onPress={() => !isSharing && handleWhatsAppShare(item)}
+            disabled={isSharing}
+          >
+            {isSharing ? (
+              <ActivityIndicator size={16} color="#25D366" />
+            ) : (
+              <Icon name="share-variant" size={16} color="#25D366" />
+            )}
+            <Text style={[styles.actionText, { color: "#2E7D32" }]}>
+              {isSharing ? "..." : "Share"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
+  // ── LOADING STATE ──────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loading}>
+          <ActivityIndicator size="large" color="#1B4D1B" />
+          <Text style={{ marginTop: 10, color: "#666" }}>
+            Loading bill history...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ── MAIN RENDER ────────────────────────────────────────────────────
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <CommonHeader
+        title="Bill History"
+        subtitle={customer?.customerName || "Unknown Customer"}
+        onBack={() => navigation.goBack()}
+        backgroundColor="#1B4D1B"
+        insideSafeArea
+        right={
+          <TouchableOpacity onPress={() => navigation.navigate("Home")}>
+            <Icon name="home-outline" size={26} color="#fff" />
+          </TouchableOpacity>
+        }
+      />
+
+      {/* Customer Balance Summary Card */}
+      <View style={styles.customerBalanceCard}>
+        <View style={styles.balanceInfo}>
+          <Text style={styles.customerNameMain}>
+            {customer?.customerName || customer?.name || "N/A"}
+          </Text>
+          <Text style={styles.shopNameText}>
+            {customer?.shopName || customer?.companyName || "No Shop Name"}
+          </Text>
+        </View>
+        <View style={styles.balanceBadgeContainer}>
+          {(Number(customer?.ob || 0) > 0 || !Number(customer?.ab || 0)) ? (
+            <View style={[styles.balanceBadge, styles.obBadge]}>
+              <Text style={styles.badgeLabel}>OB</Text>
+              <Text style={styles.badgeValue}>{Number(customer?.ob || 0).toFixed(3)}g</Text>
+            </View>
+          ) : (
+            <View style={[styles.balanceBadge, styles.abBadge]}>
+              <Text style={styles.badgeLabel}>AB</Text>
+              <Text style={styles.badgeValue}>{Number(customer?.ab || 0).toFixed(3)}g</Text>
+            </View>
+          )}
+        </View>
+      </View>
+
+      {/* Bill Number Search Bar */}
+      <View style={styles.searchBarWrapper}>
+        <Icon name="magnify" size={20} color="#666" style={{ marginRight: 8 }} />
+        <TextInput
+          style={styles.searchBarInput}
+          placeholder="Search by bill number..."
+          placeholderTextColor="#999"
+          value={billSearch}
+          onChangeText={setBillSearch}
+          clearButtonMode="while-editing"
+        />
+        {billSearch.length > 0 && (
+          <TouchableOpacity onPress={() => setBillSearch("")}>
+            <Icon name="close-circle" size={18} color="#999" />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Date Filter Card */}
+      <View style={styles.filterCard}>
+        <Text style={styles.filterTitle}>Filter by Date</Text>
+        <View style={styles.dateRow}>
+          <View style={styles.dateField}>
+            <Text style={styles.dateLabel}>From</Text>
+            <TouchableOpacity
+              style={styles.inputWrapper}
+              onPress={() => setShowFromPicker(true)}
+            >
+              <Icon
+                name="calendar"
+                size={20}
+                color="#666"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={[styles.dateText, !fromDate && { color: "#999" }]}>
+                {fromDate
+                  ? new Date(fromDate).toLocaleDateString()
+                  : "DD-MM-YYYY"}
+              </Text>
+            </TouchableOpacity>
+            {showFromPicker && (
+              <DateTimePicker
+                value={fromDate ? new Date(fromDate) : new Date()}
+                mode="date"
+                display="default"
+                onChange={(event, selectedDate) => {
+                  setShowFromPicker(false);
+                  if (selectedDate)
+                    setFromDate(selectedDate.toISOString().split("T")[0]);
+                }}
+              />
+            )}
+          </View>
+
+          <View style={styles.dateField}>
+            <Text style={styles.dateLabel}>To</Text>
+            <TouchableOpacity
+              style={styles.inputWrapper}
+              onPress={() => setShowToPicker(true)}
+            >
+              <Icon
+                name="calendar"
+                size={20}
+                color="#666"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={[styles.dateText, !toDate && { color: "#999" }]}>
+                {toDate
+                  ? new Date(toDate).toLocaleDateString()
+                  : "DD-MM-YYYY"}
+              </Text>
+            </TouchableOpacity>
+            {showToPicker && (
+              <DateTimePicker
+                value={toDate ? new Date(toDate) : new Date()}
+                mode="date"
+                display="default"
+                onChange={(event, selectedDate) => {
+                  setShowToPicker(false);
+                  if (selectedDate)
+                    setToDate(selectedDate.toISOString().split("T")[0]);
+                }}
+              />
+            )}
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={styles.searchBtn}
+          onPress={() => {
+            setLoading(true);
+            fetchBills();
+          }}
+        >
+          <Icon
+            name="magnify"
+            size={20}
+            color="#fff"
+            style={{ marginRight: 5 }}
+          />
+          <Text style={styles.searchBtnText}>Search History</Text>
+        </TouchableOpacity>
+      </View>
+
+      {filteredBills.length === 0 ? (
+        <View style={styles.noBills}>
+          <Icon name="file-document-outline" size={48} color="#ccc" />
+          <Text style={styles.noBillsText}>
+            {billSearch.trim()
+              ? `No bills found for "#${billSearch}".`
+              : "No bills found for this customer."}
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredBills}
+          keyExtractor={(item, index) =>
+            item?._id?.toString() || index.toString()
+          }
+          renderItem={renderBillItem}
+          contentContainerStyle={styles.listContainer}
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#F2F4F6" },
+  header: {
+    backgroundColor: "#1B4D1B",
+    paddingTop: 60,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    borderBottomLeftRadius: 25,
+    borderBottomRightRadius: 25,
+  },
+  headerRow: { flexDirection: "row", alignItems: "center" },
+  fileTitle: { color: "#fff", fontSize: 20, fontWeight: "bold" },
+  customerName: { color: "#FFD54F", fontSize: 14, marginTop: 4 },
+  loading: { flex: 1, justifyContent: "center", alignItems: "center" },
+  noBills: { flex: 1, justifyContent: "center", alignItems: "center", gap: 10 },
+  noBillsText: { fontSize: 15, color: "#666", textAlign: "center", paddingHorizontal: 30 },
+  listContainer: { padding: 10, paddingBottom: 30 },
+
+  // ── Search Bar ──
+  searchBarWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    marginHorizontal: 15,
+    marginTop: 14,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 46,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+  },
+  searchBarInput: { flex: 1, fontSize: 14, color: "#333" },
+
+  // ── Card ──
+  billCard: {
+    backgroundColor: "#fff",
+    marginVertical: 5,
+    borderRadius: 10,
+    padding: 15,
+    elevation: 2,
+  },
+  billHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  billDate: { fontSize: 13, color: "#666" },
+  billType: { fontSize: 13, fontWeight: "bold", color: "#2E7D32" },
+  billNoBadge: {
+    backgroundColor: "#E8F5E9",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: "#A5D6A7",
+  },
+  billNoText: { fontSize: 11, fontWeight: "bold", color: "#1B4D1B" },
+
+  gstInfoBox: {
+    backgroundColor: "#F7FBFF",
+    borderWidth: 1,
+    borderColor: "#E3F2FD",
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 6,
+  },
+  gstInfoText: { fontSize: 12, color: "#455A64", marginBottom: 2 },
+
+  // ── Balance Row ──
+  balanceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  balanceLabel: { fontSize: 13, fontWeight: "600" },
+  balanceValue: { fontSize: 16, fontWeight: "bold" },
+  obLabel: { color: "#C62828" },
+  obValue: { color: "#C62828" },
+  abLabel: { color: "#1565C0" },
+  abValue: { color: "#1565C0" },
+
+  billDescription: { fontSize: 13, color: "#666", marginTop: 2 },
+
+  // ── Action Row ──
+  actionRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#eee",
+    paddingTop: 10,
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  actionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 5,
+    backgroundColor: "#f5f5f5",
+    borderRadius: 6,
+    paddingHorizontal: 9,
+    gap: 4,
+  },
+  actionText: { fontSize: 12, fontWeight: "600" },
+
+  // ── Filter Card ──
+  filterCard: {
+    backgroundColor: "#fff",
+    margin: 15,
+    borderRadius: 15,
+    padding: 15,
+    elevation: 3,
+  },
+  filterTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#1B4D1B",
+    marginBottom: 10,
+  },
+  dateRow: { flexDirection: "row", justifyContent: "space-between", gap: 15 },
+  dateField: { flex: 1 },
+  dateLabel: {
+    fontSize: 13,
+    color: "#555",
+    marginBottom: 5,
+    fontWeight: "600",
+  },
+  inputWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F1F3F6",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    height: 45,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+  },
+  dateText: { flex: 1, fontSize: 14, color: "#333" },
+  searchBtn: {
+    backgroundColor: "#1B4D1B",
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 15,
+    flexDirection: "row",
+    justifyContent: "center",
+  },
+  searchBtnText: { color: "#fff", fontWeight: "bold", fontSize: 15 },
+
+  // ── Customer Balance Card ──
+  customerBalanceCard: {
+    backgroundColor: "#fff",
+    marginHorizontal: 15,
+    marginTop: 15,
+    borderRadius: 15,
+    padding: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  balanceInfo: { flex: 1 },
+  customerNameMain: { fontSize: 18, fontWeight: "bold", color: "#1B4D1B" },
+  shopNameText: { fontSize: 12, color: "#666", marginTop: 2 },
+  balanceBadgeContainer: { marginLeft: 15 },
+  balanceBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignItems: "center",
+    minWidth: 80,
+  },
+  obBadge: { backgroundColor: "#FFEBEE" },
+  abBadge: { backgroundColor: "#E8F5E9" },
+  badgeLabel: { fontSize: 10, fontWeight: "bold", color: "#888" },
+  badgeValue: { fontSize: 16, fontWeight: "bold", color: "#333" },
+});
+
