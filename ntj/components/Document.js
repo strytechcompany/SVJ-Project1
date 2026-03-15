@@ -8,9 +8,14 @@ import {
   FlatList,
   Alert,
   ActivityIndicator,
+  Linking,
+  Modal,
+  SafeAreaView,
+  Dimensions,
+  Image,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import CommonHeader from "./CommonHeader";
@@ -48,6 +53,9 @@ export default function Document({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerUri, setViewerUri] = useState("");
+  const [viewerType, setViewerType] = useState("");
 
   const serverRoot = useMemo(() => base_url.replace(/\/api\/?$/, ""), []);
   const apiCandidates = useMemo(() => {
@@ -253,6 +261,21 @@ export default function Document({ navigation }) {
     setSelectedFile(null);
   };
 
+  const handleView = async (item) => {
+    try {
+      const url = toAbsoluteUrl(item.fileUrl);
+      if (!url) {
+        Alert.alert("Error", "Document URL not found.");
+        return;
+      }
+      setViewerUri(url);
+      setViewerType(item.fileType || "");
+      setViewerVisible(true);
+    } catch (error) {
+      Alert.alert("Error", `Failed to view: ${error.message}`);
+    }
+  };
+
   const handleShare = async (item) => {
     try {
       const { url } = await callDocumentApi({
@@ -305,14 +328,19 @@ export default function Document({ navigation }) {
       </Text>
 
       <View style={styles.actionRow}>
-        <TouchableOpacity style={styles.editBtn} onPress={() => handleEdit(item)}>
-          <Icon name="pencil-outline" size={16} color="#fff" />
-          <Text style={styles.btnText}>Edit</Text>
+        <TouchableOpacity style={styles.viewBtn} onPress={() => handleView(item)}>
+          <Icon name="eye-outline" size={16} color="#fff" />
+          <Text style={styles.btnText}>View</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.shareBtn} onPress={() => handleShare(item)}>
           <Icon name="share-variant-outline" size={16} color="#fff" />
           <Text style={styles.btnText}>Share</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.editBtn} onPress={() => handleEdit(item)}>
+          <Icon name="pencil-outline" size={16} color="#fff" />
+          <Text style={styles.btnText}>Edit</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.deleteBtn} onPress={() => handleDelete(item)}>
@@ -384,6 +412,51 @@ export default function Document({ navigation }) {
           ListEmptyComponent={<Text style={styles.empty}>No Documents Found</Text>}
         />
       )}
+
+      <Modal visible={viewerVisible} transparent={false} animationType="fade">
+        <SafeAreaView style={styles.viewerContainer}>
+          <View style={styles.viewerHeader}>
+            <TouchableOpacity onPress={() => setViewerVisible(false)} style={styles.closeFullBtn}>
+              <Icon name="close" size={28} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.viewerTitle} numberOfLines={1}>
+              {viewerType.includes("pdf") ? "PDF Document" : "Image View"}
+            </Text>
+            <View style={{ width: 40 }} /> 
+          </View>
+          
+          <View style={styles.viewerBody}>
+            {viewerType.toLowerCase().includes("pdf") ? (
+              <View style={styles.noPreviewContainer}>
+                <Icon name="file-pdf-box" size={100} color="#ef4444" />
+                <Text style={styles.noPreviewText}>PDF Preview</Text>
+                <Text style={styles.noPreviewSubText}>
+                  Rendering PDFs inside the app requires an additional viewer.{"\n"}
+                  Please use the Share button for full PDF interaction.
+                </Text>
+                <TouchableOpacity 
+                  style={styles.shareInsideBtn} 
+                  onPress={() => {
+                    setViewerVisible(false);
+                    // Find the item and share it
+                    const item = rows.find(r => toAbsoluteUrl(r.fileUrl) === viewerUri);
+                    if (item) handleShare(item);
+                  }}
+                >
+                  <Icon name="share-variant" size={20} color="#fff" />
+                  <Text style={styles.btnText}>Share / Open PDF</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <Image 
+                source={{ uri: viewerUri }} 
+                style={styles.fullImage} 
+                resizeMode="contain"
+              />
+            )}
+          </View>
+        </SafeAreaView>
+      </Modal>
     </View>
   );
 }
@@ -449,6 +522,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
+  viewBtn: {
+    flex: 1,
+    backgroundColor: "#6366f1",
+    borderRadius: 8,
+    height: 36,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 4,
+  },
   shareBtn: {
     flex: 1,
     backgroundColor: "#16a34a",
@@ -482,4 +565,69 @@ const styles = StyleSheet.create({
   cancelBtnText: { color: "#374151", fontWeight: "700", fontSize: 13 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   empty: { textAlign: "center", color: "#888", marginTop: 20 },
+  
+  // Viewer Styles
+  viewerContainer: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  viewerHeader: {
+    height: 60,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 15,
+    backgroundColor: "#111",
+    borderBottomWidth: 1,
+    borderBottomColor: "#333",
+  },
+  viewerTitle: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+    flex: 1,
+    textAlign: "center",
+  },
+  closeFullBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  viewerBody: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fullImage: {
+    width: Dimensions.get("window").width,
+    height: Dimensions.get("window").height - 120,
+  },
+  noPreviewContainer: {
+    alignItems: "center",
+    padding: 30,
+  },
+  noPreviewText: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "700",
+    marginTop: 20,
+  },
+  noPreviewSubText: {
+    color: "#aaa",
+    fontSize: 14,
+    textAlign: "center",
+    marginTop: 10,
+    lineHeight: 20,
+  },
+  shareInsideBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#16a34a",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginTop: 30,
+    gap: 8,
+  },
 });
