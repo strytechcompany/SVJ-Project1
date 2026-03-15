@@ -17,6 +17,35 @@ const toIdString = (value) => {
     return String(value).trim();
 };
 
+const toSafeDate = (value) => {
+    if (!value) return null;
+    
+    let d;
+    if (value instanceof Date) {
+        d = value;
+    } else {
+        // Handle common frontend string "Invalid Date"
+        if (typeof value === 'string' && value.toLowerCase().includes('invalid')) return null;
+        
+        d = new Date(value);
+        if (isNaN(d.getTime()) && typeof value === 'string') {
+            // Try parsing DD/MM/YYYY
+            const parts = value.split(/[/-]/);
+            if (parts.length === 3) {
+                const day = parseInt(parts[0], 10);
+                const month = parseInt(parts[1], 10) - 1;
+                const year = parseInt(parts[2], 10);
+                const fullYear = year < 100 ? 2000 + year : year;
+                const alt = new Date(fullYear, month, day);
+                if (!isNaN(alt.getTime())) d = alt;
+            }
+        }
+    }
+
+    if (!d || isNaN(d.getTime())) return null;
+    return d;
+};
+
 const pickCustomerId = (body = {}) => {
     // Priority: custom numeric ID property, then explicit MongoDB _id, then nested customer props
     const raw = body.customerId || body.customerMongoId || body.id || body._id || body.customer?._id || body.customer?.id || body.customer?.customerId;
@@ -182,13 +211,15 @@ const buildBillPayload = (body = {}) => {
 };
 
 const findCustomerAndUpdateOverview = async (billDoc) => {
-    // Determine the correct model based on billType and dealerType/customerType
-    const rawType = String(billDoc.dealerType || billDoc.customerType || "").toUpperCase();
+    // 1. Determine model more robustly
+    const rawType = String(billDoc.dealerType || billDoc.customerType || billDoc.billType || "").toUpperCase();
     let customerModel;
-    if (rawType === "DEALER" || rawType === "SUPPLIER") {
+    if (rawType.includes("DEALER") || rawType.includes("SUPPLIER")) {
         customerModel = Dealer;
+    } else if (rawType === "B2C") {
+        customerModel = CustomerB2C;
     } else {
-        customerModel = billDoc.billType === 'B2C' ? CustomerB2C : Customer;
+        customerModel = Customer;
     }
 
     const customerId = toIdString(billDoc.customerId);
@@ -200,7 +231,7 @@ const findCustomerAndUpdateOverview = async (billDoc) => {
     const lastPure = toNumber(billDoc.issuePure || billDoc.totalIssueWeight || 0);
 
     const updatePayload = {
-        lastTransactionDate: billDoc.createdAt || new Date(),
+        lastTransactionDate: toSafeDate(billDoc.createdAt) || new Date(),
         lastTransactionType: billDoc.billType,
         oldBalance: netBalance > 0 ? netBalance : 0,
         advanceBalance: netBalance < 0 ? Math.abs(netBalance) : 0,
@@ -209,35 +240,57 @@ const findCustomerAndUpdateOverview = async (billDoc) => {
 
         // Last Bill Tracking
         lastBillNo: billDoc.billNo || billDoc.invoiceNo || "",
-        lastBillDate: billDoc.date ? new Date(billDoc.date) : (billDoc.createdAt || new Date()),
+        lastBillDate: toSafeDate(billDoc.date) || toSafeDate(billDoc.createdAt) || new Date(),
         lastBillAmount: lastAmount,
         lastBillWeight: lastWeight,
         lastBillPureWeight: lastPure,
     };
 
+    // Hard validation to prevent "Invalid Date" from ever reaching MongoDB
+    if (!updatePayload.lastBillDate || isNaN(updatePayload.lastBillDate.getTime())) {
+        console.log("⚠️ fixing invalid lastBillDate");
+        updatePayload.lastBillDate = new Date();
+    }
+    if (!updatePayload.lastTransactionDate || isNaN(updatePayload.lastTransactionDate.getTime())) {
+        console.log("⚠️ fixing invalid lastTransactionDate");
+        updatePayload.lastTransactionDate = new Date();
+    }
+
+    console.log("🔍 [Debug] updatePayload:", JSON.stringify({
+        ...updatePayload,
+        lastBillDate: updatePayload.lastBillDate?.toISOString(),
+        lastTransactionDate: updatePayload.lastTransactionDate?.toISOString()
+    }, null, 2));
+
     let updated = null;
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(customerId);
 
-    // Try Mongo _id first if it looks like one (24-char hex)
+    // Try Mongo _id first
     if (isObjectId) {
         updated = await customerModel.findByIdAndUpdate(customerId, updatePayload, { new: true });
+        
+        // If not found in primary model, try alternate models (common if billType was mislabeled)
+        if (!updated) {
+            const alternateModel = (customerModel === CustomerB2C) ? Customer : CustomerB2C;
+            updated = await alternateModel.findByIdAndUpdate(customerId, updatePayload, { new: true });
+        }
     } 
 
+    // ONLY try numeric customerId if it's NOT a hex ObjectId string
     if (!updated && !isObjectId) {
-        // Fallback to custom numeric/string customerId field (only if NOT an ObjectId)
-        // Dealer doesn't have a numeric customerId field, so skip querying it.
-        if (customerModel !== Dealer) {
-            updated = await customerModel.findOneAndUpdate({ customerId: customerId }, updatePayload, { new: true });
+        // Only attempt if it looks like a number or custom ID
+        if (customerModel !== Dealer && /^\d+$/.test(customerId)) {
+            updated = await customerModel.findOneAndUpdate({ customerId: Number(customerId) }, updatePayload, { new: true });
         }
-    }
-
-    // Final fallback for Dealers by name
-    if (!updated && customerModel === Dealer && billDoc.customerName) {
-        updated = await Dealer.findOneAndUpdate(
-            { customerName: String(billDoc.customerName).trim() },
-            updatePayload,
-            { new: true }
-        );
+        
+        // Final fallback for Dealers by name
+        if (!updated && customerModel === Dealer && billDoc.customerName) {
+            updated = await Dealer.findOneAndUpdate(
+                { customerName: String(billDoc.customerName).trim() },
+                updatePayload,
+                { new: true }
+            );
+        }
     }
 
     return updated;
