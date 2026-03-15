@@ -26,12 +26,29 @@ const formatIndianNumber = (value) => {
   return formatted;
 };
 
+const formatB2CInvoiceNo = (value) => {
+  if (!value) return "";
+  const str = String(value).trim();
+  if (/^A2026\d+$/.test(str)) return str;
+  const digits = str.replace(/\D/g, "");
+  if (!digits) return "";
+  return `A2026${digits.slice(-2).padStart(2, "0")}`;
+};
+
 const formatMainBillNo = (value) => {
-  const digits = String(value ?? "").replace(/\D/g, "");
+  if (!value) return "";
+  const str = String(value).trim();
+  if (str.toUpperCase().startsWith("A")) return str;
+  const digits = str.replace(/\D/g, "");
   if (!digits) return "";
   const n = Number.parseInt(digits, 10);
   if (!Number.isFinite(n) || n <= 0) return "";
   return String(n).padStart(5, "0");
+};
+
+const resolveBillNoForDisplay = (val, type) => {
+  const isB2C = String(type || "").toUpperCase() === "B2C";
+  return isB2C ? formatB2CInvoiceNo(val) : formatMainBillNo(val);
 };
 
 const DEFAULT_THIRUKKURAL = "அகர முதல எழுத்தெல்லாம் ஆதி பகவன் முதற்றே உலகு.";
@@ -161,6 +178,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     updatedOB: 0,
     updatedAB: 0,
   });
+  const [customPayment, setCustomPayment] = useState("");
   const [isPrinting, setIsPrinting] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const isSharingRef = useRef(false);
@@ -1125,11 +1143,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     transactions?.[0]?.customerId ||
     "";
 
-  const currentBillNo = formatMainBillNo(
+  const currentBillNo = resolveBillNoForDisplay(
     customer?.billNo ||
     transactions?.[0]?.billNo ||
     customer?.invoiceNo ||
-    transactions?.[0]?.invoiceNo
+    transactions?.[0]?.invoiceNo,
+    customer?.type || customer?.customerType || previewType
   );
   const previewTx = transactions?.[0] || {};
   const previewType = String(
@@ -1283,9 +1302,9 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	  const sendBillPdfViaWhatsAppCloudApi = async ({ waPhone, pdfUri } = {}) => {
 	    const billNoHint =
 	      currentBillNo ||
-	      formatMainBillNo(order?.orderNo) ||
-	      formatMainBillNo(estimate?.estimateNo) ||
-	      formatMainBillNo(suspense?.suspenseNo) ||
+	      resolveBillNoForDisplay(order?.orderNo, "B2B") ||
+	      resolveBillNoForDisplay(estimate?.estimateNo, "B2B") ||
+	      resolveBillNoForDisplay(suspense?.suspenseNo, "B2B") ||
 	      "";
 	    const filename = `NTJ_Bill_${billNoHint || Date.now()}.pdf`;
 	    const caption = billNoHint ? `Bill No: ${billNoHint}` : "NTJ Bill";
@@ -1577,11 +1596,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         return;
       }
 
-      const billNo = formatMainBillNo(
+      const billNo = resolveBillNoForDisplay(
         customer?.billNo ||
         transactions?.[0]?.billNo ||
         customer?.invoiceNo ||
-        transactions?.[0]?.invoiceNo
+        transactions?.[0]?.invoiceNo,
+        billType
       );
 
       const b2cItems = normalizedB2CItems;
@@ -1672,7 +1692,17 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         summary,
         gst,
         ...(!isB2BBill && billNo ? { invoiceNo: String(billNo) } : {}),
-        date: customer?.date || new Date().toLocaleDateString(),
+        date: (() => {
+          const d = customer?.date;
+          if (!d || typeof d !== 'string' || d.toLowerCase().includes('invalid')) return new Date().toISOString().split('T')[0];
+          if (d.includes('/')) return d.split("/").reverse().join("-");
+          if (d.includes('-')) {
+             const parts = d.split("-");
+             if (parts[0].length === 2) return parts.reverse().join("-");
+             return d;
+          }
+          return d;
+        })(),
       };
 
       if (isB2CBill && b2cConversion.applied) {
@@ -2122,125 +2152,149 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                 <View style={styles.cashBox}>
                   <Text style={styles.sectionTitle}>GST :</Text>
                   <Text>GST Percentage: {gst.percentage}%</Text>
-                  <Text>GST Amount: â‚¹{gst.amount}</Text>
+                  <Text>GST Amount: ₹{gst.amount}</Text>
                 </View>
               )}
 
-              {/* B2C TOTAL */}
-              <View style={styles.cashBox}>
-                <Text style={styles.sectionTitle}>TOTAL :</Text>
-                <Text>Total Amount: {displayB2CTotalAmount.toFixed(2)}</Text>
-                <Text>Cash Received Amount: {safeCashTable.reduce((sum, c) => sum + toNum(c?.rupees, 0), 0).toFixed(2)}</Text>
-                <Text>Total Cash Pure: {safeCashTable.reduce((sum, c) => sum + toNum(c?.pure, 0), 0).toFixed(3)}</Text>
-                <Text>Old Balance: {effectiveB2COldBalance.toFixed(3)}</Text>
-                <Text>Advance Balance: {effectiveB2CAdvanceBalance.toFixed(3)}</Text>
-                <Text>Current OD: {isB2C ? (Math.max(0, displayB2CTotalAmount - effectiveB2CAdvanceBalance).toFixed(2)) : '0.00'}</Text>
-                <Text>Current AB: {isB2C ? (Math.max(0, effectiveB2CAdvanceBalance - displayB2CTotalAmount).toFixed(2)) : '0.00'}</Text>
-                {displayConvertedGoldValue > 0 ? <Text>Converted Gold: {displayConvertedGoldValue.toFixed(3)}g</Text> : null}
-                {cashAmount ? (
-                  <>
-                    <Text>Cash Amount: â‚¹{cashAmount}</Text>
-                    <Text>UPI Amount: â‚¹{upiAmount}</Text>
-                  </>
-                ) : null}
+              {/* Professional B2C Total Summary Card */}
+              <View style={styles.b2cProfessionalCard}>
+                <View style={styles.b2cCardHeader}>
+                  <Icon name="sigma" size={20} color="#1B4D1B" />
+                  <Text style={styles.b2cCardTitle}>TOTAL SUMMARY</Text>
+                </View>
+
+                <View style={styles.b2cCardBody}>
+                  <View style={styles.b2cNormalRow}>
+                    <Text style={styles.b2cLabel}>Total Cash Amount</Text>
+                    <Text style={styles.b2cValue}>₹ {toNum(totalB2CItemFinal).toFixed(2)}</Text>
+                  </View>
+                  
+                  <View style={styles.b2cNormalRow}>
+                    <Text style={styles.b2cLabel}>Receipt Amount</Text>
+                    <Text style={styles.b2cValue}>₹ {toNum(totalB2COldGoldAmount).toFixed(2)}</Text>
+                  </View>
+                  
+                  <View style={styles.b2cHighlightRow}>
+                    <Text style={styles.b2cHighlightLabel}>Final Payable Amount</Text>
+                    <Text style={styles.b2cHighlightValue}>₹ {toNum(displayB2CTotalAmount).toFixed(2)}</Text>
+                  </View>
+
+                  <View style={styles.b2cDividerLine} />
+                  
+                  <View style={styles.b2cNormalRow}>
+                    <Text style={styles.b2cLabel}>Today Gold Rate</Text>
+                    <Text style={styles.b2cValue}>₹ {toNum(currentB2CGoldRate).toFixed(2)}</Text>
+                  </View>
+                  <View style={styles.b2cNormalRow}>
+                    <Text style={styles.b2cLabel}>Cash Paid</Text>
+                    <Text style={styles.b2cValue}>₹ {toNum(cashAmount || 0).toFixed(2)}</Text>
+                  </View>
+                  <View style={styles.b2cGoldHighlightRow}>
+                    <Text style={styles.b2cGoldLabel}>Old Balance / Pure Weight</Text>
+                    <Text style={styles.b2cGoldValue}>{toNum(effectiveB2COldBalance).toFixed(3)} g</Text>
+                  </View>
+                </View>
               </View>
 
-              {/* CASH INPUT */}
-              <View style={styles.row}>
-                <Text style={styles.label}>Phone Number</Text>
-                <Text style={styles.input}>
-                  {customer.phone || customer.phoneNumber || customer.mobileNumber || customer.mobile || 'N/A'}
-                </Text>
-              </View>
+              <View style={styles.b2cInputSection}>
+                <View style={styles.b2cInputWrapper}>
+                  <Text style={styles.b2cInputLabel}>Payment Method</Text>
+                  <View style={styles.paymentSelectorContainer}>
+                    <ScrollView 
+                      horizontal 
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.paymentSelectorScroll}
+                    >
+                      {['Cash', 'GPay', 'PhonePe', 'Paytm', 'Bank Transfer', 'Card', 'Mixed', 'Other'].map((method) => (
+                        <TouchableOpacity 
+                          key={method}
+                          style={[
+                            styles.paymentOptionCompact, 
+                            additionalPhone === method && styles.paymentOptionActive
+                          ]} 
+                          onPress={() => setAdditionalPhone(method)}
+                        >
+                          <Text style={[
+                            styles.paymentOptionTextCompact,
+                            additionalPhone === method && styles.paymentOptionTextActive
+                          ]}>{method}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
 
-              <View style={styles.row}>
-                <Text style={styles.label}>Kadai Amount</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter Kadai Amount"
-                  keyboardType="decimal-pad"
-                  value={kadaiAmount}
-                  onChangeText={setKadaiAmount}
-                />
-              </View>
-
-              <View style={styles.row}>
-                <Text style={styles.label}>Cash Amount</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Enter cash amount"
-                  keyboardType="numeric"
-                  value={cashAmount}
-                  onChangeText={setCashAmount}
-                />
-              </View>
-
-              {/* UPI INPUT */}
-              {cashAmount && (
-                <>
-                  <View style={styles.row}>
-                    <Text style={styles.label}>UPI Amount</Text>
-                    <View style={styles.upiRow}>
+                  {additionalPhone === 'Other' && (
+                    <View style={{ marginTop: 10 }}>
                       <TextInput
-                        style={[styles.input, styles.upiInput]}
-                        placeholder="Enter UPI amount"
-                        keyboardType="numeric"
-                        value={upiAmount}
-                        editable={false}
+                        style={styles.b2cInputField}
+                        placeholder="Enter custom payment method"
+                        value={customPayment}
+                        onChangeText={(txt) => {
+                          setCustomPayment(txt);
+                          // Optionally also set upiAmount if this is used as a amount field in some contexts,
+                          // but usually it's just a method name.
+                          // However, UI shows upiAmount is used for conversion later.
+                        }}
                       />
-                      <TouchableOpacity style={styles.convertBtn} onPress={handleConvertToGold}>
-                        <Text style={styles.convertBtnText}>Convert to Gold</Text>
-                      </TouchableOpacity>
                     </View>
-                  </View>
+                  )}
+                </View>
 
-                  <View style={styles.row}>
-                    <Text style={styles.label}>Phone Number</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter Phone Number"
-                      keyboardType="phone-pad"
-                      value={additionalPhone}
-                      onChangeText={setAdditionalPhone}
-                    />
-                  </View>
+                <View style={styles.b2cInputWrapper}>
+                  <Text style={styles.b2cInputLabel}>Cash Amount</Text>
+                  <TextInput
+                    style={styles.b2cInputField}
+                    placeholder="Enter cash amount"
+                    keyboardType="numeric"
+                    value={cashAmount}
+                    onChangeText={setCashAmount}
+                  />
+                </View>
 
-                  <View style={styles.row}>
-                    <Text style={styles.label}>Cash</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter Cash"
-                      keyboardType="numeric"
-                      value={additionalCash}
-                      onChangeText={setAdditionalCash}
-                    />
-                  </View>
-                </>
-              )}
+                {/* Conversion Line */}
+                <View style={styles.b2cConversionLineContainer}>
+                  <Text style={styles.b2cConversionLineText}>
+                    {`${toNum(upiAmount || displayB2CTotalAmount).toFixed(2)} / ${toNum(currentB2CGoldRate).toFixed(0)} => ${toNum(toNum(upiAmount || displayB2CTotalAmount) / currentB2CGoldRate).toFixed(3)} g`}
+                  </Text>
+                </View>
 
-              {/* SUBMIT BUTTON */}
-              {cashAmount && (
-                <TouchableOpacity style={styles.submitBtn} onPress={() => setShowUpi(true)}>
-                  <Text style={styles.submitText}>Generate QR Code</Text>
-                </TouchableOpacity>
-              )}
+                <View style={styles.b2cActionButtonsRow}>
+                  <TouchableOpacity 
+                    style={[styles.b2cActionButton, { backgroundColor: '#2E7D32' }]} 
+                    onPress={handleConvertToGold}
+                  >
+                    <Icon name="swap-horizontal" size={20} color="#fff" />
+                    <Text style={styles.b2cActionButtonText}>Convert to Gold</Text>
+                  </TouchableOpacity>
+
+                  {upiAmount > 0 && (
+                    <TouchableOpacity 
+                      style={[styles.b2cActionButton, { backgroundColor: '#1565C0' }]} 
+                      onPress={() => setShowUpi(true)}
+                    >
+                      <Icon name="qrcode-scan" size={20} color="#fff" />
+                      <Text style={styles.b2cActionButtonText}>Generate QR Code</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
 
               {/* QR CODE */}
               {showUpi && upiAmount > 0 && (
                 <View style={styles.qrContainer}>
-                  <Text style={styles.qrLabel}>UPI QR Code for â‚¹{upiAmount}</Text>
+                  <Text style={styles.qrLabel}>UPI QR Code for ₹{upiAmount}</Text>
                   <Text style={styles.upiIdText}>UPI ID: {upiId}</Text>
                   <TouchableOpacity style={styles.changeUpiBtn} onPress={() => navigation.navigate('UPIControl')}>
                     <Text style={styles.changeUpiText}>Change UPI ID</Text>
                   </TouchableOpacity>
                   <Image
                     source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent("NTJ Jewellery")}&am=${upiAmount}&cu=INR`)}` }}
-                    style={{ width: 200, height: 200 }
-                    }
+                    style={{ width: 200, height: 200 }}
                   />
-                  < TouchableOpacity style={styles.printQrBtn} onPress={handlePrintQR} >
+                  <TouchableOpacity style={styles.printQrBtn} onPress={handlePrintQR}>
                     <Text style={styles.printQrText}>Print QR Code</Text>
-                  </TouchableOpacity >
+                  </TouchableOpacity>
                 </View >
               )}
 
@@ -2844,7 +2898,193 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 13,
   },
+
+  // ── B2C Professional Styles ──
+  b2cProfessionalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+  },
+  b2cCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAF9',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    gap: 10,
+  },
+  b2cCardTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1B4D1B',
+    letterSpacing: 1,
+  },
+  b2cCardBody: {
+    padding: 16,
+  },
+  b2cNormalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  b2cLabel: {
+    fontSize: 13,
+    color: '#757575',
+    fontWeight: '500',
+  },
+  b2cValue: {
+    fontSize: 14,
+    color: '#212121',
+    fontWeight: '600',
+  },
+  b2cHighlightRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#E8F5E9',
+    padding: 12,
+    borderRadius: 10,
+    marginVertical: 10,
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+  },
+  b2cHighlightLabel: {
+    fontSize: 14,
+    color: '#1B5E20',
+    fontWeight: '700',
+  },
+  b2cHighlightValue: {
+    fontSize: 16,
+    color: '#1B5E20',
+    fontWeight: '900',
+  },
+  b2cDividerLine: {
+    height: 1,
+    backgroundColor: '#F0F0F0',
+    marginVertical: 8,
+  },
+  b2cGoldHighlightRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFF8E1',
+    padding: 12,
+    borderRadius: 10,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#FFECB3',
+  },
+  b2cGoldLabel: {
+    fontSize: 13,
+    color: '#7F6D17',
+    fontWeight: '700',
+  },
+  b2cGoldValue: {
+    fontSize: 14,
+    color: '#7F6D17',
+    fontWeight: '800',
+  },
+
+  b2cInputSection: {
+    paddingHorizontal: 4,
+    marginBottom: 20,
+  },
+  b2cInputWrapper: {
+    marginBottom: 16,
+  },
+  b2cInputLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#444',
+    marginBottom: 8,
+    marginLeft: 2,
+  },
+  b2cInputField: {
+    backgroundColor: '#fff',
+    height: 50,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#E0E0E0',
+    paddingHorizontal: 16,
+    fontSize: 16,
+    color: '#333',
+  },
+  b2cConversionLineContainer: {
+    alignItems: 'center',
+    marginVertical: 15,
+    paddingVertical: 10,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+  },
+  b2cConversionLineText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1B4D1B',
+    letterSpacing: 1,
+  },
+  b2cActionButtonsRow: {
+    gap: 12,
+    marginTop: 10,
+  },
+  b2cActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 54,
+    borderRadius: 14,
+    gap: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  b2cActionButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+
+  // ── Payment Selector Styles ──
+  paymentSelectorContainer: {
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F5',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  paymentSelectorScroll: {
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+  },
+  paymentOptionCompact: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginHorizontal: 4,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#D1D1D1',
+  },
+  paymentOptionActive: {
+    backgroundColor: '#2E7D32',
+    borderColor: '#2E7D32',
+  },
+  paymentOptionTextCompact: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  paymentOptionTextActive: {
+    color: '#fff',
+  },
 });
-
-
-
