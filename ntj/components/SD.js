@@ -1354,8 +1354,15 @@ export default function CreateTransaction({ navigation }) {
     const normalizedCustomerType = String(customerType).toUpperCase();
     const isDealerOrSupplier =
       normalizedCustomerType === "DEALER" || normalizedCustomerType === "SUPPLIER";
-    const customerRecordId =
-      selectedCustomer.id || selectedCustomer._id || selectedCustomer.customerId;
+
+    // ✅ FIX: Prioritize numeric customerId for B2B/B2C, use ObjectId for Dealer/Supplier
+    const customerRecordId = isDealerOrSupplier 
+      ? (selectedCustomer.id || selectedCustomer._id || selectedCustomer.customerId)
+      : (selectedCustomer.customerId || selectedCustomer.id || selectedCustomer._id);
+
+    console.log("👤 Selected Customer Object:", JSON.stringify(selectedCustomer, null, 2));
+    console.log("🆔 Resolved customerRecordId:", customerRecordId, "| isDealerOrSupplier:", isDealerOrSupplier);
+
     if (!customerRecordId) {
       Alert.alert("Error", "Customer ID not found for this transaction");
       return;
@@ -1430,6 +1437,8 @@ export default function CreateTransaction({ navigation }) {
       balance: finalDistinctBalance,
       advBal: Number(advBalance.toFixed(3)),
     };
+
+    console.log("📤 Sending /transactions POST Payload:", JSON.stringify(transactionData, null, 2));
 
     try {
       const editBill = route.params?.editTransaction;
@@ -1576,7 +1585,7 @@ export default function CreateTransaction({ navigation }) {
         customerType: billStorageType,  // B2B or B2C only (schema constraint)
         dealerType: customerType,        // preserve Dealer/Supplier label
         billType: billStorageType,       // redundant but explicit
-        date: date,
+        date: (date && typeof date === 'string' && !date.toLowerCase().includes('invalid')) ? date.split("/").reverse().join("-") : new Date().toISOString().split('T')[0],
         ob: Number(oldBalance.toFixed(3)),
         issuePure: Number(totalIssuePure.toFixed(3)),
         receiptPure: Number(totalReceiptPure.toFixed(3)),
@@ -1619,6 +1628,8 @@ export default function CreateTransaction({ navigation }) {
           }
           : null,
       };
+
+      console.log("📤 Sending /billSummary POST Payload:", JSON.stringify(billSummaryData, null, 2));
 
       // Use POST upsert semantics always; on edit, preserve valid billNo to update same bill.
       const billEndpoint = `${base_url}/billSummary`;
@@ -1883,174 +1894,7 @@ export default function CreateTransaction({ navigation }) {
           </View>
         )}
 
-        {/* ISSUE ENTRY */}
-        {selectedCustomer && (
-          <View style={styles.card}>
-            <View style={styles.issueHeader}>
-              <View style={styles.greenDot} />
-              <Text style={styles.sectionTitle}>Issue Entry</Text>
-              <View style={styles.cartContainer}>
-                <Icon name="cart" size={24} color="#000" />
-                <Text style={styles.cartText}>
-                  {totalIssuePure.toFixed(3)}g
-                </Text>
-                {issueItems.length > 0 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{issueItems.length}</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-
-            {/* SEARCH BOX */}
-            <TextInput
-              placeholder="Search items..."
-              style={styles.searchBox}
-              value={issueItemSearch}
-              onChangeText={(text) => {
-                setIssueItemSearch(text);
-                setIssueItemDropdownOpen(true);
-              }}
-              onFocus={() => setIssueItemDropdownOpen(true)}
-              onBlur={() =>
-                setTimeout(() => setIssueItemDropdownOpen(false), 200)
-              }
-            />
-
-            {issueItemDropdownOpen && !loadingItems && (
-              <View style={styles.dropdownFloating}>
-                {itemsList.length > 0 ? (
-                  getReverseMappedItems(issueItemSearch, "issue")
-                    .map((it, idx) => (
-                      <TouchableOpacity
-                        key={idx}
-                        style={[
-                          styles.listItem,
-                          styles.dropdownItemContentIssue,
-                        ]}
-                        onPress={() => {
-                          setSelectedIssueItem(it.itemName);
-                          setIssueItemDropdownOpen(false);
-                          setIssueItemSearch(it.itemName);
-                          setTouch(it.sellingTouch?.toString() || ""); // Auto-fill touch
-                        }}
-                      >
-                        <Text style={styles.dropdownItemTextIssue}>
-                          {it.itemName}
-                        </Text>
-                        <Text style={styles.dropdownItemWeightIssue}>
-                          Weight: {itemsStock[it.itemName]?.weight || 0} g
-                        </Text>
-                      </TouchableOpacity>
-                    ))
-                ) : (
-                  <Text style={styles.infoText}>No items in stock master</Text>
-                )}
-              </View>
-            )}
-
-            {/* Inputs */}
-            <View style={styles.row}>
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Weight (g)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={weight}
-                  onChangeText={setWeight}
-                  keyboardType="decimal-pad"
-                  placeholder="0.000"
-                />
-              </View>
-
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Stone (g)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={stone}
-                  onChangeText={setStone}
-                  keyboardType="decimal-pad"
-                  placeholder="0.000"
-                />
-              </View>
-            </View>
-
-            <View style={styles.row}>
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Touch (%)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={touch}
-                  onChangeText={setTouch}
-                  keyboardType="decimal-pad"
-                  placeholder="0.0"
-                />
-              </View>
-
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Purity</Text>
-                <View style={styles.purityBox}>
-                  <Text style={styles.purityText}>
-                    {fmt(calcIssuePure(weight || 0, stone || 0, touch || 0))} g
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            <TouchableOpacity style={styles.addBtn} onPress={addIssueItem}>
-              <Text style={styles.addBtnText}>+ Add New Item (Issue)</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* ISSUE TABLE */}
-        {issueItems.length > 0 && (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Issue Entry Table</Text>
-
-            <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
-              <View style={styles.productTable}>
-                <View style={styles.productTableHeader}>
-                  <Text style={styles.productHeaderCell}>#</Text>
-                  <Text style={styles.productHeaderCell}>Kind</Text>
-                  <Text style={styles.productHeaderCell}>Item</Text>
-                  <Text style={styles.productHeaderCell}>Weight (g)</Text>
-                  <Text style={styles.productHeaderCell}>Stone (g)</Text>
-                  <Text style={styles.productHeaderCell}>Touch (%)</Text>
-                  <Text style={styles.productHeaderCell}>Pure (g)</Text>
-                  <Text style={styles.productHeaderCell}>Action</Text>
-                </View>
-
-                {issueItems.map((row, idx) => (
-                  <View key={row.id} style={styles.productTableRow}>
-                    <Text style={styles.productCell}>{idx + 1}</Text>
-                    <Text style={styles.productCell}>Issue</Text>
-                    <Text style={styles.productCell}>{row.item}</Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.weight).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.stone).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.touch).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.purity).toFixed(3)}
-                    </Text>
-                    <TouchableOpacity onPress={() => removeIssueItem(row.id)}>
-                      <Text style={[styles.actionText, { color: "#d9534f" }]}>
-                        Remove
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
-          </View>
-        )}
-
-
-        {selectedCustomer && (
+                {selectedCustomer && (
           <View style={styles.card}>
             <View style={styles.issueHeader}>
               <View style={[styles.greenDot, { backgroundColor: "#0aa76a" }]} />
@@ -2227,6 +2071,175 @@ export default function CreateTransaction({ navigation }) {
             </ScrollView>
           </View>
         )}
+
+
+        {/* ISSUE ENTRY */}
+        {selectedCustomer && (
+          <View style={styles.card}>
+            <View style={styles.issueHeader}>
+              <View style={styles.greenDot} />
+              <Text style={styles.sectionTitle}>Issue Entry</Text>
+              <View style={styles.cartContainer}>
+                <Icon name="cart" size={24} color="#000" />
+                <Text style={styles.cartText}>
+                  {totalIssuePure.toFixed(3)}g
+                </Text>
+                {issueItems.length > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{issueItems.length}</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+
+            {/* SEARCH BOX */}
+            <TextInput
+              placeholder="Search items..."
+              style={styles.searchBox}
+              value={issueItemSearch}
+              onChangeText={(text) => {
+                setIssueItemSearch(text);
+                setIssueItemDropdownOpen(true);
+              }}
+              onFocus={() => setIssueItemDropdownOpen(true)}
+              onBlur={() =>
+                setTimeout(() => setIssueItemDropdownOpen(false), 200)
+              }
+            />
+
+            {issueItemDropdownOpen && !loadingItems && (
+              <View style={styles.dropdownFloating}>
+                {itemsList.length > 0 ? (
+                  getReverseMappedItems(issueItemSearch, "issue")
+                    .map((it, idx) => (
+                      <TouchableOpacity
+                        key={idx}
+                        style={[
+                          styles.listItem,
+                          styles.dropdownItemContentIssue,
+                        ]}
+                        onPress={() => {
+                          setSelectedIssueItem(it.itemName);
+                          setIssueItemDropdownOpen(false);
+                          setIssueItemSearch(it.itemName);
+                          setTouch(it.sellingTouch?.toString() || ""); // Auto-fill touch
+                        }}
+                      >
+                        <Text style={styles.dropdownItemTextIssue}>
+                          {it.itemName}
+                        </Text>
+                        <Text style={styles.dropdownItemWeightIssue}>
+                          Weight: {itemsStock[it.itemName]?.weight || 0} g
+                        </Text>
+                      </TouchableOpacity>
+                    ))
+                ) : (
+                  <Text style={styles.infoText}>No items in stock master</Text>
+                )}
+              </View>
+            )}
+
+            {/* Inputs */}
+            <View style={styles.row}>
+              <View style={styles.inputBox}>
+                <Text style={styles.subLabel}>Weight (g)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={weight}
+                  onChangeText={setWeight}
+                  keyboardType="decimal-pad"
+                  placeholder="0.000"
+                />
+              </View>
+
+              <View style={styles.inputBox}>
+                <Text style={styles.subLabel}>Stone (g)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={stone}
+                  onChangeText={setStone}
+                  keyboardType="decimal-pad"
+                  placeholder="0.000"
+                />
+              </View>
+            </View>
+
+            <View style={styles.row}>
+              <View style={styles.inputBox}>
+                <Text style={styles.subLabel}>Touch (%)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={touch}
+                  onChangeText={setTouch}
+                  keyboardType="decimal-pad"
+                  placeholder="0.0"
+                />
+              </View>
+
+              <View style={styles.inputBox}>
+                <Text style={styles.subLabel}>Purity</Text>
+                <View style={styles.purityBox}>
+                  <Text style={styles.purityText}>
+                    {fmt(calcIssuePure(weight || 0, stone || 0, touch || 0))} g
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity style={styles.addBtn} onPress={addIssueItem}>
+              <Text style={styles.addBtnText}>+ Add New Item (Issue)</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ISSUE TABLE */}
+        {issueItems.length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Issue Entry Table</Text>
+
+            <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
+              <View style={styles.productTable}>
+                <View style={styles.productTableHeader}>
+                  <Text style={styles.productHeaderCell}>#</Text>
+                  <Text style={styles.productHeaderCell}>Kind</Text>
+                  <Text style={styles.productHeaderCell}>Item</Text>
+                  <Text style={styles.productHeaderCell}>Weight (g)</Text>
+                  <Text style={styles.productHeaderCell}>Stone (g)</Text>
+                  <Text style={styles.productHeaderCell}>Touch (%)</Text>
+                  <Text style={styles.productHeaderCell}>Pure (g)</Text>
+                  <Text style={styles.productHeaderCell}>Action</Text>
+                </View>
+
+                {issueItems.map((row, idx) => (
+                  <View key={row.id} style={styles.productTableRow}>
+                    <Text style={styles.productCell}>{idx + 1}</Text>
+                    <Text style={styles.productCell}>Issue</Text>
+                    <Text style={styles.productCell}>{row.item}</Text>
+                    <Text style={styles.productCell}>
+                      {Number(row.weight).toFixed(3)}
+                    </Text>
+                    <Text style={styles.productCell}>
+                      {Number(row.stone).toFixed(3)}
+                    </Text>
+                    <Text style={styles.productCell}>
+                      {Number(row.touch).toFixed(3)}
+                    </Text>
+                    <Text style={styles.productCell}>
+                      {Number(row.purity).toFixed(3)}
+                    </Text>
+                    <TouchableOpacity onPress={() => removeIssueItem(row.id)}>
+                      <Text style={[styles.actionText, { color: "#d9534f" }]}>
+                        Remove
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+        )}
+
+
 
         
         {/* RECEIPT ENTRY */}
