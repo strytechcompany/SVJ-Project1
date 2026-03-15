@@ -6,6 +6,7 @@ const gstCustomerSchema = new mongoose.Schema(
     phoneNumber: { type: String, required: true, trim: true },
     address: { type: String, required: true, trim: true },
     gstin: { type: String, default: "", trim: true },
+    date: { type: String, default: "" },
   },
   { timestamps: true }
 );
