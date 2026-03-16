@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { useFocusEffect } from "@react-navigation/native";
 import CommonHeader from "./CommonHeader";
@@ -32,6 +33,12 @@ const formatDateTime = (value) => {
   });
 };
 
+const toDateOnlyKey = (value) => {
+  const d = value ? new Date(value) : null;
+  if (!d || Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
 export default function DailyExpense({ navigation }) {
   const [expenseName, setExpenseName] = useState("");
   const [workerName, setWorkerName] = useState("");
@@ -47,6 +54,11 @@ export default function DailyExpense({ navigation }) {
   const [loadingList, setLoadingList] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
+  // Saved records filters (UI only)
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedDate, setSelectedDate] = useState(null); // Date | null
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
   const workerSuggestions = useMemo(() => {
     const key = workerName.trim().toLowerCase();
     if (!key) return workerNames.slice(0, 8);
@@ -54,6 +66,33 @@ export default function DailyExpense({ navigation }) {
       .filter((w) => w.name.toLowerCase().includes(key))
       .slice(0, 8);
   }, [workerName, workerNames]);
+
+  const filteredRows = useMemo(() => {
+    const q = String(searchQuery || "").trim().toLowerCase();
+    const qNoSpace = q.replace(/\s+/g, "");
+    const dateKey = selectedDate ? toDateOnlyKey(selectedDate) : null;
+
+    return (rows || []).filter((r) => {
+      if (dateKey) {
+        const recordKey = toDateOnlyKey(r?.expenseDate || r?.createdAt);
+        if (!recordKey || recordKey !== dateKey) return false;
+      }
+
+      if (!q) return true;
+
+      const worker = String(r?.workerName || "").toLowerCase();
+      const product = String(r?.expenseName || "").toLowerCase();
+      const amt = Number(r?.amount);
+      const amtText = Number.isFinite(amt) ? amt.toFixed(2) : String(r?.amount || "");
+      const amtKey = String(amtText).replace(/\s+/g, "").toLowerCase();
+
+      return (
+        worker.includes(q) ||
+        product.includes(q) ||
+        amtKey.includes(qNoSpace)
+      );
+    });
+  }, [rows, searchQuery, selectedDate]);
 
   const fetchWorkerNames = async () => {
     try {
@@ -430,16 +469,74 @@ export default function DailyExpense({ navigation }) {
 
         <View style={styles.listCard}>
           <Text style={styles.sectionTitle}>Saved Daily Expenses</Text>
+
+          <View style={styles.filtersRow}>
+            <View style={styles.searchWrap}>
+              <Icon name="magnify" size={18} color="#6b6b6b" style={{ marginRight: 6 }} />
+              <TextInput
+                style={styles.searchInput}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search worker, product, amount..."
+                placeholderTextColor="#8a8a8a"
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+              {!!searchQuery && (
+                <TouchableOpacity onPress={() => setSearchQuery("")} style={styles.clearIconBtn}>
+                  <Icon name="close-circle" size={18} color="#8a8a8a" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.dateBtn, selectedDate && styles.dateBtnActive]}
+              onPress={() => setShowDatePicker(true)}
+            >
+              <Icon name="calendar" size={18} color={selectedDate ? "#fff" : "#1B4D1B"} />
+              <Text style={[styles.dateBtnText, selectedDate && styles.dateBtnTextActive]}>
+                {selectedDate ? toDateOnlyKey(selectedDate) : "Date"}
+              </Text>
+            </TouchableOpacity>
+
+            {(!!selectedDate || !!searchQuery) && (
+              <TouchableOpacity
+                style={styles.resetBtn}
+                onPress={() => {
+                  setSearchQuery("");
+                  setSelectedDate(null);
+                }}
+              >
+                <Text style={styles.resetBtnText}>Clear</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {showDatePicker && (
+            <DateTimePicker
+              value={selectedDate || new Date()}
+              mode="date"
+              display="default"
+              onChange={(event, date) => {
+                setShowDatePicker(false);
+                if (event?.type === "dismissed") return;
+                setSelectedDate(date || null);
+              }}
+            />
+          )}
+
           {loadingList ? (
             <ActivityIndicator size="small" color="#1B4D1B" style={{ marginTop: 12 }} />
           ) : (
             <FlatList
-              data={rows}
+              data={filteredRows}
               keyExtractor={(item, idx) => String(item._id || item.id || idx)}
               renderItem={renderItem}
               scrollEnabled={false}
               ListEmptyComponent={
-                <Text style={styles.emptyText}>No expense records yet.</Text>
+                <Text style={styles.emptyText}>
+                  {rows?.length ? "No matching records." : "No expense records yet."}
+                </Text>
               }
             />
           )}
@@ -492,6 +589,67 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     backgroundColor: "#fff",
     color: "#111",
+  },
+  filtersRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+  },
+  searchWrap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#d6d6d6",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    backgroundColor: "#fff",
+    height: 40,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: 0,
+    color: "#111",
+  },
+  clearIconBtn: {
+    paddingLeft: 6,
+    paddingVertical: 6,
+  },
+  dateBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#1B4D1B",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    height: 40,
+    backgroundColor: "#fff",
+  },
+  dateBtnActive: {
+    backgroundColor: "#1B4D1B",
+  },
+  dateBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1B4D1B",
+  },
+  dateBtnTextActive: {
+    color: "#fff",
+  },
+  resetBtn: {
+    height: 40,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: "#efefef",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  resetBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#333",
   },
   multilineInput: {
     minHeight: 70,
