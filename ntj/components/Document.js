@@ -56,6 +56,8 @@ export default function Document({ navigation }) {
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerUri, setViewerUri] = useState("");
   const [viewerType, setViewerType] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const serverRoot = useMemo(() => base_url.replace(/\/api\/?$/, ""), []);
   const apiCandidates = useMemo(() => {
@@ -89,6 +91,16 @@ export default function Document({ navigation }) {
       setLoading(false);
     }
   }, []);
+
+  const filteredRows = useMemo(() => {
+    const q = String(searchQuery || "").trim().toLowerCase();
+    if (!q) return rows;
+    return (rows || []).filter((r) => {
+      const name = String(r?.documentName || "").toLowerCase();
+      const type = String(r?.fileType || "").toLowerCase();
+      return name.includes(q) || type.includes(q);
+    });
+  }, [rows, searchQuery]);
 
   React.useEffect(() => {
     fetchDocuments();
@@ -359,7 +371,39 @@ export default function Document({ navigation }) {
         onBack={() => navigation.goBack()}
         backgroundColor="#1B4D1B"
         insideSafeArea
+        right={
+          <TouchableOpacity
+            onPress={() => {
+              setShowSearch((v) => !v);
+              if (showSearch) setSearchQuery("");
+            }}
+            style={styles.headerIconBtn}
+          >
+            <Icon name={showSearch ? "close" : "magnify"} size={22} color="#fff" />
+          </TouchableOpacity>
+        }
       />
+
+      {showSearch && (
+        <View style={styles.searchBarWrapper}>
+          <Icon name="magnify" size={20} color="#666" style={{ marginRight: 8 }} />
+          <TextInput
+            style={styles.searchBarInput}
+            placeholder="Search documents..."
+            placeholderTextColor="#999"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCorrect={false}
+            autoCapitalize="none"
+            clearButtonMode="while-editing"
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery("")}>
+              <Icon name="close-circle" size={18} color="#999" />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       <View style={styles.uploadBox}>
         {editingItem ? (
@@ -405,11 +449,15 @@ export default function Document({ navigation }) {
         </View>
       ) : (
         <FlatList
-          data={rows}
+          data={filteredRows}
           keyExtractor={(item, index) => item?._id || item?.id || String(index)}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
-          ListEmptyComponent={<Text style={styles.empty}>No Documents Found</Text>}
+          ListEmptyComponent={
+            <Text style={styles.empty}>
+              {rows?.length ? "No matching documents found" : "No Documents Found"}
+            </Text>
+          }
         />
       )}
 
@@ -463,6 +511,29 @@ export default function Document({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#F3F5F8" },
+  headerIconBtn: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 20,
+  },
+  searchBarWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    marginHorizontal: 12,
+    marginTop: 12,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 44,
+    elevation: 2,
+  },
+  searchBarInput: {
+    flex: 1,
+    fontSize: 14,
+    color: "#111",
+  },
   uploadBox: {
     margin: 12,
     backgroundColor: "#fff",
