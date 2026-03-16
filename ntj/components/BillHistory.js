@@ -1,31 +1,91 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { useFocusEffect } from "@react-navigation/native";
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  SafeAreaView,
-  Alert,
-  TextInput,
-  Share,
-  ActivityIndicator,
-  Linking,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+// ntj/components/BillPreview.js
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, TextInput, Image, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, Linking } from "react-native";
+import { useFocusEffect } from '@react-navigation/native';
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
-import DateTimePicker from "@react-native-community/datetimepicker";
-import * as Print from "expo-print";
-import * as Sharing from "expo-sharing";
+import QRCode from 'react-native-qrcode-svg';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from "axios";
 import { base_url } from "./config";
-import CommonHeader from "./CommonHeader";
 
-const num = (value, fallback = 0) => {
+// `react-native-share` requires a native module ("RNShare"). In Expo Go (and any build
+// where that native module isn't included), importing it crashes at startup.
+// Load it lazily so we can fall back to `expo-sharing` when unavailable.
+let _rnShare;
+let _rnShareTried = false;
+const getRNShare = () => {
+  if (_rnShareTried) return _rnShare;
+  _rnShareTried = true;
+  try {
+    const mod = require('react-native-share');
+    _rnShare = mod?.default ?? mod;
+  } catch (_) {
+    _rnShare = null;
+  }
+  return _rnShare;
+};
+
+// Format numbers in Indian comma style: 1,230 / 12,035 / 1,23,456
+const formatIndianNumber = (value) => {
+  const num = parseFloat(value);
+  if (isNaN(num)) return value;
+  // Use Math.round for whole rupees display
+  const rounded = Math.round(num);
+  const str = rounded.toString();
+  // Indian number system: last 3 digits, then groups of 2
+  const lastThree = str.slice(-3);
+  const rest = str.slice(0, str.length - 3);
+  const formatted = rest.length > 0
+    ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + lastThree
+    : lastThree;
+  return formatted;
+};
+
+const formatB2CInvoiceNo = (value) => {
+  if (!value) return "";
+  const str = String(value).trim();
+  if (/^A2026\d+$/.test(str)) return str;
+  const digits = str.replace(/\D/g, "");
+  if (!digits) return "";
+  return `A2026${digits.slice(-2).padStart(2, "0")}`;
+};
+
+const formatMainBillNo = (value) => {
+  if (!value) return "";
+  const str = String(value).trim();
+  if (str.toUpperCase().startsWith("A")) return str;
+  const digits = str.replace(/\D/g, "");
+  if (!digits) return "";
+  const n = Number.parseInt(digits, 10);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return String(n).padStart(5, "0");
+};
+
+const resolveBillNoForDisplay = (val, type) => {
+  const isB2C = String(type || "").toUpperCase() === "B2C";
+  return isB2C ? formatB2CInvoiceNo(val) : formatMainBillNo(val);
+};
+
+const DEFAULT_THIRUKKURAL = "அகர முதல எழுத்தெல்லாம் ஆதி பகவன் முதற்றே உலகு.";
+const TAMIL_FONT_STACK = '"Noto Sans Tamil", "Nirmala UI", "Latha", "Tamil Sangam MN", "Arial Unicode MS", sans-serif';
+const tamilFontFamily = Platform.select({
+  ios: "Tamil Sangam MN",
+  android: "Noto Sans Tamil",
+  default: "Noto Sans Tamil",
+});
+
+export default function BillPreview({ route, navigation }) {
+  const { issueItems, receiptItems, cashTable, summary, report, transactions, items, gst, estimate, suspense, order, printAgain } = route.params || {};
+  const customer = route.params?.customer || {};
+const toNum = (value, fallback = 0) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 };
-const readImageField = (value) => {
+
+const normalizeImageUri = (rawValue, baseUrl = "") => {
   const isInvalidImageToken = (raw) => {
     const token = String(raw || "").trim().toLowerCase();
     return (
@@ -36,64 +96,66 @@ const readImageField = (value) => {
       token === "[object object]"
     );
   };
-
-  if (!value) return "";
-  if (typeof value === "string") {
-    let trimmed = value.trim();
-    if (isInvalidImageToken(trimmed)) return "";
-    if (
-      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-      (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
-      (trimmed.startsWith("\"") && trimmed.endsWith("\""))
-    ) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        const nested = readImageField(parsed);
-        if (nested) return nested;
-      } catch (_) {}
+  const readImageField = (value) => {
+    if (!value) return "";
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (isInvalidImageToken(trimmed)) return "";
+      if (
+        (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+        (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+        (trimmed.startsWith("\"") && trimmed.endsWith("\""))
+      ) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          const nested = readImageField(parsed);
+          if (nested) return nested;
+        } catch (_) {}
+      }
+      return isInvalidImageToken(trimmed) ? "" : trimmed;
     }
-    return isInvalidImageToken(trimmed) ? "" : trimmed;
-  }
-  if (Array.isArray(value)) {
-    for (const row of value) {
-      const nested = readImageField(row);
+    if (Array.isArray(value)) {
+      for (const row of value) {
+        const nested = readImageField(row);
+        if (nested) return nested;
+      }
+      return "";
+    }
+    if (typeof value !== "object") return "";
+    const candidates = [
+      value.uri,
+      value.url,
+      value.path,
+      value.src,
+      value.fileUri,
+      value.sourceURL,
+      value.receiptImage,
+      value.proofImage,
+      value.image,
+      value.base64,
+      value.data,
+      value.assets,
+      value.images,
+      value.files,
+    ];
+    for (const candidate of candidates) {
+      const nested = readImageField(candidate);
       if (nested) return nested;
     }
     return "";
-  }
-  if (typeof value !== "object") return "";
-  const candidates = [
-    value.uri,
-    value.url,
-    value.path,
-    value.src,
-    value.fileUri,
-    value.sourceURL,
-    value.receiptImage,
-    value.proofImage,
-    value.image,
-    value.base64,
-    value.data,
-    value.assets,
-    value.images,
-    value.files,
-  ];
-  for (const candidate of candidates) {
-    const nested = readImageField(candidate);
-    if (nested) return nested;
-  }
-  return "";
-};
-const normalizeImageUri = (raw, baseUrl = "") => {
-  const uriRaw = readImageField(raw);
-  if (!uriRaw) return "";
-  let uri = uriRaw.trim();
+  };
+
+  if (rawValue === null || rawValue === undefined) return "";
+  let uri = readImageField(rawValue);
+  if (!uri) return "";
 
   try {
     if (uri.includes("%2F") || uri.includes("%3A") || uri.includes("%2B")) {
       uri = decodeURIComponent(uri);
     }
-  } catch (_) {}
+  } catch (_) {
+    // keep original
+  }
 
   const compact = uri.replace(/\s+/g, "");
   if (compact.startsWith("data:image/")) return compact;
@@ -113,1336 +175,3944 @@ const normalizeImageUri = (raw, baseUrl = "") => {
   if (/^[A-Za-z0-9+/_=\r\n-]+$/.test(compact) && compact.length > 100) {
     return `data:image/jpeg;base64,${compact}`;
   }
+
   const cleanBaseUrl = String(baseUrl || "").replace(/\/+$/, "");
   const cleanPath = uri.replace(/^\/+/, "");
   return cleanBaseUrl ? `${cleanBaseUrl}/${cleanPath}` : uri;
 };
-const getRecordImage = (row = {}) =>
-  normalizeImageUri(
-    readImageField(row?.receiptImage) ||
-      readImageField(row?.proofImage) ||
-      readImageField(row?.image) ||
-      "",
-    base_url,
-  );
+  const safeIssueItems = Array.isArray(issueItems) ? issueItems : [];
+  const safeReceiptItems = Array.isArray(receiptItems) ? receiptItems : [];
+  const safeCashTable = Array.isArray(cashTable) ? cashTable : [];
 
-const formatB2CInvoiceNo = (value) => {
-  const raw = String(value ?? "").trim();
-  if (!raw || raw === "N/A" || raw === "00000") return "A202600";
-  // If it already starts with A, just return it (maybe pad the numbers at the end)
-  if (raw.toUpperCase().startsWith("A")) {
-    const digits = raw.replace(/\D/g, "");
-    return `A2026${digits.padStart(2, "0")}`;
-  }
-  const digits = raw.replace(/\D/g, "");
-  if (!digits) return "A202600";
-  return `A2026${digits.padStart(2, "0")}`;
-};
+  const isB2C = customer?.type === 'B2C';
+  console.log("DEBUG: Customer in Preview ðŸ‘‰", customer);
 
-const formatMainBillNo = (value) => {
-  const raw = String(value ?? "").trim();
-  if (raw.toUpperCase().startsWith("A")) return formatB2CInvoiceNo(value);
-  const digits = raw.replace(/\D/g, "");
-  if (!digits) return "";
-  const n = Number.parseInt(digits, 10);
-  if (!Number.isFinite(n) || n <= 0) return "";
-  return String(n).padStart(5, "0");
-};
-
-const resolveBillNoForDisplay = (bill = {}, customer = {}) => {
-  const type = resolveBillTypeFromContext(bill, customer);
-  const raw = bill?.billNo || bill?.invoiceNo || "";
-  if (type === "B2C") return formatB2CInvoiceNo(raw);
-  return formatMainBillNo(raw) || "00000";
-};
-
-const getBillTimestamp = (bill = {}) => {
-  const d = new Date(bill?.updatedAt || bill?.createdAt || bill?.date || 0);
-  const t = d.getTime();
-  return Number.isFinite(t) ? t : 0;
-};
-
-const resolveBillTypeFromContext = (bill = {}, customer = {}) => {
-  const contextType = String(customer?.customerType || customer?.type || "").toUpperCase();
-  if (contextType === "B2C") return "B2C";
-  if (contextType === "B2B") return "B2B";
-  return resolveBillType(bill);
-};
-
-const resolveDisplayTypeFromContext = (bill = {}, customer = {}) => {
-  const contextType = String(customer?.customerType || customer?.type || "").toUpperCase();
-  if (contextType === "DEALER" || contextType === "SUPPLIER") {
-    return contextType === "DEALER" ? "Dealer" : "Supplier";
-  }
-  if (contextType === "B2C") return "B2C";
-  if (contextType === "B2B") return "B2B";
-  const billDealerType = String(bill?.dealerType || "").toUpperCase();
-  if (billDealerType === "DEALER" || billDealerType === "SUPPLIER") {
-    return billDealerType === "DEALER" ? "Dealer" : "Supplier";
-  }
-  return resolveBillType(bill);
-};
-
-/** Resolve the correct API billType (B2B or B2C) from a customer or bill record */
-const resolveBillType = (source = {}) => {
-  const raw = String(
-    source?.billType || source?.customerType || source?.type || "B2B"
-  ).toUpperCase();
-  // Dealer / Supplier transactions are stored as B2B
-  if (raw === "B2C") return "B2C";
-  return "B2B";
-};
-
-const isGstBill = (bill = {}) => {
-  const gst = bill?.gst || {};
-  const gstAmount = Number(gst?.amount || 0);
-  const gstPure = Number(bill?.gstPure || 0);
-  return Boolean(gst?.enabled) || gstAmount > 0 || gstPure > 0;
-};
-
-const resolveBillTotalAmount = (bill = {}) => {
-  const gstFinal = Number(bill?.gst?.finalAmount || 0);
-  if (Number.isFinite(gstFinal) && gstFinal > 0) return gstFinal;
-  const gstTaxable = Number(bill?.gst?.taxableAmount || 0);
-  if (Number.isFinite(gstTaxable) && gstTaxable > 0) return gstTaxable;
-  const directAmount = Number(bill?.totalAmount ?? bill?.finalAmount ?? bill?.netAmount ?? bill?.cashAmount);
-  if (Number.isFinite(directAmount) && directAmount > 0) return directAmount;
-  const items = Array.isArray(bill?.items) ? bill.items : [];
-  const sum = items.reduce((acc, row) => {
-    const v = Number(row?.final ?? row?.totalAmount ?? row?.amount ?? row?.total);
-    return acc + (Number.isFinite(v) ? v : 0);
-  }, 0);
-  return sum > 0 ? sum : 0;
-};
-
-const getBalanceFromBill = (bill = {}, fallbackBalance = null) => {
-  const rawCurrent = Number(bill?.currentBalance ?? bill?.availableBalance);
-  const rawOB = Number(bill?.oldBalance ?? bill?.ob);
-  const rawAB = Number(bill?.advanceBalance ?? bill?.advBal);
-
-  const hasCurrent = Number.isFinite(rawCurrent);
-  const hasOB = Number.isFinite(rawOB);
-  const hasAB = Number.isFinite(rawAB);
-
-  const hasAnyBalanceField = hasCurrent || hasOB || hasAB;
-  if (!hasAnyBalanceField && fallbackBalance) {
-    return fallbackBalance;
-  }
-
-  let current = hasCurrent ? rawCurrent : NaN;
-  if (!Number.isFinite(current)) {
-    if (hasOB && rawOB > 0) current = rawOB;
-    else if (hasAB && rawAB > 0) current = -Math.abs(rawAB);
-    else current = 0;
-  }
-
-  const ob = hasOB && rawOB > 0 ? rawOB : (current > 0 ? current : 0);
-  const ab = hasAB && rawAB > 0 ? rawAB : (current < 0 ? Math.abs(current) : 0);
-
-  if (current < 0 || ab > 0) return { label: "AB", value: Math.abs(current || ab), current, ob, ab };
-  if (current > 0 || ob > 0) return { label: "OB", value: current || ob, current, ob, ab };
-  return { label: null, value: 0, current: 0, ob: 0, ab: 0 };
-};
-
-const normalizeBills = (rows = [], ctxCustomer = {}) => {
-  const ordered = [...(Array.isArray(rows) ? rows : [])].sort(
-    (a, b) => getBillTimestamp(b) - getBillTimestamp(a),
-  );
-  const seen = new Set();
-  const unique = ordered.filter((bill) => {
-    const rawNo = bill?.billNo || bill?.invoiceNo || "";
-    const isB2C = String(bill?.billType || bill?.customerType || "").toUpperCase() === "B2C";
-    const formattedNo = isB2C ? formatB2CInvoiceNo(rawNo) : (formatMainBillNo(rawNo) || "00000");
-
-    const compositeKey = [
-      String(bill?.customerId || "").trim(),
-      formattedNo,
-      String(bill?.date || "").trim(),
-      String(num(bill?.oldBalance ?? bill?.ob, 0)),
-      String(num(bill?.issuePure ?? bill?.totalIssueWeight, 0)),
-      String(num(bill?.receiptPure ?? bill?.totalReceiptWeight, 0)),
-      String(num(bill?.cashPure ?? bill?.cashAmount, 0)),
-    ].join("|");
-    const key = compositeKey;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
+  const [cashAmount, setCashAmount] = useState('');
+  const [upiAmount, setUpiAmount] = useState('');
+  const [showUpi, setShowUpi] = useState(false);
+  const [b2cCashReceived, setB2cCashReceived] = useState("");
+  const [b2cConversion, setB2cConversion] = useState({
+    applied: false,
+    goldWeight: 0,
+    updatedOB: 0,
+    updatedAB: 0,
   });
-  const sorted = unique;
-  return sorted.map((bill) => {
-    const bal = getBalanceFromBill(bill, null);
-    const normalizedBillNo = resolveBillNoForDisplay(bill, ctxCustomer);
-    return {
-      ...bill,
-      billNo: normalizedBillNo,
-      invoiceNo: normalizedBillNo,
-      currentBalance: bal.current,
-      availableBalance: bal.current,
-      oldBalance: bal.ob,
-      ob: bal.ob,
-      advanceBalance: bal.ab,
-      advBal: bal.ab,
-      isConvertedToGold: bill.isConvertedToGold || false,
-    };
+  const [customPayment, setCustomPayment] = useState("");
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const isSharingRef = useRef(false);
+  const hasAutoPrintedRef = useRef(false);
+  const hasAutoSharedRef = useRef(false);
+  const preparedPdfUriRef = useRef("");
+
+  const [upiId, setUpiId] = useState("kaliyamoorthirengaraj@okaxis");
+  const [additionalPhone, setAdditionalPhone] = useState('');
+  const [additionalCash, setAdditionalCash] = useState('');
+  const [kadaiAmount, setKadaiAmount] = useState(() => {
+    const existing = transactions?.[0]?.kadaiAmount ?? customer?.kadaiAmount ?? "";
+    return existing === null || existing === undefined || String(existing).trim() === ""
+      ? ""
+      : String(existing);
   });
-};
-
-const enrichBillsWithTransactionImage = (billRows = [], allTx = [], ctxCustomer = {}) => {
-  const txRows = Array.isArray(allTx) ? allTx : [];
-  const ctxIds = [
-    ctxCustomer?._id,
-    ctxCustomer?.id,
-    ctxCustomer?.customerId,
-  ]
-    .filter(Boolean)
-    .map((v) => String(v));
-  const ctxName = String(ctxCustomer?.customerName || ctxCustomer?.name || "").trim().toLowerCase();
-
-  return (Array.isArray(billRows) ? billRows : []).map((bill) => {
-    if (getRecordImage(bill)) return bill;
-    const billId = String(bill?.customerId || "");
-    const billName = String(bill?.customerName || "").trim().toLowerCase();
-    const billTs = getBillTimestamp(bill);
-
-    let bestTx = null;
-    let bestDiff = Number.POSITIVE_INFINITY;
-
-    for (const tx of txRows) {
-      const img = getRecordImage(tx);
-      if (!img) continue;
-
-      const txId = String(tx?.customerId || "");
-      const txName = String(tx?.customerName || "").trim().toLowerCase();
-      const idMatch = (billId && txId && billId === txId) || (txId && ctxIds.includes(txId));
-      const nameMatch = (billName && txName && billName === txName) || (ctxName && txName && ctxName === txName);
-      if (!idMatch && !nameMatch) continue;
-
-      const txTs = new Date(tx?.updatedAt || tx?.createdAt || tx?.date || 0).getTime() || 0;
-      const diff = Math.abs((billTs || 0) - txTs);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestTx = tx;
-      }
-    }
-
-    if (!bestTx) return bill;
-    const fallbackImage = getRecordImage(bestTx);
-    return {
-      ...bill,
-      receiptImage: fallbackImage,
-      proofImage: bill?.proofImage || fallbackImage,
-      image: bill?.image || fallbackImage,
-      receiptImageShowInBill:
-        typeof bill?.receiptImageShowInBill === "boolean"
-          ? bill.receiptImageShowInBill
-          : (typeof bestTx?.receiptImageShowInBill === "boolean" ? bestTx.receiptImageShowInBill : true),
-    };
-  });
-};
-
-const buildSummaryForPreview = (bill = {}, bal = { ob: 0, ab: 0, current: 0 }) => {
-  const issueFromRows = (Array.isArray(bill?.issueItems) ? bill.issueItems : [])
-    .reduce((sum, row) => sum + num(row?.pure, 0), 0);
-  const receiptFromRows = (Array.isArray(bill?.receiptItems) ? bill.receiptItems : [])
-    .reduce((sum, row) => sum + num(row?.pure, num(row?.result, num(row?.netWeight, 0))), 0);
-  const cashFromTable = (Array.isArray(bill?.cashTable) ? bill.cashTable : [])
-    .reduce((sum, row) => sum + num(row?.pure, 0), 0);
-
-  const issue = num(
-    bill?.issuePure,
-    num(bill?.totalIssueWeight, num(bill?.summary?.issue, issueFromRows)),
-  );
-  const receipt = num(
-    bill?.receiptPure,
-    num(bill?.totalReceiptWeight, num(bill?.summary?.receipt, receiptFromRows)),
-  );
-  const cash = num(
-    bill?.cashPure,
-    num(bill?.cashAmount, num(bill?.summary?.cash, cashFromTable)),
-  );
-  const gstPure = num(bill?.gstPure, num(bill?.summary?.gstPure, 0));
-
-  return {
-    ob: num(bal?.ob, 0).toFixed(3),
-    ab: num(bal?.ab, 0).toFixed(3),
-    issue: issue.toFixed(3),
-    receipt: receipt.toFixed(3),
-    cash: cash.toFixed(3),
-    gstPure: gstPure.toFixed(3),
-    receiptPlusCash: (receipt + cash).toFixed(3),
-    current: num(bal?.current, num(bill?.currentBalance, num(bill?.availableBalance, 0))).toFixed(3),
-  };
-};
-
-export default function BillHistory({ navigation, route }) {
-  const [customer, setCustomer] = useState(route.params?.customer || {});
-  const [bills, setBills] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [showFromPicker, setShowFromPicker] = useState(false);
-  const [showToPicker, setShowToPicker] = useState(false);
-  const [billSearch, setBillSearch] = useState("");
-  const [sharingBillId, setSharingBillId] = useState(null);
-
-  useEffect(() => {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - 30);
-    const startStr = start.toISOString().split("T")[0];
-    const endStr = end.toISOString().split("T")[0];
-    setFromDate(startStr);
-    setToDate(endStr);
-  }, []);
+  const [thirukkural, setThirukkural] = useState(DEFAULT_THIRUKKURAL);
+  const [homeGoldRate, setHomeGoldRate] = useState("");
 
   useFocusEffect(
     useCallback(() => {
-      let start = fromDate;
-      let end = toDate;
-      if (!start || !end) {
-        const d = new Date();
-        const s = new Date();
-        s.setDate(d.getDate() - 30);
-        start = s.toISOString().split("T")[0];
-        end = d.toISOString().split("T")[0];
-      }
-      fetchCustomerDetails();
-      fetchBills(start, end);
-    }, [fromDate, toDate])
+      const loadSelectedUpiId = async () => {
+        try {
+          const stored = await AsyncStorage.getItem('selectedUpiId');
+          if (stored) {
+            setUpiId(stored);
+          }
+        } catch (error) {
+          console.error('Error loading selected UPI ID:', error);
+        }
+      };
+      const loadThirukkural = async () => {
+        try {
+          const response = await axios.get(`${base_url}/thirukkural`);
+          const latestKural = response?.data?.kural || "";
+          if (String(latestKural).trim()) {
+            setThirukkural(latestKural);
+            await AsyncStorage.setItem('thirukkural_quote', latestKural);
+            return;
+          }
+          const storedKural = await AsyncStorage.getItem('thirukkural_quote');
+          if (storedKural && String(storedKural).trim()) {
+            setThirukkural(storedKural);
+            return;
+          }
+          setThirukkural(DEFAULT_THIRUKKURAL);
+        } catch (error) {
+          console.error('Error loading Thirukkural:', error);
+          const storedKural = await AsyncStorage.getItem('thirukkural_quote');
+          if (storedKural && String(storedKural).trim()) {
+            setThirukkural(storedKural);
+            return;
+          }
+          setThirukkural(DEFAULT_THIRUKKURAL);
+        }
+      };
+      const loadHomeGoldRate = async () => {
+        try {
+          const storedGoldRate = await AsyncStorage.getItem("goldRate");
+          setHomeGoldRate(storedGoldRate ? String(storedGoldRate) : "");
+        } catch (error) {
+          console.error("Error loading goldRate from HomeScreen:", error);
+        }
+      };
+      loadSelectedUpiId();
+      loadThirukkural();
+      loadHomeGoldRate();
+    }, [])
   );
+  const [qrDataURL, setQrDataURL] = useState('');
+  const [qrReady, setQrReady] = useState(false);
 
-  // ── FETCH CUSTOMER ────────────────────────────────────────────────
-  const fetchCustomerDetails = async () => {
-    try {
-      const cid = customer?._id || customer?.id || customer?.customerId;
-      if (!cid) return;
-      const type = resolveBillType(customer);
-      const isDealer = String(customer?.customerType || customer?.type || "").toUpperCase() === "DEALER";
-      
-      let url = `${base_url}/customers/${cid}`;
-      if (type === "B2C") url = `${base_url}/customersB2C/${cid}`;
-      else if (isDealer) url = `${base_url}/customersDealer/${cid}`;
+  const qrRef = useRef(null);
 
-      const res = await fetch(url);
-      if (res.ok) {
-        const fresh = await res.json();
-        setCustomer(prev => ({ ...prev, ...fresh, ob: fresh.oldBalance || 0, ab: fresh.advanceBalance || 0 }));
-      }
-    } catch (error) {
-      console.warn("Failed to refresh customer details in BillHistory:", error);
-    }
+  const totalAmount = report ? parseFloat(report.cash) : 0;
+
+  useEffect(() => {
+    if (!printAgain || hasAutoPrintedRef.current) return;
+    hasAutoPrintedRef.current = true;
+    const timer = setTimeout(() => {
+      handlePrint();
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [printAgain]);
+
+  const finalBalance = toNum(summary?.current, 0);
+  const summaryOB = toNum(summary?.ob, toNum(customer?.oldBalance, 0));
+  const summaryAB = toNum(summary?.ab, toNum(customer?.advanceBalance, 0));
+
+
+  // Calculate separate totals for issue and receipt
+  const totalIssuePure = safeIssueItems.reduce((sum, item) => sum + toNum(item?.pure, 0), 0).toFixed(3);
+  const totalReceiptPure = safeReceiptItems.reduce((sum, item) => sum + toNum(item?.pure, 0), 0).toFixed(3);
+
+  // Calculate TW (Total Weight) and NW (Net Weight) totals for Issue and Receipt
+  const totalIssueTW = safeIssueItems.reduce((sum, item) => sum + toNum(item?.gross, 0), 0).toFixed(3);
+  const totalIssueNW = safeIssueItems.reduce((sum, item) => sum + toNum(item?.net, 0), 0).toFixed(3);
+  const totalReceiptTW = safeReceiptItems.reduce((sum, item) => sum + toNum(item?.weight, 0), 0).toFixed(3);
+  const totalReceiptNW = safeReceiptItems.reduce((sum, item) => sum + toNum(item?.result, 0), 0).toFixed(3);
+  const showIssueMColumn = safeIssueItems.some((item) => toNum(item?.m, 0) !== 0);
+  const showIssueNetWeightColumn = safeIssueItems.some((item) => toNum(item?.net, 0) !== 0);
+  const issueFromRows = safeIssueItems.reduce((sum, row) => sum + toNum(row?.pure, 0), 0);
+  const receiptFromRows = safeReceiptItems.reduce(
+    (sum, row) => sum + toNum(row?.pure, toNum(row?.result, toNum(row?.netWeight, 0))),
+    0,
+  );
+  const cashFromRows = safeCashTable.reduce((sum, row) => sum + toNum(row?.pure, 0), 0);
+  const summaryIssueRaw = toNum(summary?.issue, 0);
+  const summaryReceiptRaw = toNum(summary?.receipt, 0);
+  const summaryCashRaw = toNum(summary?.cash, 0);
+  const summaryGstPureRaw = toNum(summary?.gstPure, 0);
+  const summaryIssue = Math.abs(summaryIssueRaw) < 0.0001 && Math.abs(issueFromRows) > 0.0001 ? issueFromRows : summaryIssueRaw;
+  const summaryReceipt = Math.abs(summaryReceiptRaw) < 0.0001 && Math.abs(receiptFromRows) > 0.0001 ? receiptFromRows : summaryReceiptRaw;
+  const summaryCash = Math.abs(summaryCashRaw) < 0.0001 && Math.abs(cashFromRows) > 0.0001 ? cashFromRows : summaryCashRaw;
+  const summaryGstPure = summaryGstPureRaw;
+  const displaySummary = {
+    issue: summaryIssue.toFixed(3),
+    receipt: summaryReceipt.toFixed(3),
+    cash: summaryCash.toFixed(3),
+    gstPure: summaryGstPure.toFixed(3),
+    receiptPlusCash: (summaryReceipt + summaryCash).toFixed(3),
+    ob: summaryOB.toFixed(3),
+    ab: summaryAB.toFixed(3),
+    current: toNum(summary?.current, (summaryOB - summaryAB) + summaryIssue + summaryGstPure - summaryReceipt - summaryCash).toFixed(3),
   };
-
-  // ── FETCH ──────────────────────────────────────────────────────────
-  const fetchBills = async (start = fromDate, end = toDate) => {
-    try {
-      if (!customer) { setBills([]); setLoading(false); return; }
-
-      const billType = resolveBillType(customer);
-      const customerId =
-        customer?._id || customer?.id || customer?.customerId || "";
-
-      if (!customerId) { setBills([]); setLoading(false); return; }
-
-      const legacyCustomerId = customer?.customerId || "";
-      let url = `${base_url}/billSummary/customer/${customerId}?billType=${billType}&lookupCustomerId=${legacyCustomerId}`;
-      if (start) url += `&fromDate=${start}`;
-      if (end) url += `&toDate=${end}`;
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 12000);
-      const response = await fetch(url, { signal: controller.signal });
-      clearTimeout(timeout);
-
-      if (!response.ok) { setBills([]); return; }
-
-      const data = await response.json();
-      const txResForImage = await fetch(`${base_url}/transactions`);
-      const txRowsForImage = txResForImage.ok ? await txResForImage.json() : [];
-      const primary = normalizeBills(
-        enrichBillsWithTransactionImage(Array.isArray(data) ? data : [], txRowsForImage, customer),
-        customer
-      );
-      if (primary.length > 0) { setBills(primary); return; }
-
-      // Fallback 1: fetch bill summary list and match by customerName
-      // (covers old records stored with wrong customerId like "N/A")
-      let byNameUrl = `${base_url}/billSummary?billType=${billType}`;
-      if (start) byNameUrl += `&fromDate=${start}`;
-      if (end) byNameUrl += `&toDate=${end}`;
-      const byNameRes = await fetch(byNameUrl);
-      if (byNameRes.ok) {
-        const byNameRows = await byNameRes.json();
-        const ctxName = String(customer?.customerName || customer?.name || "").trim().toLowerCase();
-        const ctxType = String(customer?.customerType || customer?.type || "").toUpperCase();
-        const nameMatchedRows = (Array.isArray(byNameRows) ? byNameRows : []).filter(
-            (row) => {
-              if (String(row?.customerName || "").trim().toLowerCase() !== ctxName) return false;
-              if (ctxType === "DEALER" || ctxType === "SUPPLIER") {
-                const rowDealerType = String(row?.dealerType || "").toUpperCase();
-                return !rowDealerType || rowDealerType === ctxType;
-              }
-              return true;
-            },
-        );
-        const nameMatched = normalizeBills(
-          enrichBillsWithTransactionImage(nameMatchedRows, txRowsForImage, customer),
-          customer
-        );
-        if (nameMatched.length > 0) { setBills(nameMatched); return; }
-      }
-      // ── Fallback: scan transactions collection ──
-      const txRes = await fetch(`${base_url}/transactions`);
-      if (!txRes.ok) { setBills([]); return; }
-
-      const allTx = await txRes.json();
-      const candidateCustomerIds = [
-        customer?._id,
-        customer?.id,
-        customer?.customerId,
-      ]
-        .filter(Boolean)
-        .map((v) => String(v));
-      const custLegacyId = String(customer?.customerId || "");
-      const custName = String(customer?.customerName || "").toLowerCase();
-
-      const filtered = (Array.isArray(allTx) ? allTx : [])
-        .filter((t) => {
-          const txId = String(t?.customerId || "");
-          const txName = String(t?.customerName || "").toLowerCase();
-          const txType = String(t?.customerType || t?.type || "").toUpperCase();
-          const idMatch =
-            (txId && candidateCustomerIds.includes(txId)) ||
-            (custLegacyId && txId === custLegacyId);
-          const nameMatch = custName && txName && txName === custName;
-          const typeMatch =
-            !txType ||
-            txType === billType ||
-            (billType === "B2B" && (txType === "DEALER" || txType === "SUPPLIER"));
-          return (idMatch || nameMatch) && typeMatch;
-        })
-        .map((t) => {
-          const formattedNo = resolveBillNoForDisplay(t, customer);
-          return {
-            ...t,
-            receiptImage: t?.receiptImage || t?.proofImage || t?.image || "",
-            proofImage: t?.proofImage || t?.receiptImage || t?.image || "",
-            image: t?.image || t?.receiptImage || t?.proofImage || "",
-            receiptImageShowInBill:
-              typeof t?.receiptImageShowInBill === "boolean" ? t.receiptImageShowInBill : true,
-            billType: resolveBillType(t),
-            billNo: formattedNo,
-            invoiceNo: formattedNo,
-            totalIssueWeight: num(t?.issuePure, num(t?.issueTotal, 0)),
-            totalReceiptWeight: num(t?.receiptPure, 0),
-            cashAmount: num(t?.cashPure, 0),
-            availableBalance: num(t?.balance, 0),
-            oldBalance: num(t?.oldBalance, 0),
-            advanceBalance: num(t?.advBal, 0),
-            isConvertedToGold: t?.isConvertedToGold || false,
-            createdAt: t?.createdAt || t?.date || new Date().toISOString(),
-          };
-        });
-
-      setBills(normalizeBills(filtered, customer));
-    } catch (error) {
-      console.error("Error fetching bills:", error);
-      setBills([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ── CLIENT-SIDE SEARCH ─────────────────────────────────────────────
-  const filteredBills = (billSearch.trim()
-    ? bills.filter((b) => {
-      const bn = String(b.billNo || b.invoiceNo).toLowerCase();
-      return bn.includes(billSearch.trim().toLowerCase());
-    })
-    : bills
-  ).slice().sort((a, b) => getBillTimestamp(b) - getBillTimestamp(a));
-
-  const normalizeB2CReceiptItems = (rows = [], bill = {}) =>
-    (Array.isArray(rows) ? rows : []).map((row) => {
-      const weight = num(row?.weight, 0);
-      const sub = num(row?.sub, 0);
-      const netWeight = num(
-        row?.netWeight,
-        num(row?.netWt, num(row?.result, num(row?.pure, weight - sub))),
-      );
-      const rate = num(
-        row?.rate,
-        num(row?.ftRate, num(row?.goldRate, num(row?.goldrate, num(bill?.cashTable?.[0]?.goldRate, 0)))),
-      );
-      const amount = num(row?.amount, num(row?.amt, num(row?.total, netWeight * rate)));
-      return {
-        name: row?.name || "",
-        weight: weight.toFixed(3),
-        sub: sub.toFixed(3),
-        netWeight: netWeight.toFixed(3),
-        rate: rate ? rate.toFixed(2) : String(row?.rate || "0"),
-        amount: amount.toFixed(2),
-        // compatibility fields
-        result: netWeight.toFixed(3),
-        calc: row?.calc ?? 0,
-        pure: netWeight.toFixed(3),
-      };
-    });
-
-  const normalizeB2CItems = (bill = {}) => {
-    const rateFallback =
-      num(bill?.cashTable?.[0]?.goldRate, 0) ||
-      num(bill?.receiptItems?.[0]?.rate, 0) ||
-      0;
-    const rows =
-      Array.isArray(bill.items) && bill.items.length > 0
-        ? bill.items
-        : (Array.isArray(bill.issueItems) ? bill.issueItems : []);
-
-    return rows.map((row) => {
-      const weight = num(row?.weight, num(row?.gross, 0));
-      const touch = num(row?.touch, num(row?.calc, 0));
-      const wastage = num(row?.wastage, num(row?.m, 0));
-      const rate = num(row?.rate, num(row?.goldRate, num(row?.goldrate, num(row?.ftRate, rateFallback))));
-      const computedTotal = (weight + wastage) * rate;
-      const total = num(row?.total, num(row?.netAmount, num(row?.amount, num(row?.final, computedTotal))));
-      const gst = num(row?.gst, num(row?.gstAmount, num(row?.gst_value, 0)));
-      const final = num(
-        row?.final,
-        num(row?.totalAmount, num(row?.finalAmount, total + gst)),
-      );
-      return {
-        itemName: row?.itemName || row?.displayItemName || row?.name || "",
-        displayItemName: row?.displayItemName || row?.itemName || row?.name || "",
-        weight,
-        touch,
-        wastage,
-        rate,
-        total,
-        gst,
-        final,
-        pure: num(row?.pure, (weight * touch) / 100),
-      };
-    });
-  };
-
-  const buildB2CReport = (bill = {}, b2cItems = [], b2cReceiptItems = []) => {
-    if (bill?.report) return bill.report;
-    const totalFinal = b2cItems.reduce(
-      (sum, it) => sum + num(it?.final, num(it?.total, 0) + num(it?.gst, 0)),
-      0,
-    );
-    const oldGoldAmount = b2cReceiptItems.reduce((sum, it) => sum + num(it?.amount, 0), 0);
+  const b2cRateFallback =
+    toNum(safeCashTable?.[0]?.goldRate, 0) ||
+    toNum(safeReceiptItems?.[0]?.rate, 0) ||
+    toNum(summary?.goldRate, 0);
+  const normalizedB2CItems = (Array.isArray(items) ? items : []).map((row) => {
+    const weight = toNum(row?.weight, toNum(row?.gross, 0));
+    const touch = toNum(row?.touch, toNum(row?.calc, 0));
+    const wastage = toNum(row?.wastage, toNum(row?.m, 0));
+    const rate = toNum(row?.rate, toNum(row?.goldRate, toNum(row?.goldrate, b2cRateFallback)));
+    const computedTotal = (weight + wastage) * rate;
+    const total = toNum(row?.total, toNum(row?.netAmount, toNum(row?.amount, computedTotal)));
+    const gstValue = toNum(row?.gst, toNum(row?.gstAmount, 0));
+    const final = toNum(row?.final, toNum(row?.totalAmount, total + gstValue));
     return {
-      cash: (totalFinal - oldGoldAmount).toFixed(2),
-      totalReceiptPure: num(bill?.issuePure ?? bill?.totalIssueWeight, 0).toFixed(3),
-      oldGoldAmount: oldGoldAmount.toFixed(2),
+      ...row,
+      itemName: row?.itemName || row?.name || "",
+      displayItemName: row?.displayItemName || row?.itemName || row?.name || "",
+      weight,
+      touch,
+      wastage,
+      rate,
+      total,
+      gst: gstValue,
+      final,
+      pure: toNum(row?.pure, (weight * touch) / 100),
     };
-  };
+  });
+  const normalizedB2CReceiptItems = safeReceiptItems.map((row) => {
+    const weight = toNum(row?.weight, 0);
+    const sub = toNum(row?.sub, 0);
+    const netWeight = toNum(row?.netWeight, toNum(row?.netWt, toNum(row?.result, toNum(row?.pure, weight - sub))));
+    const rate = toNum(row?.rate, toNum(row?.ftRate, toNum(row?.goldRate, toNum(row?.goldrate, b2cRateFallback))));
+    const amount = toNum(row?.amount, toNum(row?.amt, toNum(row?.total, netWeight * rate)));
+    return {
+      ...row,
+      name: row?.name || "",
+      weight: weight.toFixed(3),
+      sub: sub.toFixed(3),
+      netWeight: netWeight.toFixed(3),
+      rate: rate.toFixed(2),
+      amount: amount.toFixed(2),
+      result: netWeight.toFixed(3),
+      pure: netWeight.toFixed(3),
+    };
+  });
+  const totalB2CItemFinal = normalizedB2CItems.reduce((sum, item) => sum + toNum(item?.final, 0), 0);
+  const totalB2CItemsTotal = normalizedB2CItems.reduce((sum, item) => sum + toNum(item?.total, 0), 0);
+  const totalB2COldGoldAmount = normalizedB2CReceiptItems.reduce((sum, item) => sum + toNum(item?.amount, 0), 0);
+  const b2cTotalCashAmount = normalizedB2CReceiptItems.length > 0
+    ? toNum(totalB2CItemFinal, 0) - toNum(totalB2COldGoldAmount, 0)
+    : toNum(totalB2CItemFinal, 0);
+  const computedB2CTotalAmount = totalB2CItemFinal - totalB2COldGoldAmount;
+  const reportCash = toNum(report?.cash, NaN);
+  const displayB2CTotalAmount =
+    Number.isFinite(reportCash) && !(Math.abs(reportCash) < 0.0001 && Math.abs(computedB2CTotalAmount) > 0.0001)
+      ? reportCash
+      : computedB2CTotalAmount;
+  const displayB2COldBalance = toNum(summary?.ob, toNum(customer?.oldBalance, 0));
+  const displayB2CAdvanceBalance = toNum(summary?.ab, toNum(customer?.advanceBalance, 0));
+  const homeGoldRateNum = toNum(homeGoldRate, 0);
+  const currentB2CGoldRate =
+    (homeGoldRateNum > 0 ? homeGoldRateNum : 0) ||
+    toNum(customer?.goldRate, 0) ||
+    toNum(normalizedB2CItems?.[0]?.rate, 0) ||
+    b2cRateFallback;
+  const b2cGoldRateAtPurchase =
+    toNum(normalizedB2CItems?.[0]?.rate, 0) ||
+    toNum(summary?.goldRate, 0) ||
+    b2cRateFallback ||
+    currentB2CGoldRate;
+  const hasManualCashForB2C = isB2C && String(cashAmount || "").trim() !== "";
+  const parsedCashAmount = hasManualCashForB2C ? Math.max(0, toNum(cashAmount, 0)) : 0;
+  const parsedUpiAmount = hasManualCashForB2C ? Math.max(0, toNum(upiAmount, 0)) : 0;
+  const savedB2CConvertedGold = toNum(transactions?.[0]?.b2cUpiGoldValue, 0);
+  const b2cUpiGoldValue = b2cConversion.applied ? b2cConversion.goldWeight : 0;
+  const displayConvertedGoldValue = b2cConversion.applied ? b2cUpiGoldValue : savedB2CConvertedGold;
+  const effectiveB2COldBalance = b2cConversion.applied
+    ? b2cConversion.updatedOB
+    : displayB2COldBalance;
+  const effectiveB2CAdvanceBalance = b2cConversion.applied
+    ? b2cConversion.updatedAB
+    : displayB2CAdvanceBalance;
+  const b2cHasOldBalance = Math.abs(toNum(customer?.oldBalance, summaryOB)) > 0.0001 || Math.abs(toNum(summaryOB, 0)) > 0.0001;
+  const b2cHasAdvanceBalance = !b2cHasOldBalance && (Math.abs(toNum(customer?.advanceBalance, summaryAB)) > 0.0001 || Math.abs(toNum(summaryAB, 0)) > 0.0001);
+  const b2cBalanceLabel = b2cHasOldBalance ? "Old Balance" : b2cHasAdvanceBalance ? "Advance Balance" : "Balance";
+  const b2cBalanceWeight = b2cHasOldBalance
+    ? toNum(effectiveB2COldBalance, 0)
+    : b2cHasAdvanceBalance
+      ? toNum(effectiveB2CAdvanceBalance, 0)
+      : 0;
+  const b2cBalanceRupees = toNum(b2cBalanceWeight, 0) * toNum(currentB2CGoldRate, 0);
+  const b2cFinalPayableAmount = toNum(b2cTotalCashAmount, 0) + (b2cHasOldBalance ? b2cBalanceRupees : (b2cHasAdvanceBalance ? -b2cBalanceRupees : 0));
+  const b2cCashReceivedNum = Math.max(0, toNum(b2cCashReceived, 0));
+  const b2cBalanceAfterCash = toNum(b2cFinalPayableAmount, 0) - b2cCashReceivedNum;
+  const b2cBalanceAfterCashGrams =
+    toNum(currentB2CGoldRate, 0) > 0 ? (toNum(b2cBalanceAfterCash, 0) / toNum(currentB2CGoldRate, 0)) : 0;
+  const b2cNextOldBalance = Math.max(0, b2cBalanceAfterCashGrams);
+  const b2cNextAdvanceBalance = Math.max(0, -b2cBalanceAfterCashGrams);
+  const estimateItems = Array.isArray(estimate?.items) ? estimate.items : [];
+  const estimateGSTEnabled = Boolean(estimate?.enableGST);
+  const estimateSubTotal = estimateItems.length > 0
+    ? estimateItems.reduce((sum, it) => sum + toNum(it?.netAmount, 0), 0)
+    : toNum(estimate?.netAmount, 0);
+  const estimateFinalTotal = estimateItems.length > 0
+    ? estimateItems.reduce((sum, it) => sum + toNum(it?.totalAmount, 0), 0)
+    : toNum(estimate?.totalAmount, 0);
+  const estimateGstFromItems = estimateItems.reduce((sum, it) => sum + toNum(it?.gst, 0), 0);
+  const estimateGstAmount = estimateGSTEnabled
+    ? toNum(
+      estimate?.gst,
+      estimateGstFromItems > 0 ? estimateGstFromItems : Math.max(0, estimateFinalTotal - estimateSubTotal),
+    )
+    : 0;
+  const estimateGstPercent = estimateGSTEnabled && estimateSubTotal > 0
+    ? (estimateGstAmount / estimateSubTotal) * 100
+    : 0;
 
-  // ── VIEW ────────────────────────────────────────────────────────────
-  const handleViewBill = (bill) => {
-    const billType = resolveBillTypeFromContext(bill, customer);
-    const displayType = resolveDisplayTypeFromContext(bill, customer);
-    const bal = getBalanceFromBill(bill);
-    const isB2C = billType === "B2C";
-    const b2cItems = isB2C ? normalizeB2CItems(bill) : (bill.items || []);
-    const b2cReceiptItems = isB2C ? normalizeB2CReceiptItems(bill.receiptItems || [], bill) : (bill.receiptItems || []);
-    const resolvedReport = isB2C ? buildB2CReport(bill, b2cItems, b2cReceiptItems) : (bill.report || null);
-    const resolvedSummary = buildSummaryForPreview(bill, bal);
-    const previewImage =
-      getRecordImage(bill) ||
-      normalizeImageUri(customer?.receiptImage, base_url) ||
-      normalizeImageUri(customer?.proofImage, base_url) ||
-      normalizeImageUri(customer?.image, base_url) ||
-      normalizeImageUri(customer?.latestTransactionImage, base_url) ||
-      normalizeImageUri(customer?.lastTransaction?.receiptImage, base_url) ||
-      normalizeImageUri(customer?.lastTransaction?.proofImage, base_url) ||
-      normalizeImageUri(customer?.lastTransaction?.image, base_url) ||
-      "";
-    navigation.navigate("BillPreview", {
-      customer: {
-        name: bill.customerName || customer?.customerName || "Unknown",
-        phone:
-          bill?.phone ||
-          bill?.phoneNumber ||
-          bill?.customerNumber ||
-          customer?.customerNumber ||
-          customer?.phoneNumber ||
-          customer?.phone ||
-          "",
-        address: bill?.address || customer?.address || "",
-        gstin: bill?.gstin || customer?.gstin || "",
-        type: displayType,
-        image: previewImage,
-        proofImage: previewImage,
-        receiptImage: previewImage,
-        receiptImageShowInBill:
-          typeof bill?.receiptImageShowInBill === "boolean" ? bill.receiptImageShowInBill : true,
-        date:
-          bill.date ||
-          (bill.createdAt
-            ? new Date(bill.createdAt).toLocaleDateString()
-            : new Date().toLocaleDateString()),
-        oldBalance: bal.ob,
-        advanceBalance: bal.ab,
-        balance: bal.current,
-        id: customer?.id || customer?._id || customer?.customerId || "",
-        customerId: customer?.id || customer?._id || customer?.customerId || "",
-        billNo: resolveBillNoForDisplay(bill, customer),
-        invoiceNo: resolveBillNoForDisplay(bill, customer),
-      },
-      issueItems: bill.issueItems || [],
-      receiptItems: b2cReceiptItems,
-      cashTable: bill.cashTable || [],
-      summary: resolvedSummary,
-      report: resolvedReport,
-      transactions: [bill],
-      items: b2cItems,
-      gst: bill.gst || null,
-      estimate: bill.estimate || null,
-    });
-  };
-
-  // ── EDIT ────────────────────────────────────────────────────────────
-  const handleEditBill = (bill) => {
-    if (!bill?._id) {
-      Alert.alert("Error", "This bill cannot be edited because its bill record ID is missing.");
+  useEffect(() => {
+    if (!isB2C) return;
+    const rawCash = String(cashAmount || "").trim();
+    if (!rawCash) {
+      if (upiAmount !== "") setUpiAmount("");
+      if (b2cConversion.applied) setB2cConversion((prev) => ({ ...prev, applied: false, goldWeight: 0 }));
+      setShowUpi(false);
       return;
     }
-    const billType = resolveBillTypeFromContext(bill, customer);
-    const custType = String(
-      customer?.customerType || customer?.type || ""
-    ).toUpperCase();
 
-    if (billType === "B2C") {
-      // B2C → B2CCalculationPage
-      const normalizedEditBill = {
-        ...bill,
-        items: normalizeB2CItems(bill),
-        receiptItems: normalizeB2CReceiptItems(bill.receiptItems || [], bill),
-      };
-      navigation.navigate("B2CCalculationPage", {
-        editTransaction: normalizedEditBill,
-        editCustomer: customer,
-      });
-    } else if (custType === "SUPPLIER" || custType === "DEALER") {
-      // Dealer / Supplier → SD (CreateTransaction / dealer transaction page)
-      navigation.navigate("SD", {
-        editTransaction: bill,
-        editCustomer: customer,
-      });
+    const cash = Math.max(0, toNum(rawCash, 0));
+    const remaining = Math.max(0, displayB2CTotalAmount - cash);
+    const nextUpi = remaining.toFixed(2);
+    if (nextUpi !== upiAmount) {
+      setUpiAmount(nextUpi);
+      setB2cConversion((prev) => ({ ...prev, applied: false, goldWeight: 0 }));
+    }
+  }, [b2cConversion.applied, cashAmount, displayB2CTotalAmount, isB2C, upiAmount]);
+
+  useEffect(() => {
+    if (!isB2C || !b2cConversion.applied) return;
+    setB2cConversion((prev) => ({ ...prev, applied: false, goldWeight: 0 }));
+  }, [isB2C, upiAmount]);
+
+  function generateHTML() {
+    if (estimate) {
+      const enableGST = estimate.enableGST !== false && estimate.enableGST !== undefined ? estimate.enableGST : false;
+      const estimateItems = estimate.items && estimate.items.length > 0 ? estimate.items : null;
+      const subTotal = estimateItems
+        ? estimateItems.reduce((sum, i) => sum + toNum(i?.netAmount, 0), 0)
+        : toNum(estimate?.netAmount, 0);
+      const grandTotal = estimateItems
+        ? estimateItems.reduce((sum, i) => sum + i.totalAmount, 0)
+        : parseFloat(estimate.totalAmount || 0);
+      const gstAmount = enableGST
+        ? (estimateItems
+          ? estimateItems.reduce((sum, i) => sum + toNum(i?.gst, 0), 0)
+          : toNum(estimate?.gst, Math.max(0, grandTotal - subTotal)))
+        : 0;
+      const gstPercent = enableGST && subTotal > 0 ? (gstAmount / subTotal) * 100 : 0;
+      return `
+        <html>
+          <head>
+            <style>
+              @page { margin: 0; }
+              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 10px; }
+              h1 { text-align: center; font-size: 16px; margin-bottom: 5px; }
+              h2 { margin-top: 5px; font-size: 11px; margin-bottom: 5px; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+              th, td { border: 1px solid black; padding: 2px 1px; text-align: center; font-size: 8px; word-wrap: break-word; overflow: hidden; }
+              th { background-color: #f2f2f2; }
+              p { margin: 2px 0; font-size: 9px; }
+              .tamil-text { font-family: ${TAMIL_FONT_STACK}; }
+              .total-row { font-weight: bold; background-color: #e8f5e9; }
+            </style>
+          </head>
+          <body>
+            <h1>ESTIMATE BILL</h1>
+            <div>
+              <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+              <p><strong>GST No:</strong> ${estimate.gstin || 'N/A'}</p>
+            </div>
+            <h2>ESTIMATE DETAILS:</h2>
+            <table>
+              <tr>
+                <th>Item Name</th>
+                <th>Wt (g)</th>
+                <th>W%</th>
+                <th>Gross Wt</th>
+                <th>Rate</th>
+                <th>Net Amt</th>
+                ${enableGST ? '<th>GST</th>' : ''}
+                <th>Total</th>
+              </tr>
+              ${estimateItems
+          ? estimateItems.map(item => `
+                  <tr>
+                    <td>${item.itemName}</td>
+                    <td>${item.weight}</td>
+                    <td>${item.wastagePercent}</td>
+                    <td>${item.grossWeight}</td>
+                    <td>${item.goldRate}</td>
+                    <td>\u20b9${item.netAmount}</td>
+                    ${enableGST ? `<td>\u20b9${item.gst}</td>` : ''}
+                    <td>\u20b9${Math.round(item.totalAmount)}</td>
+                  </tr>
+                `).join('')
+          : `
+                  <tr>
+                    <td>${estimate.itemName}</td>
+                    <td>${estimate.weight}</td>
+                    <td>${estimate.wastagePercent || 0}</td>
+                    <td>${estimate.grossWeight}</td>
+                    <td>${estimate.goldRate}</td>
+                    <td>\u20b9${estimate.netAmount}</td>
+                    ${enableGST ? `<td>\u20b9${parseFloat(estimate.gst || 0).toFixed(2)}</td>` : ''}
+                    <td>\u20b9${Math.round(parseFloat(estimate.totalAmount))}</td>
+                  </tr>
+                `
+        }
+              <tr class="total-row">
+                <td colspan="${enableGST ? 7 : 6}" style="text-align:right;">TOTAL ESTIMATE AMOUNT:</td>
+                <td>\u20b9${Math.round(grandTotal)}</td>
+              </tr>
+            </table>
+
+            ${enableGST ? `
+              <h2 style="margin-bottom: 5px;">GST SUMMARY:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                <tr>
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Subtotal</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">\u20b9${subTotal.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">${gstPercent.toFixed(2)}%</td>
+                </tr>
+                <tr>
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">\u20b9${gstAmount.toFixed(2)}</td>
+                </tr>
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Final Total (Incl. GST)</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">\u20b9${grandTotal.toFixed(2)}</td>
+                </tr>
+              </table>
+            ` : ''}
+
+            ${!estimate && gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+          </body>
+        </html>
+      `;
+    } else if (order) {
+      return `
+        <html>
+          <head>
+            <style>
+              @page { margin: 0; }
+              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 10px; }
+              h1 { text-align: center; color: #1B4D1B; margin-bottom: 10px; font-size: 14px; }
+              .order-details { margin-bottom: 10px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; }
+              .order-details p { margin: 2px 0; font-size: 9px; }
+              .photo-container { text-align: center; margin: 5px 0; }
+              .order-photo { max-width: 100%; height: auto; border-radius: 4px; border: 1px solid #ddd; }
+              table { width: 100%; border-collapse: collapse; margin-top: 5px; table-layout: fixed; }
+              th, td { border: 1px solid black; padding: 2px 1px; text-align: center; font-size: 8px; word-wrap: break-word; overflow: hidden; }
+              th { background-color: #f2f2f2; }
+              .footer { text-align: center; margin-top: 15px; font-style: italic; color: #666; font-size: 9px; }
+            </style>
+          </head>
+          <body>
+            <h1>ORDER RECEIPT</h1>
+            <div class="order-details" style="display: flex; justify-content: space-between; border: 1px solid #000; padding: 10px;">
+              <div style="flex: 1;">
+                <p><strong>Order No:</strong> ${order.orderNo}</p>
+                <p><strong>Name:</strong> ${order.customer}</p>
+                <p><strong>Phone:</strong> ${order.phone}</p>
+                <p><strong>Address:</strong> ${order.address || 'N/A'}</p>
+                <p><strong>GST No:</strong> ${order.gstin || 'N/A'}</p>
+              </div>
+              <div style="text-align: right; width: 100px;">
+                <p><strong>Type:</strong> Order</p>
+                <p><strong>Date:</strong> ${order.date || '-'}</p>
+              </div>
+            </div>
+            <div style="border: 1px solid #000; margin-top: 10px; padding: 10px;">
+               <p><strong>ORDER DETAILS :</strong></p>
+               <div style="margin-top: 5px;">
+                  <p><strong>Order No:</strong> ${order.orderNo}</p>
+                  <p><strong>Item:</strong> ${order.type}</p>
+                  <p><strong>Weight:</strong> ${order.weight} GMS</p>
+                  <p><strong>Payment:</strong> ${order.payment}</p>
+                  <p><strong>Pending Balance:</strong> ₹${order.balance}</p>
+               </div>
+            </div>
+
+            ${(() => {
+              const orderImg = normalizeImageUri(order.image, base_url);
+              return orderImg ? `
+                <div class="photo-container">
+                  <p><strong>Item Photo:</strong></p>
+                  <img src="${orderImg}" style="width: 100%; border-radius: 5px;" />
+                </div>
+              ` : '';
+            })()}
+
+            ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+
+            <div class="footer" style="text-align: center; margin-top: 20px;">
+              <p class="tamil-text">${thirukkural}</p>
+              <p>Thank you for choosing NJT Jewellery!</p>
+            </div>
+          </body>
+        </html>
+      `;
+    } else if (suspense) {
+      return `
+        <html>
+          <head>
+            <style>
+              @page { margin: 0; }
+              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 10px; }
+              h1 { text-align: center; font-size: 16px; margin-bottom: 5px; }
+              h2 { margin-top: 8px; font-size: 11px; margin-bottom: 5px; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+              th, td { border: 1px solid black; padding: 2px 1px; text-align: center; font-size: 8px; word-wrap: break-word; overflow: hidden; }
+              th { background-color: #f2f2f2; }
+              p { margin: 2px 0; font-size: 9px; }
+              .total-row { font-weight: bold; background-color: #e0e0e0; }
+            </style>
+          </head>
+          <body>
+            <h1>SUSPENSE BILL</h1>
+            <div>
+              <p><strong>Name:</strong> ${customer.name}</p>
+              <p><strong>Phone:</strong> ${customer.phone}</p>
+              <p><strong>Address:</strong> ${customer.address || 'N/A'}</p>
+              <p><strong>GST No:</strong> ${customer.gstin || 'N/A'}</p>
+              <p><strong>Date:</strong> ${customer.date}</p>
+              <p><strong>Gold Rate:</strong> â‚¹${suspense.goldRate}</p>
+            </div>
+
+            <h2>ISSUE ITEMS:</h2>
+            <table>
+              <tr>
+                <th>Item Name</th>
+                <th>Weight (g)</th>
+                <th>Qty</th>
+                <th>Rate</th>
+                <th>Pure (g)</th>
+                <th>Amount</th>
+              </tr>
+              ${suspense.issueItems.map(item => `
+                <tr>
+                  <td>${item.name}</td>
+                  <td>${item.weight.toFixed(3)}</td>
+                  <td>${item.count}</td>
+                  <td>${item.rate}</td>
+                  <td>${item.pure.toFixed(3)}</td>
+                  <td>${item.amount.toFixed(2)}</td>
+                </tr>
+              `).join('')}
+              <tr class="total-row">
+                <td colspan="4">Total Issue</td>
+                <td>${suspense.totalIssuePure.toFixed(3)}</td>
+                <td>â‚¹${suspense.totalIssueAmount.toFixed(2)}</td>
+              </tr>
+            </table>
+
+            <h2>RECEIPT ITEMS:</h2>
+            <table>
+              <tr>
+                <th>Item Name</th>
+                <th>Weight (g)</th>
+                <th>Qty</th>
+                <th>Rate</th>
+                <th>Pure (g)</th>
+                <th>Amount</th>
+              </tr>
+              ${suspense.receiptItems.map(item => `
+                <tr>
+                  <td>${item.name}</td>
+                  <td>${item.weight.toFixed(3)}</td>
+                  <td>${item.count}</td>
+                  <td>${item.rate}</td>
+                  <td>${item.pure.toFixed(3)}</td>
+                  <td>${item.amount.toFixed(2)}</td>
+                </tr>
+              `).join('')}
+              <tr class="total-row">
+                <td colspan="4">Total Receipt</td>
+                <td>${suspense.totalReceiptPure.toFixed(3)}</td>
+                <td>â‚¹${suspense.totalReceiptAmount.toFixed(2)}</td>
+              </tr>
+            </table>
+
+            <h2>SUMMARY:</h2>
+            <table>
+              <tr>
+                 <th>Description</th>
+                 <th>Pure Gold (g)</th>
+                 <th>Amount (â‚¹)</th>
+              </tr>
+              <tr>
+                <td>Net Balance</td>
+                <td style="color: ${suspense.netPure >= 0 ? 'red' : 'green'}">${suspense.netPure.toFixed(3)}</td>
+                <td>â‚¹${suspense.netAmount.toFixed(2)}</td>
+              </tr>
+            </table>
+
+            ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+          </body>
+        </html >
+    `;
+    } else if (isB2C) {
+      return `
+    <html>
+          <head>
+            <style>
+              @page { margin: 0; }
+              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 10px; }
+              h1 { text-align: center; font-size: 16px; margin-bottom: 5px; }
+              h2 { margin-top: 8px; font-size: 11px; margin-bottom: 5px; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+              th, td { border: 1px solid black; padding: 2px 1px; text-align: center; font-size: 7px; word-wrap: break-word; overflow: hidden; }
+              th { background-color: #f2f2f2; }
+              p { margin: 2px 0; font-size: 9px; }
+            </style>
+          </head>
+          <body>
+            <h1>BILL</h1>
+            <div>
+              <p><strong>Bill No:</strong> ${currentBillNo || 'N/A'}</p>
+              <p><strong>Name:</strong> ${customer.name}</p>
+              <p><strong>Phone:</strong> ${customer.phone}</p>
+              <p><strong>Address:</strong> ${customer.address || 'N/A'}</p>
+              <p><strong>GST No:</strong> ${customer.gstin || 'N/A'}</p>
+              <p><strong>Type:</strong> ${customer.type}</p>
+              <p><strong>Date:</strong> ${customer.date}</p>
+              <p><strong>Balance:</strong> ${customer.balance}</p>
+              <p><strong>Advance:</strong> ${customer.advanceBalance || 0}</p>
+            </div>
+            <h2>ITEMS:</h2>
+            <table>
+              <tr>
+                <th>Item</th>
+                <th>Weight</th>
+                <th>Touch</th>
+                <th>W/M</th>
+                <th>Rate</th>
+                <th>Total</th>
+                <th>GST</th>
+                <th>Final</th>
+              </tr>
+              ${normalizedB2CItems.length > 0 ? normalizedB2CItems.map(item => `
+                <tr>
+                  <td>${item.displayItemName || item.itemName}</td>
+                  <td>${item.weight}</td>
+                  <td>${item.touch}</td>
+                  <td>${item.wastage}</td>
+                  <td>${item.rate}</td>
+                  <td>${item.total}</td>
+                  <td>${item.gst}</td>
+                  <td>${item.final}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="8">No items</td></tr>'}
+            </table>
+
+    ${normalizedB2CReceiptItems.length > 0 ? `
+              <h2>RECEIPT / OLD GOLD:</h2>
+              <table>
+                <tr>
+                  <th>Item</th>
+                  <th>Weight</th>
+                  <th>Sub</th>
+                  <th>Net Wt</th>
+                  <th>Rate</th>
+                  <th>Amount</th>
+                </tr>
+                ${normalizedB2CReceiptItems.map(item => `
+                  <tr>
+                    <td>${item.name}</td>
+                    <td>${item.weight}</td>
+                    <td>${item.sub}</td>
+                    <td>${item.netWeight}</td>
+                    <td>${item.rate}</td>
+                    <td>${item.amount}</td>
+                  </tr>
+                `).join('')}
+                <tr>
+                  <td colspan="5" style="text-align: right; font-weight: bold;">Total Old Gold Amount:</td>
+                  <td style="font-weight: bold;">â‚¹${totalB2COldGoldAmount.toFixed(2)}</td>
+                </tr>
+              </table>
+            ` : ''
+        }
+            <h2>CASH RECEIVED:</h2>
+            <table>
+              <tr>
+                <th>Rupees</th>
+                <th>FT Rate</th>
+                <th>Pure</th>
+              </tr>
+              ${safeCashTable && safeCashTable.length > 0
+          ? safeCashTable.map(c => `
+                  <tr>
+                    <td>${c.rupees}</td>
+                    <td>${c.goldRate}</td>
+                    <td>${c.pure}</td>
+                  </tr>
+                `).join('')
+          : '<tr><td colspan="3">No cash entries</td></tr>'
+        }
+              <tr>
+                <td colspan="2" style="text-align: right; font-weight: bold;">Total Cash Pure:</td>
+                <td style="font-weight: bold;">${safeCashTable.reduce((sum, c) => sum + toNum(c?.pure, 0), 0).toFixed(3)}</td>
+              </tr>
+            </table>
+            <h2>TOTAL:</h2>
+            <p><strong>Total Amount:</strong> ${displayB2CTotalAmount.toFixed(2)}</p>
+            <p><strong>Old Balance:</strong> ${effectiveB2COldBalance.toFixed(3)}</p>
+            <p><strong>Advance Balance:</strong> ${effectiveB2CAdvanceBalance.toFixed(3)}</p>
+            ${displayConvertedGoldValue > 0 ? `<p><strong>Converted Gold:</strong> ${displayConvertedGoldValue.toFixed(3)} g</p>` : ''}
+            ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+
+            ${cashAmount ? `<p><strong>Cash Amount:</strong> â‚¹${cashAmount}</p>` : ''}
+            ${upiAmount && parseFloat(upiAmount) > 0 ? `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+                <div>
+                  <h2>UPI Payment</h2>
+                  <p>Amount: â‚¹${upiAmount}</p>
+                  <p>Please scan the QR code for payment.</p>
+                </div>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent("NTJ Jewellery")}&am=${upiAmount}&cu=INR`)}" style="width:200px;height:200px;" />
+              </div>
+            ` : ''
+        }
+  <div style="text-align: center; margin-top: 20px;">
+  <p class="tamil-text" style="font-weight: bold; font-style: italic; margin-top: 10px;">${thirukkural}</p>
+    <p>Thank you for your visit. Please visit again.</p>
+  </div>
+          </body>
+        </html>
+    `;
     } else {
-      // B2B → B2BCalculationPage
+      return `
+    <html>
+          <head>
+            <style>
+              @page { margin: 0; }
+              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 10px; }
+              h1 { text-align: center; font-size: 16px; margin-bottom: 5px; }
+              h2 { margin-top: 8px; font-size: 11px; margin-bottom: 5px; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+              th, td { border: 1px solid black; padding: 2px 1px; text-align: center; font-size: 8px; word-wrap: break-word; overflow: hidden; }
+              th { background-color: #f2f2f2; }
+              p { margin: 2px 0; font-size: 9px; }
+            </style>
+          </head>
+          <body>
+            <h1>BILL</h1>
+            <div>
+              <p><strong>Bill No:</strong> ${currentBillNo || 'N/A'}</p>
+              <p><strong>Name:</strong> ${customer.name}</p>
+              <p><strong>Phone:</strong> ${customer.phone}</p>
+              <p><strong>Address:</strong> ${customer.address || 'N/A'}</p>
+              <p><strong>GST No:</strong> ${customer.gstin || 'N/A'}</p>
+              <p><strong>Type:</strong> ${customer.type}</p>
+              <p><strong>Date:</strong> ${customer.date}</p>
+              <p><strong>Old Balance:</strong> ${customer.oldBalance}</p>
+              <p><strong>Advance Balance:</strong> ${customer.advanceBalance || 0}</p>
+            </div>
+            ${isDealerPreview && dealerProofImageShowInBill && dealerProofImageUri ? `
+              <div style="text-align:center; margin: 8px 0;">
+                <p><strong>Receipt Proof:</strong></p>
+                <img src="${dealerProofImageUri}" style="width:100%; max-height:160px; object-fit:cover; border:1px solid #ddd; border-radius:6px;" />
+              </div>
+            ` : ""}
+            <h2>ISSUE:</h2>
+            <table>
+              <tr>
+                <th>Name</th>
+                <th>G.Weight</th>
+                ${showIssueMColumn ? '<th>M</th>' : ''}
+                ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
+                <th>Calc</th>
+                <th>Pure</th>
+              </tr>
+                ${issueItems.map(row => `
+                  <tr>
+                    <td>${row.name}</td>
+                    <td>${row.gross}</td>
+                    ${showIssueMColumn ? `<td>${row.m}</td>` : ''}
+                    ${showIssueNetWeightColumn ? `<td>${row.net}</td>` : ''}
+                    <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+                    <td><strong>${row.pure}</strong></td>
+                  </tr>
+                `).join('')}
+                <tr class="total-row">
+                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
+                  <td>TW: ${totalIssueTW}</td>
+                  ${showIssueMColumn ? '<td>-</td>' : ''}
+                  ${showIssueNetWeightColumn ? `<td>N.W: ${totalIssueNW}</td>` : ''}
+                  <td>-</td>
+                  <td><strong>Pure: ${totalIssuePure}</strong></td>
+                </tr>
+              </table>
+            <h2>RECEIPT:</h2>
+            <table>
+              <tr>
+                <th>Name</th>
+                <th>Weight</th>
+                <th>Result</th>
+                <th>Calc</th>
+                <th>Pure</th>
+              </tr>
+                ${receiptItems && receiptItems.length > 0 ? receiptItems.map(row => `
+                  <tr>
+                    <td>${row.name}</td>
+                    <td>${row.weight}</td>
+                    <td>${row.result}</td>
+                    <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+                    <td>${row.pure}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="5">No receipt items</td></tr>'}
+                ${receiptItems && receiptItems.length > 0 ? `
+                <tr class="total-row">
+                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
+                  <td>TW: ${totalReceiptTW}</td>
+                  <td>N.W: ${totalReceiptNW}</td>
+                  <td>-</td>
+                  <td><Strong>Pure: ${totalReceiptPure}</Strong></td>
+                </tr>` : ''}
+              </table>
+            <h2>CASH:</h2>
+            <p>${cashTable && cashTable.length > 0
+          ? cashTable.map(c => `${c.rupees} / ${c.goldRate} â†’ ${c.pure}`).join('<br/>')
+          : 'N/A'
+        }</p>
+            ${gst && (gst.enabled || (parseFloat(gst.amount) > 0)) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+
+            <h2>SUMMARY:</h2>
+            <table>
+              ${summaryOB !== 0 ? `
+                <!-- OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | Old Balance -->
+                <tr>
+                  <th>Old Balance</th>
+                  <th>ISSUE</th>
+                  <th>GST (g)</th>
+                  <th>RECEIPT</th>
+                  <th>CASH</th>
+                  <th>Old Balance</th>
+                </tr>
+                <tr>
+                  <td>${summaryOB.toFixed(3)}</td>
+                  <td>${displaySummary.issue}</td>
+                  <td>${displaySummary.gstPure}</td>
+                  <td>${displaySummary.receipt}</td>
+                  <td>${displaySummary.cash}</td>
+                  <td>${displaySummary.current}</td>
+                </tr>
+                <tr>
+                  <td>${(summaryOB + toNum(displaySummary.issue) + toNum(displaySummary.gstPure)).toFixed(3)}</td>
+                  <td>-</td>
+                  <td>-</td>
+                  <td>${displaySummary.receiptPlusCash}</td>
+                  <td>=</td>
+                  <td><strong>${toNum(displaySummary.current).toFixed(3)}</strong></td>
+                </tr>
+              ` : `
+                <!-- AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | Advance Balance -->
+                <tr>
+                  <th>ISSUE</th>
+                  <th>GST (g)</th>
+                  <th>Advance Balance</th>
+                  <th>RECEIPT</th>
+                  <th>CASH</th>
+                  <th>Advance Balance</th>
+                </tr>
+                <tr>
+                  <td>${displaySummary.issue}</td>
+                  <td>${displaySummary.gstPure}</td>
+                  <td>${summaryAB.toFixed(3)}</td>
+                  <td>${displaySummary.receipt}</td>
+                  <td>${displaySummary.cash}</td>
+                  <td>${(summaryAB + toNum(displaySummary.receipt) + toNum(displaySummary.cash) - (toNum(displaySummary.issue) + toNum(displaySummary.gstPure))).toFixed(3)}</td>
+                </tr>
+                <tr>
+                  <td colspan="4" style="text-align: right; padding-right: 10px;">${summaryAB.toFixed(3)} + ${displaySummary.receipt} + ${displaySummary.cash} - (${displaySummary.issue} + ${displaySummary.gstPure})</td>
+                  <td>=</td>
+                  <td><strong>${(summaryAB + toNum(displaySummary.receipt) + toNum(displaySummary.cash) - (toNum(displaySummary.issue) + toNum(displaySummary.gstPure))).toFixed(3)}</strong></td>
+                </tr>
+              `}
+            </table>
+            ${cashAmount ? `<p><strong>Cash Amount:</strong> â‚¹${cashAmount}</p>` : ''}
+          </body>
+        </html>
+    `;
+    }
+  }
+
+
+  const getCustomerPhone = () => {
+    return (
+      order?.phone ||
+      customer?.phone ||
+      customer?.phoneNumber ||
+      customer?.mobileNumber ||
+      customer?.mobile ||
+      customer?.customerNumber ||
+      customer?.customerPhone ||
+      ""
+    );
+  };
+
+  const getCustomerIdForLookup = () =>
+    customer?.id ||
+    customer?._id ||
+    customer?.customerId ||
+    transactions?.[0]?.customerId ||
+    "";
+
+  const currentBillNo = resolveBillNoForDisplay(
+    customer?.billNo ||
+    transactions?.[0]?.billNo ||
+    customer?.invoiceNo ||
+    transactions?.[0]?.invoiceNo,
+    customer?.type || customer?.customerType || previewType
+  );
+  const previewTx = transactions?.[0] || {};
+  const previewType = String(
+    customer?.type || customer?.customerType || previewTx?.dealerType || previewTx?.customerType || ""
+  ).toUpperCase();
+  const isDealerPreview = previewType === "DEALER" || previewType === "SUPPLIER";
+  const resolveFirstValidImageUri = (candidates = []) => {
+    for (const candidate of candidates) {
+      const uri = normalizeImageUri(candidate, base_url);
+      if (uri) return uri;
+    }
+    return "";
+  };
+  const dealerProofImageShowInBill =
+    previewTx?.receiptImageShowInBill ??
+    customer?.receiptImageShowInBill ??
+    true;
+   const normalizePhoneWithCountryCode = (value) => {
+    let digits = String(value || "").replace(/\D/g, "");
+    if (!digits) return "";
+    
+    // Remove leading zeros
+    digits = digits.replace(/^0+/, "");
+
+    // If it's exactly 10 digits, assume it's an Indian number and add 91
+    if (digits.length === 10) {
+      return `91${digits}`;
+    }
+    
+    // If it's 12 digits and starts with 91, it's already correct for India
+    // If it's something else, we return as is (could be international)
+    return digits;
+  };
+  const dealerProofImageUri = resolveFirstValidImageUri([
+    previewTx?.receiptImage,
+    previewTx?.proofImage,
+    previewTx?.image,
+    customer?.receiptImage,
+    customer?.proofImage,
+    customer?.image,
+  ]);
+
+  // ─── A4 HTML Generator ─────────────────────────────────────────────────────
+  const generateA4HTML = () => {
+    const shopName = 'NTJ JEWELLERY';
+    const shopAddress = 'Salem, Tamil Nadu';
+    const shopPhone = '';
+    const billDate = estimate
+      ? new Date().toLocaleDateString('en-IN')
+      : order
+        ? (order.date || new Date().toLocaleDateString('en-IN'))
+        : (customer?.date || new Date().toLocaleDateString('en-IN'));
+
+    const billTitle = estimate ? 'ESTIMATE BILL'
+      : suspense ? 'SUSPENSE BILL'
+      : order ? 'ORDER RECEIPT'
+      : 'TAX INVOICE';
+
+    const custName = estimate ? (estimate.itemName || 'Customer')
+      : order ? order.customer
+      : (customer?.name || '');
+    const custPhone = order ? order.phone : (customer?.phone || customer?.phoneNumber || customer?.customerNumber || '');
+    const custAddress = order ? (order.address || '') : (customer?.address || '');
+    const custGST = order ? (order.gstin || '') : (customer?.gstin || '');
+    const billNo = currentBillNo || order?.orderNo || '';
+
+    // ── Issue rows ──
+    const issueRowsHtml = safeIssueItems.length > 0 ? safeIssueItems.map((row, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${row.name || ''}</td>
+        <td>${row.gross || ''}</td>
+        <td>${row.m || ''}</td>
+        <td>${row.net || ''}</td>
+        <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+        <td><strong>${row.pure || ''}</strong></td>
+      </tr>`).join('') : '<tr><td colspan="7" style="text-align:center">No issue items</td></tr>';
+
+    const receiptRowsHtml = safeReceiptItems.length > 0 ? safeReceiptItems.map((row, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${row.name || ''}</td>
+        <td>${row.weight || ''}</td>
+        <td>${row.result || ''}</td>
+        <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+        <td>${row.pure || ''}</td>
+      </tr>`).join('') : '<tr><td colspan="6" style="text-align:center">No receipt items</td></tr>';
+
+    const cashRowsHtml = safeCashTable.length > 0 ? safeCashTable.map((c, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>&#8377;${c.rupees || ''}</td>
+        <td>${c.goldRate || ''}</td>
+        <td>${c.pure || ''}</td>
+      </tr>`).join('') : '<tr><td colspan="4" style="text-align:center">No cash entries</td></tr>';
+
+    // B2C items
+    const b2cItemRowsHtml = normalizedB2CItems.length > 0 ? normalizedB2CItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.displayItemName || item.itemName || ''}</td>
+        <td>${item.weight}</td>
+        <td>${item.touch}</td>
+        <td>${item.wastage}</td>
+        <td>${item.rate}</td>
+        <td>&#8377;${item.total.toFixed(2)}</td>
+        <td>&#8377;${item.gst.toFixed(2)}</td>
+        <td>&#8377;${item.final.toFixed(2)}</td>
+      </tr>`).join('') : '<tr><td colspan="9" style="text-align:center">No items</td></tr>';
+
+    const b2cOldGoldRowsHtml = normalizedB2CReceiptItems.length > 0 ? normalizedB2CReceiptItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.name || ''}</td>
+        <td>${item.weight}</td>
+        <td>${item.sub}</td>
+        <td>${item.netWeight}</td>
+        <td>${item.rate}</td>
+        <td>&#8377;${item.amount}</td>
+      </tr>`).join('') : '';
+
+    // Estimate items
+    const estimateItems = Array.isArray(estimate?.items) && estimate.items.length > 0 ? estimate.items : null;
+    const estimateRowsHtml = estimateItems
+      ? estimateItems.map((item, i) => `
+        <tr>
+          <td>${i + 1}</td>
+          <td>${item.itemName || ''}</td>
+          <td>${item.weight || ''}</td>
+          <td>${item.wastagePercent || 0}%</td>
+          <td>${item.grossWeight || ''}</td>
+          <td>&#8377;${formatIndianNumber(item.goldRate)}</td>
+          <td>&#8377;${formatIndianNumber(item.netAmount)}</td>
+          ${estimate.enableGST ? `<td>&#8377;${formatIndianNumber(item.gst || 0)}</td>` : ''}
+          <td><strong>&#8377;${formatIndianNumber(item.totalAmount)}</strong></td>
+        </tr>`).join('')
+      : estimate ? `
+        <tr>
+          <td>1</td>
+          <td>${estimate.itemName || ''}</td>
+          <td>${estimate.weight || ''}</td>
+          <td>${estimate.wastagePercent || 0}%</td>
+          <td>${estimate.grossWeight || ''}</td>
+          <td>&#8377;${formatIndianNumber(estimate.goldRate)}</td>
+          <td>&#8377;${formatIndianNumber(estimate.netAmount)}</td>
+          ${estimate && estimate.enableGST ? `<td>&#8377;${formatIndianNumber(estimate.gst || 0)}</td>` : ''}
+          <td><strong>&#8377;${formatIndianNumber(estimate.totalAmount)}</strong></td>
+        </tr>` : '';
+
+    // Suspense items
+    const suspIssueRowsHtml = suspense ? suspense.issueItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.name}</td>
+        <td>${item.weight.toFixed(3)}</td>
+        <td>${item.count}</td>
+        <td>${item.rate}</td>
+        <td>${item.pure.toFixed(3)}</td>
+        <td>&#8377;${item.amount.toFixed(2)}</td>
+      </tr>`).join('') : '';
+    const suspReceiptRowsHtml = suspense ? suspense.receiptItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.name}</td>
+        <td>${item.weight.toFixed(3)}</td>
+        <td>${item.count}</td>
+        <td>${item.rate}</td>
+        <td>${item.pure.toFixed(3)}</td>
+        <td>&#8377;${item.amount.toFixed(2)}</td>
+      </tr>`).join('') : '';
+
+    const orderItemsHtml = order ? `
+      <tr><td>Item</td><td>${order.type || ''}</td></tr>
+      <tr><td>Weight</td><td>${order.weight || ''} GMS</td></tr>
+      <tr><td>Payment</td><td>${order.payment || ''}</td></tr>
+      <tr><td>Pending Balance</td><td>&#8377;${order.balance || ''}</td></tr>` : '';
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    @page { size: A4; margin: 15mm 12mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+      color: #111;
+      background: #fff;
+    }
+    .page { width: 100%; }
+
+    /* ── Shop Header ── */
+    .header {
+      text-align: center;
+      border-bottom: 3px double #222;
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+    }
+    .shop-name {
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: #1B4D1B;
+      text-transform: uppercase;
+    }
+    .shop-sub {
+      font-size: 12px;
+      color: #444;
+      margin-top: 2px;
+    }
+    .bill-badge {
+      display: inline-block;
+      background: #1B4D1B;
+      color: #fff;
+      font-size: 13px;
+      font-weight: bold;
+      padding: 4px 18px;
+      border-radius: 4px;
+      margin-top: 6px;
+      letter-spacing: 1px;
+    }
+
+    /* ── Customer / Bill Info ── */
+    .info-grid {
+      display: flex;
+      justify-content: space-between;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin-bottom: 10px;
+      background: #FAFAFA;
+    }
+    .info-col { flex: 1; }
+    .info-col + .info-col { border-left: 1px dashed #ccc; padding-left: 12px; }
+    .info-row { margin-bottom: 3px; font-size: 11px; }
+    .info-label { font-weight: bold; color: #333; }
+
+    /* ── Tables ── */
+    .section-title {
+      font-size: 12px;
+      font-weight: bold;
+      background: #1B4D1B;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 3px;
+      margin-bottom: 4px;
+      margin-top: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 6px;
+      font-size: 10px;
+    }
+    th {
+      background: #E8F5E9;
+      border: 1px solid #999;
+      padding: 4px 3px;
+      text-align: center;
+      font-weight: bold;
+      font-size: 10px;
+    }
+    td {
+      border: 1px solid #ccc;
+      padding: 4px 3px;
+      text-align: center;
+    }
+    .total-row td {
+      background: #F1F8E9;
+      font-weight: bold;
+    }
+
+    /* ── Summary Box ── */
+    .summary-box {
+      border: 2px solid #1B4D1B;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-top: 10px;
+      background: #F9FBF9;
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+      border-bottom: 1px dashed #ddd;
+      font-size: 11px;
+    }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-label { color: #444; font-weight: 600; }
+    .summary-value { font-weight: bold; color: #111; }
+    .summary-total {
+      background: #1B4D1B;
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      text-align: center;
+      margin-top: 18px;
+      padding-top: 10px;
+      border-top: 1px dashed #aaa;
+      font-size: 10px;
+      color: #555;
+    }
+    .kural {
+      font-style: italic;
+      font-size: 12px;
+      font-weight: bold;
+      color: #1B4D1B;
+      margin-bottom: 4px;
+    }
+    .sign-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 30px;
+      font-size: 10px;
+    }
+    .sign-col { text-align: center; border-top: 1px solid #999; padding-top: 4px; min-width: 120px; }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Shop Header -->
+  <div class="header">
+    <div class="shop-name">${shopName}</div>
+    <div class="shop-sub">${shopAddress}${shopPhone ? ' | ' + shopPhone : ''}</div>
+    <div class="bill-badge">${billTitle}</div>
+  </div>
+
+  <!-- Customer & Bill Info -->
+  <div class="info-grid">
+    <div class="info-col">
+      <div class="info-row"><span class="info-label">Name:</span> ${custName}</div>
+      <div class="info-row"><span class="info-label">Phone:</span> ${custPhone || 'N/A'}</div>
+      <div class="info-row"><span class="info-label">Address:</span> ${custAddress || 'N/A'}</div>
+      <div class="info-row"><span class="info-label">GST No:</span> ${custGST || 'N/A'}</div>
+    </div>
+    <div class="info-col">
+      ${billNo ? `<div class="info-row"><span class="info-label">Bill No:</span> ${billNo}</div>` : ''}
+      <div class="info-row"><span class="info-label">Date:</span> ${billDate}</div>
+      <div class="info-row"><span class="info-label">Type:</span> ${estimate ? 'Estimate' : order ? 'Order' : (customer?.type || '')}</div>
+      ${!estimate && !order && summaryOB ? `<div class="info-row"><span class="info-label">Old Balance:</span> ${summaryOB.toFixed(3)} g</div>` : ''}
+      ${!estimate && !order && summaryAB ? `<div class="info-row"><span class="info-label">Adv Balance:</span> ${summaryAB.toFixed(3)} g</div>` : ''}
+    </div>
+  </div>
+
+  ${estimate ? `
+  <!-- Estimate Items -->
+  <div class="section-title">ESTIMATE DETAILS</div>
+  <table>
+    <thead><tr>
+      <th>#</th><th>Item Name</th><th>Wt (g)</th><th>W%</th><th>Gross Wt</th><th>Rate</th><th>Net Amt</th>
+      ${estimate.enableGST ? '<th>GST</th>' : ''}<th>Total</th>
+    </tr></thead>
+    <tbody>${estimateRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="${estimate.enableGST ? 8 : 7}" style="text-align:right">TOTAL ESTIMATE AMOUNT:</td>
+      <td>&#8377;${formatIndianNumber(estimateFinalTotal)}</td>
+    </tr></tfoot>
+  </table>
+  ${estimateGSTEnabled ? `
+  <div class="section-title">GST SUMMARY</div>
+  <table><tbody>
+    <tr><td style="text-align:left">Subtotal</td><td>&#8377;${estimateSubTotal.toFixed(2)}</td></tr>
+    <tr><td style="text-align:left">GST %</td><td>${estimateGstPercent.toFixed(2)}%</td></tr>
+    <tr><td style="text-align:left">GST Amount</td><td>&#8377;${estimateGstAmount.toFixed(2)}</td></tr>
+    <tr class="total-row"><td style="text-align:left">Final Total (Incl. GST)</td><td>&#8377;${estimateFinalTotal.toFixed(2)}</td></tr>
+  </tbody></table>` : ''}
+  ` : order ? `
+  <!-- Order Details -->
+  <div class="section-title">ORDER DETAILS</div>
+  <table><tbody>${orderItemsHtml}</tbody></table>
+  ` : suspense ? `
+  <!-- Suspense Issue -->
+  <div class="section-title">ISSUE ITEMS</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Weight(g)</th><th>Qty</th><th>Rate</th><th>Pure(g)</th><th>Amount</th></tr></thead>
+    <tbody>${suspIssueRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="5">Total Issue</td>
+      <td>${suspense.totalIssuePure.toFixed(3)}</td>
+      <td>&#8377;${suspense.totalIssueAmount.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>
+  <!-- Suspense Receipt -->
+  <div class="section-title">RECEIPT ITEMS</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Weight(g)</th><th>Qty</th><th>Rate</th><th>Pure(g)</th><th>Amount</th></tr></thead>
+    <tbody>${suspReceiptRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="5">Total Receipt</td>
+      <td>${suspense.totalReceiptPure.toFixed(3)}</td>
+      <td>&#8377;${suspense.totalReceiptAmount.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>
+  <!-- Suspense Summary -->
+  <div class="summary-box">
+    <div class="summary-row"><span class="summary-label">Gold Rate</span><span class="summary-value">&#8377;${suspense.goldRate}/g</span></div>
+    <div class="summary-row"><span class="summary-label">Net Pure Gold</span><span class="summary-value" style="color:${suspense.netPure >= 0 ? '#c62828' : '#2e7d32'}">${suspense.netPure.toFixed(3)} g</span></div>
+    <div class="summary-row"><span class="summary-label">Net Amount</span><span class="summary-value">&#8377;${suspense.netAmount.toFixed(2)}</span></div>
+  </div>
+  ` : isB2C ? `
+  <!-- B2C Items -->
+  <div class="section-title">ITEMS ISSUED</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Wt</th><th>Touch</th><th>Wastage</th><th>Rate</th><th>Amount</th><th>GST</th><th>Final</th></tr></thead>
+    <tbody>${b2cItemRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="8" style="text-align:right">Total:</td>
+      <td>&#8377;${totalB2CItemFinal.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>
+  ${normalizedB2CReceiptItems.length > 0 ? `
+  <div class="section-title">OLD GOLD / RECEIPT</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Wt(g)</th><th>Sub(g)</th><th>Net Wt(g)</th><th>Rate</th><th>Amount</th></tr></thead>
+    <tbody>${b2cOldGoldRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="6" style="text-align:right">Total Old Gold:</td>
+      <td>&#8377;${totalB2COldGoldAmount.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>` : ''}
+  <div class="summary-box">
+    <div class="summary-row"><span class="summary-label">Total Bill Amount</span><span class="summary-value">&#8377;${displayB2CTotalAmount.toFixed(2)}</span></div>
+    ${cashAmount ? `<div class="summary-row"><span class="summary-label">Cash Paid</span><span class="summary-value">&#8377;${cashAmount}</span></div>` : ''}
+    ${upiAmount && parseFloat(upiAmount) > 0 ? `<div class="summary-row"><span class="summary-label">UPI Amount</span><span class="summary-value">&#8377;${upiAmount}</span></div>` : ''}
+    <div class="summary-row"><span class="summary-label">Old Balance</span><span class="summary-value">${effectiveB2COldBalance.toFixed(3)} g</span></div>
+    <div class="summary-row"><span class="summary-label">Advance Balance</span><span class="summary-value">${effectiveB2CAdvanceBalance.toFixed(3)} g</span></div>
+    ${displayConvertedGoldValue > 0 ? `<div class="summary-row"><span class="summary-label">Converted Gold</span><span class="summary-value">${displayConvertedGoldValue.toFixed(3)} g</span></div>` : ''}
+  </div>
+  ` : `
+  <!-- B2B Issue -->
+  <div class="section-title">ISSUE</div>
+  <table>
+    <thead><tr>
+      <th>#</th><th>Name</th><th>G.Weight</th>
+      ${showIssueMColumn ? '<th>M</th>' : ''}
+      ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
+      <th>Calc</th><th>Pure (g)</th>
+    </tr></thead>
+    <tbody>${issueRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="2">Totals</td>
+      <td>TW: ${totalIssueTW}</td>
+      ${showIssueMColumn ? '<td>-</td>' : ''}
+      ${showIssueNetWeightColumn ? `<td>NW: ${totalIssueNW}</td>` : ''}
+      <td>-</td><td>Pure: ${totalIssuePure}</td>
+    </tr></tfoot>
+  </table>
+
+  <!-- B2B Receipt -->
+  <div class="section-title">RECEIPT</div>
+  <table>
+    <thead><tr><th>#</th><th>Name</th><th>Weight</th><th>Result</th><th>Calc</th><th>Pure (g)</th></tr></thead>
+    <tbody>${receiptRowsHtml}</tbody>
+    ${safeReceiptItems.length > 0 ? `<tfoot><tr class="total-row">
+      <td colspan="2">Totals</td>
+      <td>TW: ${totalReceiptTW}</td>
+      <td>NW: ${totalReceiptNW}</td>
+      <td>-</td>
+      <td>Pure: ${totalReceiptPure}</td>
+    </tr></tfoot>` : ''}
+  </table>
+
+  <!-- Cash Table -->
+  <div class="section-title">CASH</div>
+  <table>
+    <thead><tr><th>#</th><th>Rupees</th><th>FT Rate</th><th>Pure (g)</th></tr></thead>
+    <tbody>${cashRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="3" style="text-align:right">Total Cash Pure:</td>
+      <td>${safeCashTable.reduce((s, c) => s + toNum(c?.pure, 0), 0).toFixed(3)} g</td>
+    </tr></tfoot>
+  </table>
+
+  <!-- Summary -->
+  <div class="section-title">SUMMARY</div>
+  <div class="summary-box">
+    ${summaryOB !== 0 ? `
+    <div class="summary-row"><span class="summary-label">Old Balance (OB)</span><span class="summary-value">${summaryOB.toFixed(3)} g</span></div>` : ''}
+    ${summaryAB !== 0 ? `
+    <div class="summary-row"><span class="summary-label">Advance Balance (AB)</span><span class="summary-value">${summaryAB.toFixed(3)} g</span></div>` : ''}
+    <div class="summary-row"><span class="summary-label">Issue</span><span class="summary-value">${displaySummary.issue} g</span></div>
+    <div class="summary-row"><span class="summary-label">Receipt</span><span class="summary-value">${displaySummary.receipt} g</span></div>
+    <div class="summary-row"><span class="summary-label">Cash</span><span class="summary-value">${displaySummary.cash} g</span></div>
+    ${parseFloat(displaySummary.gstPure) > 0 ? `<div class="summary-row"><span class="summary-label">GST Pure</span><span class="summary-value">${displaySummary.gstPure} g</span></div>` : ''}
+    <div class="summary-total">
+      <span>Current Balance</span>
+      <span>${displaySummary.current} g</span>
+    </div>
+  </div>
+  `}
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="kural">${thirukkural}</div>
+    <div>Thank you for your visit. Please visit again!</div>
+    <div class="sign-row">
+      <div class="sign-col">Customer Signature</div>
+      <div class="sign-col">Authorised Signature</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>`;
+  };
+
+  // ─── Generate A4 PDF ───────────────────────────────────────────────────────
+  const generateA4BillPdf = async () => {
+    const html = generateA4HTML();
+    // A4 in points: 595 x 842
+    const tryPrint = async (payload, useFixed = true) => {
+      if (useFixed) {
+        return Print.printToFileAsync({ html: payload, width: 595, height: 842 });
+      }
+      return Print.printToFileAsync({ html: payload });
+    };
+    try {
+      const { uri } = await tryPrint(html, true);
+      return uri;
+    } catch {
+      try {
+        const { uri } = await tryPrint(html, false);
+        return uri;
+      } catch {
+        const stripped = String(html).replace(/<img\b[^>]*>/gi, '');
+        const { uri } = await tryPrint(stripped, false);
+        return uri;
+      }
+    }
+  };
+
+  const generateBillPdf = async () => {
+    const html = generateHTML();
+    const tryPrint = async (payload, useFixedPage = true) => {
+      if (useFixedPage) {
+        return Print.printToFileAsync({
+          html: payload,
+          width: 204,
+          height: 842,
+        });
+      }
+      return Print.printToFileAsync({ html: payload });
+    };
+
+    try {
+      const { uri } = await tryPrint(html, true);
+      return uri;
+    } catch (firstErr) {
+      console.warn("printToFileAsync failed with fixed page size, retrying default size.", firstErr);
+      try {
+        const { uri } = await tryPrint(html, false);
+        return uri;
+      } catch (secondErr) {
+        console.warn("printToFileAsync failed with full HTML, retrying without images.", secondErr);
+        // Some devices fail writing PDF when very large/unsupported images are embedded.
+        const htmlWithoutImages = String(html).replace(/<img\b[^>]*>/gi, "");
+        try {
+          const { uri } = await tryPrint(htmlWithoutImages, false);
+          return uri;
+        } catch (thirdErr) {
+          const finalErr = new Error(
+            "Failed to generate PDF. Please try again or reduce heavy bill content/images."
+          );
+          finalErr.cause = thirdErr;
+          throw finalErr;
+        }
+      }
+    }
+  };
+
+  const prepareBillPdf = async ({ force = false } = {}) => {
+    if (!force && preparedPdfUriRef.current) {
+      const check = await FileSystem.getInfoAsync(preparedPdfUriRef.current);
+      if (check.exists) return preparedPdfUriRef.current;
+    }
+    const uri = await generateBillPdf();
+    preparedPdfUriRef.current = uri;
+    return uri;
+  };
+
+  const openWhatsAppChat = async (waPhone) => {
+    const appUrl = `whatsapp://send?phone=${waPhone}`;
+    const webUrl = `https://wa.me/${waPhone}`;
+
+    const canOpenApp = await Linking.canOpenURL(appUrl);
+    if (canOpenApp) {
+      await Linking.openURL(appUrl);
+      return true;
+    }
+
+    const canOpenWeb = await Linking.canOpenURL(webUrl);
+    if (canOpenWeb) {
+      await Linking.openURL(webUrl);
+      return true;
+    }
+
+    return false;
+  };
+
+  const fetchRegisteredCustomerPhone = async () => {
+    const customerId = getCustomerIdForLookup();
+    if (!customerId) return "";
+
+    const rawType = String(customer?.type || customer?.customerType || "").toUpperCase();
+    const endpoint = rawType === "B2C"
+      ? `${base_url}/customersB2C/${customerId}`
+      : rawType === "DEALER" || rawType === "SUPPLIER"
+        ? `${base_url}/customersDealer/${customerId}`
+        : `${base_url}/customers/${customerId}`;
+
+    try {
+      const res = await fetch(endpoint);
+      if (!res.ok) return "";
+      const data = await res.json();
+      return (
+        data?.phoneNumber ||
+        data?.phone ||
+        data?.mobileNumber ||
+        data?.mobile ||
+        data?.customerNumber ||
+        ""
+      );
+    } catch {
+      return "";
+    }
+  };
+
+	  const resolveCustomerWhatsAppPhone = async () => {
+	    const registeredPhone = await fetchRegisteredCustomerPhone();
+	    return normalizePhoneWithCountryCode(registeredPhone || getCustomerPhone());
+	  };
+
+		  const sharePdfViaDeviceWhatsApp = async ({ waPhone, pdfUri, isAuto = false } = {}) => {
+		    const canShare = await Sharing.isAvailableAsync();
+		    if (!canShare) {
+		      throw new Error("File sharing is not available on this device.");
+		    }
+
+	    // Verify file exists
+	    const fileInfo = await FileSystem.getInfoAsync(pdfUri);
+	    if (!fileInfo.exists) {
+	      throw new Error("Generated PDF file not found. Please try again.");
+	    }
+
+	    // Rename to a meaningful filename for better user experience
+	    let sharingUri = pdfUri;
+	    try {
+	      const billNoHint =
+	        currentBillNo ||
+	        resolveBillNoForDisplay(order?.orderNo, "B2B") ||
+	        Date.now();
+	      const cleanBillNo = String(billNoHint).replace(/[^a-zA-Z0-9]/g, "_");
+	      const newUri = `${FileSystem.cacheDirectory}Bill_${cleanBillNo}.pdf`;
+	      await FileSystem.copyAsync({ from: pdfUri, to: newUri });
+	      sharingUri = newUri;
+		    } catch (e) {
+		      console.warn("Renaming failed, sharing original URI", e);
+		    }
+
+		    // IMPORTANT: expo-sharing only supports local file URLs (file://).
+		    // Do not convert to content:// here; it will be rejected.
+		    const uriToShare = sharingUri;
+
+		    // On Android, calling Linking.openURL before Sharing.shareAsync often blocks the share sheet.
+		    // We only open the chat if NOT doing auto-share, or as a fallback.
+		    // For standard PDF sharing, shareAsync is much more reliable.
+		    try {
+		      await Sharing.shareAsync(uriToShare, {
+		        mimeType: "application/pdf",
+		        dialogTitle: "Send Bill on WhatsApp",
+		        UTI: "com.adobe.pdf",
+		      });
+		    } catch (shareErr) {
+		      console.error("ExpoSharing.shareAsync failed:", shareErr);
+		      throw new Error(
+		        shareErr?.message ||
+		          "Unable to open share sheet. Please try again."
+		      );
+		    }
+		  };
+
+	  const sendBillPdfViaWhatsAppCloudApi = async ({ waPhone, pdfUri } = {}) => {
+	    const billNoHint =
+	      currentBillNo ||
+	      resolveBillNoForDisplay(order?.orderNo, "B2B") ||
+	      resolveBillNoForDisplay(estimate?.estimateNo, "B2B") ||
+	      resolveBillNoForDisplay(suspense?.suspenseNo, "B2B") ||
+	      "";
+	    const filename = `NTJ_Bill_${billNoHint || Date.now()}.pdf`;
+	    const caption = billNoHint ? `Bill No: ${billNoHint}` : "NTJ Bill";
+
+	    const form = new FormData();
+	    form.append("phone", waPhone);
+	    form.append("filename", filename);
+	    form.append("caption", caption);
+	    form.append("pdf", {
+	      uri: pdfUri,
+	      name: filename,
+	      type: "application/pdf",
+	    });
+
+	    const response = await fetch(`${base_url}/whatsapp/send-bill-pdf`, {
+	      method: "POST",
+	      body: form,
+	    });
+
+	    const text = await response.text();
+	    let json = null;
+	    try {
+	      json = text ? JSON.parse(text) : null;
+	    } catch (_e) {}
+
+	    if (!response.ok) {
+	      const message =
+	        json?.message ||
+	        (typeof json?.error === "string" ? json.error : "") ||
+	        text;
+	      const err = new Error(message);
+	      err.status = response.status;
+	      err.payload = json || text;
+	      throw err;
+	    }
+
+	    return json || { ok: true };
+	  };
+
+		  const shareBillPdfOnly = async () => {
+		    if (isSharingRef.current) return;
+		    try {
+		      isSharingRef.current = true;
+		      const pdfUri = await prepareBillPdf();
+		      if (!pdfUri) throw new Error("Could not generate bill PDF.");
+		      const waPhone = await resolveCustomerWhatsAppPhone();
+
+		      // 1. Try direct Cloud API delivery first (most direct)
+		      let sentViaCloud = false;
+		      if (waPhone) {
+		        try {
+		          const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
+		          if (cloudRes?.ok) {
+		            sentViaCloud = true;
+		            Alert.alert("Success", `Bill PDF sent directly to ${waPhone}`);
+		            await openWhatsAppChat(waPhone); // Open chat to show the sent document
+		            return;
+		          }
+		        } catch (e) {
+		          console.log("Cloud API skipped/failed");
+		        }
+		      }
+
+		      // 2. Fallback: Share the PDF via the OS share sheet.
+		      // Note: WhatsApp deep-links cannot pre-attach files reliably; opening WhatsApp first
+		      // often prevents the share sheet from appearing (app goes background).
+		      if (!sentViaCloud) {
+		        await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri, isAuto: false });
+		      }
+		    } catch (error) {
+		      Alert.alert("Error", error.message || "Failed to share PDF.");
+		    } finally {
+		      isSharingRef.current = false;
+		    }
+		  };
+
+	  const openCustomerChatOnly = async () => {
+	    try {
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) throw new Error("Customer WhatsApp number not found.");
+	      await openWhatsAppChat(waPhone);
+	    } catch (error) {
+	      Alert.alert("Error", error.message || "Could not open WhatsApp chat.");
+	    }
+	  };
+
+	  const shareBillToCustomerWhatsApp = async ({ isAuto = false } = {}) => {
+	    if (isSharingRef.current) return;
+	    try {
+	      isSharingRef.current = true;
+	      setIsSharing(true);
+
+	      // 1. Generate and verify PDF first
+	      const pdfUri = await prepareBillPdf();
+	      if (!pdfUri) {
+	        throw new Error("Could not generate bill PDF.");
+	      }
+
+	      // 2. Resolve target phone number
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) {
+	        throw new Error("Customer WhatsApp number not found.");
+	      }
+
+	      // 3. Try Background Cloud API Send (Ideal for 'attached in send area' effect)
+	      let cloudSent = false;
+	      try {
+	        const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
+	        if (cloudRes?.ok) {
+	          cloudSent = true;
+	        }
+	      } catch (e) {
+	        console.log("Cloud API skipped or failed");
+	      }
+
+	      // 4. Fallback for Auto/Manual trigger
+	      if (!cloudSent) {
+	        // On auto-share, we prioritize the attachment sheet as it's the main requirement
+	        await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri, isAuto });
+	      } else {
+	        Alert.alert("Success", "Bill sent via WhatsApp Cloud API");
+	      }
+	    } catch (error) {
+	      if (!isAuto || !(error?.message || "").toLowerCase().includes("cancel")) {
+	        Alert.alert("Error", error?.message || "Failed to share bill.");
+	      }
+	      console.error("WhatsApp share flow error:", error);
+	    } finally {
+	      setIsSharing(false);
+	      isSharingRef.current = false;
+	    }
+	  };
+
+  useEffect(() => {
+    preparedPdfUriRef.current = "";
+    const timer = setTimeout(() => {
+      prepareBillPdf().catch(() => { });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [customer?.billNo, customer?.invoiceNo, order?.orderNo, suspense?.netAmount, estimate?.totalAmount, safeIssueItems.length, safeReceiptItems.length]);
+
+  useEffect(() => {
+    const shouldAutoShare = Boolean(route.params?.customer?.autoShare || route.params?.autoShare);
+    const isBillReady = Boolean(customer?.billNo || customer?.invoiceNo || order || suspense || estimate);
+    if (!shouldAutoShare || hasAutoSharedRef.current || !isBillReady) return;
+
+    hasAutoSharedRef.current = true;
+    const timer = setTimeout(() => {
+      shareBillToCustomerWhatsApp({ isAuto: true });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [route.params?.customer?.autoShare, route.params?.autoShare, customer?.billNo, customer?.invoiceNo, order, suspense, estimate]);
+
+  const handleDownload = async () => {
+    try {
+      const uri = await prepareBillPdf();
+      setIsPrinting(false);
+      Alert.alert('Download Successful', `PDF saved to: ${uri} `);
+    } catch (error) {
+      setIsPrinting(false);
+      Alert.alert('Error', 'Failed to download PDF');
+      console.error(error);
+    }
+  };
+
+	  const handleShare = async () => {
+	    await shareBillToCustomerWhatsApp({ isAuto: false });
+	  };
+
+  const handleTransferToB2B = () => {
+    if (estimate) {
       navigation.navigate("B2BCalculationPage", {
-        editTransaction: bill,
-        editCustomer: customer,
+        previewData: {
+          itemName: estimate.itemName,
+          weight: estimate.weight,
+          touch: estimate.wastagePercent,
+          ftRate: estimate.goldRate,
+          items: estimate.items // Pass if it's a multi-item estimate
+        }
       });
     }
   };
 
-  // ── DELETE ──────────────────────────────────────────────────────────
-  const handleDeleteBill = (bill) => {
+  const handleTransferToB2C = () => {
+    if (estimate) {
+      navigation.navigate("B2CCalculationPage", {
+        estimate: {
+          itemName: estimate.itemName,
+          weight: estimate.weight,
+          wastagePercent: estimate.wastagePercent,
+          goldRate: estimate.goldRate,
+          items: estimate.items // Pass if it's a multi-item estimate
+        }
+      });
+      return;
+    }
+
+    navigation.navigate("B2CCalculationPage", {
+      printAgain: true,
+      lastBill: route.params,
+    });
+  };
+
+	  const openDirectWhatsApp = async () => {
+	    if (isSharingRef.current) return;
+	    try {
+	      isSharingRef.current = true;
+	      setIsSharing(true);
+
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) throw new Error('Customer mobile number is missing or invalid.');
+
+	      // Generate A4 PDF
+	      const pdfUri = await generateA4BillPdf();
+	      if (!pdfUri) throw new Error('Could not generate A4 bill PDF.');
+
+	      // Give the file a meaningful name
+	      const billNoHint = currentBillNo || order?.orderNo || Date.now();
+	      const cleanBillNo = String(billNoHint).replace(/[^a-zA-Z0-9]/g, '_');
+	      const namedUri = `${FileSystem.cacheDirectory}NTJ_Bill_${cleanBillNo}_A4.pdf`;
+	      try { await FileSystem.copyAsync({ from: pdfUri, to: namedUri }); } catch (_) {}
+	      const fileInfo = await FileSystem.getInfoAsync(namedUri);
+	      const sharableUri = fileInfo.exists ? namedUri : pdfUri;
+
+	      // 1. Try Cloud API (sends directly, no user action needed)
+	      let sentViaCloud = false;
+	      try {
+	        const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri: sharableUri });
+	        if (cloudRes?.ok) {
+	          sentViaCloud = true;
+	          Alert.alert('Sent!', `Bill PDF sent to ${waPhone} on WhatsApp!`);
+	          await openWhatsAppChat(waPhone);
+	        }
+	      } catch (_) {
+	        console.log('Cloud API unavailable, using device share.');
+	      }
+
+	      if (!sentViaCloud) {
+	        await shareA4PdfToWhatsApp(sharableUri, waPhone);
+	      }
+	    } catch (error) {
+	      Alert.alert('Error', error?.message || 'Failed to send bill on WhatsApp.');
+	      console.error('Direct WhatsApp send error:', error);
+	    } finally {
+	      setIsSharing(false);
+	      isSharingRef.current = false;
+	    }
+	  };
+
+	  // ─── Core helper: share A4 PDF directly into WhatsApp ───────────────────
+	  const shareA4PdfToWhatsApp = async (fileUri, waPhone) => {
+	    // react-native-share can target WhatsApp directly and attach a file.
+	    // On Android the uri must be a base64 data-uri OR a content:// uri.
+	    // Expo's FileSystem gives us a file:// uri — we read it as base64 first.
+	    try {
+	      const RNShare = getRNShare();
+	      if (!RNShare) throw new Error('RNShare native module not available');
+
+	      const base64 = await FileSystem.readAsStringAsync(fileUri, {
+	        encoding: FileSystem.EncodingType.Base64,
+	      });
+	      const dataUri = `data:application/pdf;base64,${base64}`;
+
+	      await RNShare.shareSingle({
+	        social: RNShare.Social.WHATSAPP,
+	        url: dataUri,
+	        type: 'application/pdf',
+	        filename: `NTJ_Bill.pdf`,
+	        title: 'NTJ Bill PDF',
+	        message: waPhone ? `Bill for ${waPhone}` : 'Please find your bill attached.',
+	      });
+	    } catch (rnShareErr) {
+	      // RNShare throws if user cancels or WhatsApp not installed — fall back to generic sheet
+	      console.warn('RNShare WhatsApp failed, falling back to expo-sharing:', rnShareErr?.message);
+	      try {
+	        // Use the safer sharing flow (checks isAvailableAsync, verifies file exists,
+	        // and converts file:// -> content:// on Android).
+	        await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri: fileUri, isAuto: false });
+	      } catch (sharingErr) {
+	        throw new Error(sharingErr?.message || 'Could not open share sheet. Please try again.');
+	      }
+	    }
+	  };
+
+	  const sendA4BillViaWhatsApp = async () => {
+	    if (isSharingRef.current) return;
+	    try {
+	      isSharingRef.current = true;
+	      setIsSharing(true);
+
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) throw new Error('Customer WhatsApp number not found.');
+
+	      // Generate full A4 PDF
+	      const pdfUri = await generateA4BillPdf();
+	      if (!pdfUri) throw new Error('Could not generate A4 bill PDF.');
+
+	      // Give it a clean filename
+	      const billNoHint = currentBillNo || order?.orderNo || Date.now();
+	      const cleanBillNo = String(billNoHint).replace(/[^a-zA-Z0-9]/g, '_');
+	      const namedUri = `${FileSystem.cacheDirectory}NTJ_Bill_${cleanBillNo}_A4.pdf`;
+	      try { await FileSystem.copyAsync({ from: pdfUri, to: namedUri }); } catch (_) {}
+	      const fileInfo = await FileSystem.getInfoAsync(namedUri);
+	      const sharableUri = fileInfo.exists ? namedUri : pdfUri;
+
+	      // 1. Try Cloud API first (sends without user interaction)
+	      let cloudSent = false;
+	      try {
+	        const res = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri: sharableUri });
+	        if (res?.ok) {
+	          cloudSent = true;
+	          Alert.alert('Sent!', `Bill PDF sent to WhatsApp (${waPhone})`);
+	          // Only open the chat AFTER the cloud send succeeded
+	          await openWhatsAppChat(waPhone);
+	        }
+	      } catch (_) {}
+
+	      // 2. Fallback: open WhatsApp directly with PDF attached via react-native-share
+	      if (!cloudSent) {
+	        await shareA4PdfToWhatsApp(sharableUri, waPhone);
+	      }
+	    } catch (error) {
+	      Alert.alert('Error', error?.message || 'Failed to send PDF via WhatsApp.');
+	    } finally {
+	      setIsSharing(false);
+	      isSharingRef.current = false;
+	    }
+	  };
+
+	  async function handleWhatsAppShare() {
+	    await shareBillToCustomerWhatsApp({ isAuto: false });
+	  }
+
+  const handlePrint = async () => {
+    try {
+      setIsPrinting(true);
+      const html = generateHTML();
+      await Print.printAsync({
+        html,
+        width: 204,
+        height: 842,
+      });
+    } catch (error) {
+      Alert.alert('Error', 'Failed to process bill');
+      console.error("General bill processing error:", error);
+    } finally {
+      setIsPrinting(false);
+    }
+  };
+
+  const handlePrintQR = async () => {
+    try {
+      setIsPrinting(true);
+      if (qrRef.current) {
+        qrRef.current.toDataURL(async (dataURL) => {
+          const html = `
+    < html >
+              <head>
+                <style>
+                  @page { margin: 0; }
+                  body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; text-align: center; font-size: 10px; }
+                  h1 { margin-bottom: 10px; font-size: 14px; }
+                  img { max-width: 60mm; height: auto; }
+                </style>
+              </head>
+              <body>
+                <h1>UPI QR Code</h1>
+                <p>Amount: â‚¹${upiAmount}</p>
+                <img src="${dataURL}" alt="UPI QR Code" />
+              </body>
+            </html >
+    `;
+          await Print.printAsync({
+            html,
+            width: 204,
+            height: 842,
+          });
+          setIsPrinting(false);
+        });
+      } else {
+        setIsPrinting(false);
+        Alert.alert('Error', 'QR Code not available');
+      }
+    } catch (error) {
+      setIsPrinting(false);
+      Alert.alert('Error', 'Failed to print QR Code');
+      console.error(error);
+    }
+  };
+
+  const handleConvertToGold = async () => {
+    if (!isB2C) return;
+
+    const upi = Math.max(0, toNum(upiAmount, 0));
+    if (upi <= 0) {
+      Alert.alert("Invalid UPI Amount", "UPI Amount must be greater than 0 to convert.");
+      return;
+    }
+
+    if (currentB2CGoldRate <= 0) {
+      Alert.alert("Invalid Gold Rate", "Current gold rate is invalid for conversion.");
+      return;
+    }
+
+    const convertedGold = upi / currentB2CGoldRate;
+    const baseOB = toNum(displayB2COldBalance, 0);
+    const baseAB = toNum(displayB2CAdvanceBalance, 0);
+
+    let updatedOB = baseOB;
+    let updatedAB = baseAB;
+
+    if (baseAB > 0) {
+      if (convertedGold <= baseAB) {
+        updatedAB = baseAB - convertedGold;
+      } else {
+        updatedAB = 0;
+        updatedOB = baseOB + (convertedGold - baseAB);
+      }
+    } else {
+      updatedOB = baseOB + convertedGold;
+    }
+
+    // Persist immediately so BillHistory / CustomerDataList / HomeScreen see fresh values
+    try {
+      const customerId =
+        customer?.id ||
+        customer?._id ||
+        customer?.customerId ||
+        transactions?.[0]?.customerId ||
+        "";
+
+      if (customerId) {
+        const activeBillId = transactions?.[0]?._id || transactions?.[0]?.id || "";
+        const patchRes = await fetch(`${base_url}/customersB2C/${customerId}/balances`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            oldBalance: updatedOB,
+            advanceBalance: updatedAB,
+            billId: activeBillId,
+          }),
+        });
+        if (!patchRes.ok) {
+          const errText = await patchRes.text();
+          console.warn("Convert-to-Gold balance update failed:", errText);
+        }
+      }
+    } catch (err) {
+      console.warn("Convert-to-Gold network error:", err?.message || err);
+    }
+    setB2cConversion({
+      applied: true,
+
+      goldWeight: convertedGold,
+      updatedOB,
+      updatedAB,
+    });
+    Alert.alert("Converted", `UPI ₹${upi.toFixed(2)} = ${convertedGold.toFixed(3)}g`);
+  };
+
+  const handleNullifyBalance = async () => {
+    if (!isB2C) return;
+
     Alert.alert(
-      "Delete Bill",
-      "Are you sure you want to delete this bill? This cannot be undone.",
+      "Nullify Balance",
+      "Are you sure you want to set the customer balance to zero? This will take effect when the bill is saved.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Delete",
-          style: "destructive",
+          text: "Yes, Nullify",
           onPress: async () => {
+             // We update local state so the preview shows 0 and handleSaveBill uses 0.
+             // We also optionally update DB immediately like handleConvertToGold does.
             try {
-              if (!bill._id) {
-                throw new Error("This record has no bill ID and cannot be deleted safely.");
+              const customerId = customer?.id || customer?._id || customer?.customerId || transactions?.[0]?.customerId || "";
+              if (customerId) {
+                const activeBillId = transactions?.[0]?._id || transactions?.[0]?.id || "";
+                await fetch(`${base_url}/customersB2C/${customerId}/balances`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    oldBalance: 0,
+                    advanceBalance: 0,
+                    billId: activeBillId,
+                  }),
+                });
               }
-              const billType = resolveBillType(bill);
-              const forcedBillType = resolveBillTypeFromContext(bill, customer);
-              const res = await fetch(
-                `${base_url}/billSummary/${bill._id}?billType=${forcedBillType}`,
-                { method: "DELETE" }
-              );
-              if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(errText || "Server error");
-              }
-              // Immediately remove from local state
-              setBills((prev) => normalizeBills(prev.filter((b) => b._id !== bill._id)));
-              await fetchBills(fromDate, toDate);
-              Alert.alert("Deleted", "Bill deleted successfully.");
-            } catch (error) {
-              console.error("Delete failed:", error);
-              Alert.alert("Error", `Failed to delete bill: ${error.message}`);
+            } catch (err) {
+              console.warn("Nullify balance network error:", err);
             }
-          },
-        },
+
+            setB2cConversion({
+              applied: true,
+              goldWeight: 0,
+              updatedOB: 0,
+              updatedAB: 0,
+            });
+            Alert.alert("Success", "Balance set to zero for this transaction.");
+          }
+        }
       ]
     );
   };
 
-  // ── PRINT ───────────────────────────────────────────────────────────
-  const handlePrintBill = (bill) => {
-    // Navigate to BillPreview with printAgain flag so it auto-opens print dialog
-    const billType = resolveBillTypeFromContext(bill, customer);
-    const displayType = resolveDisplayTypeFromContext(bill, customer);
-    const bal = getBalanceFromBill(bill);
-    const isB2C = billType === "B2C";
-    const b2cItems = isB2C ? normalizeB2CItems(bill) : (bill.items || []);
-    const b2cReceiptItems = isB2C ? normalizeB2CReceiptItems(bill.receiptItems || [], bill) : (bill.receiptItems || []);
-    const resolvedReport = isB2C ? buildB2CReport(bill, b2cItems, b2cReceiptItems) : (bill.report || null);
-    const resolvedSummary = buildSummaryForPreview(bill, bal);
-    const previewImage =
-      getRecordImage(bill) ||
-      normalizeImageUri(customer?.receiptImage, base_url) ||
-      normalizeImageUri(customer?.proofImage, base_url) ||
-      normalizeImageUri(customer?.image, base_url) ||
-      normalizeImageUri(customer?.latestTransactionImage, base_url) ||
-      normalizeImageUri(customer?.lastTransaction?.receiptImage, base_url) ||
-      normalizeImageUri(customer?.lastTransaction?.proofImage, base_url) ||
-      normalizeImageUri(customer?.lastTransaction?.image, base_url) ||
-      "";
-    navigation.navigate("BillPreview", {
-      customer: {
-        name: bill.customerName || customer?.customerName || "Unknown",
-        phone:
-          bill?.phone ||
-          bill?.phoneNumber ||
-          bill?.customerNumber ||
-          customer?.customerNumber ||
-          customer?.phoneNumber ||
-          customer?.phone ||
-          "",
-        address: bill?.address || customer?.address || "",
-        gstin: bill?.gstin || customer?.gstin || "",
-        type: displayType,
-        image: previewImage,
-        proofImage: previewImage,
-        receiptImage: previewImage,
-        receiptImageShowInBill:
-          typeof bill?.receiptImageShowInBill === "boolean" ? bill.receiptImageShowInBill : true,
-        date:
-          bill.date ||
-          (bill.createdAt
-            ? new Date(bill.createdAt).toLocaleDateString()
-            : new Date().toLocaleDateString()),
-        oldBalance: bal.ob,
-        advanceBalance: bal.ab,
-        balance: bal.current,
-        id: customer?.id || customer?._id || customer?.customerId || "",
-        customerId: customer?.id || customer?._id || customer?.customerId || "",
-        billNo: resolveBillNoForDisplay(bill, customer),
-        invoiceNo: resolveBillNoForDisplay(bill, customer),
-      },
-      issueItems: bill.issueItems || [],
-      receiptItems: b2cReceiptItems,
-      cashTable: bill.cashTable || [],
-      summary: resolvedSummary,
-      report: resolvedReport,
-      transactions: [bill],
-      items: b2cItems,
-      gst: bill.gst || null,
-      estimate: bill.estimate || null,
-      printAgain: true,
-    });
-  };
-
-  // ── SHARE ───────────────────────────────────────────────────────────
-  const getCustomerPhoneForBill = async (bill) => {
-    const fallbackPhone =
-      bill?.phone ||
-      customer?.customerNumber ||
-      customer?.phone ||
-      customer?.phoneNumber ||
-      "";
+  const handleSaveBill = async () => {
     try {
-      const forcedBillType = resolveBillTypeFromContext(bill, customer);
-      const custType = String(
-        customer?.customerType || customer?.type || bill?.dealerType || ""
-      ).toUpperCase();
+      const billType = String(customer?.type || customer?.customerType || "B2B").toUpperCase() === "B2C" ? "B2C" : "B2B";
+      const isB2BBill = billType === "B2B";
+      const isB2CBill = billType === "B2C";
       const customerId =
-        customer?._id || customer?.id || customer?.customerId || bill?.customerId || "";
-      if (!customerId) return fallbackPhone;
-      let endpoint = `${base_url}/customers/${customerId}`;
-      if (forcedBillType === "B2C") endpoint = `${base_url}/customersB2C/${customerId}`;
-      else if (custType === "DEALER" || custType === "SUPPLIER") endpoint = `${base_url}/customersDealer/${customerId}`;
-      const res = await fetch(endpoint);
-      if (!res.ok) return fallbackPhone;
-      const data = await res.json();
-      return data?.phoneNumber || data?.phone || data?.customerNumber || fallbackPhone;
-    } catch {
-      return fallbackPhone;
-    }
-  };
-  const handleWhatsAppShare = async (bill) => {
-    setSharingBillId(bill._id);
-    try {
-      const billType = resolveDisplayTypeFromContext(bill, customer);
-      const custName = bill.customerName || customer?.customerName || "Customer";
-      const billNo = formatMainBillNo(bill.billNo || bill.invoiceNo) || "N/A";
-      const date = bill.date || (bill.createdAt ? new Date(bill.createdAt).toLocaleDateString() : "N/A");
-      const bal = getBalanceFromBill(bill);
-      const issue = num(bill.issuePure ?? bill.totalIssueWeight);
-      const receipt = num(bill.receiptPure ?? bill.totalReceiptWeight);
+        customer?.id ||
+        customer?._id ||
+        customer?.customerId ||
+        transactions?.[0]?.customerId ||
+        "";
 
-      const balanceLine =
-        bal.label === "OB"
-          ? `Old Balance  : ${bal.value.toFixed(3)} g`
-          : bal.label === "AB"
-            ? `Adv Balance  : ${bal.value.toFixed(3)} g`
-            : "Balance      : 0.000 g";
+      if (!customerId) {
+        Alert.alert("Error", "Customer ID is missing. Please select a valid customer and try again.");
+        return;
+      }
 
-      const message = [
-        "NTJ Jewellery Bill Summary",
-        `Customer     : ${custName}` ,
-        `Bill No      : ${billNo}` ,
-        `Date         : ${date}` ,
-        `Type         : ${billType}` ,
-        `Issue Pure   : ${issue.toFixed(3)} g` ,
-        `Receipt Pure : ${receipt.toFixed(3)} g` ,
-        balanceLine,
-      ].join("\n");
+      const billNo = resolveBillNoForDisplay(
+        customer?.billNo ||
+        transactions?.[0]?.billNo ||
+        customer?.invoiceNo ||
+        transactions?.[0]?.invoiceNo,
+        billType
+      );
 
-      const html = `<html><body style="font-family:Arial;padding:20px;font-size:14px;">
-        <h2 style="text-align:center;">NTJ Jewellery Bill Summary</h2>
-        <hr/>
-        <p><b>Customer:</b> ${custName}</p>
-        <p><b>Bill No:</b> ${billNo}</p>
-        <p><b>Date:</b> ${date}</p>
-        <p><b>Type:</b> ${billType}</p>
-        <hr/>
-        <p><b>Issue Pure:</b> ${issue.toFixed(3)} g</p>
-        <p><b>Receipt Pure:</b> ${receipt.toFixed(3)} g</p>
-        <p><b>${balanceLine}</b></p>
-      </body></html>`;
+      const b2cItems = normalizedB2CItems;
+      const b2cIssueRows = b2cItems.map((it) => {
+        const weight = toNum(it?.weight, 0);
+        const touch = toNum(it?.touch, 0);
+        const wastage = toNum(it?.wastage, 0);
+        const rate = toNum(it?.rate, 0);
+        const total = toNum(it?.total, 0);
+        const gstValue = toNum(it?.gst, 0);
+        const finalValue = toNum(it?.final, total);
+        const pure = toNum(it?.pure, (weight * touch) / 100);
+        const displayName = it?.displayItemName || it?.itemName || "";
+        return {
+          name: displayName,
+          itemName: it?.itemName || displayName,
+          displayItemName: displayName,
+          weight,
+          touch,
+          wastage,
+          rate,
+          total,
+          gst: gstValue,
+          final: finalValue,
+          gross: weight.toFixed(3),
+          m: wastage.toFixed(3),
+          net: weight.toFixed(3),
+          calc: touch.toFixed(3),
+          pure: pure.toFixed(3),
+        };
+      });
+      const b2cReceiptRows = normalizedB2CReceiptItems.map((it) => ({
+        name: it?.name || "",
+        weight: toNum(it?.weight, 0).toFixed(3),
+        sub: toNum(it?.sub, 0).toFixed(3),
+        netWeight: toNum(it?.netWeight, toNum(it?.result, toNum(it?.pure, 0))).toFixed(3),
+        rate: toNum(it?.rate, 0).toFixed(2),
+        amount: toNum(it?.amount, 0).toFixed(2),
+        // compatibility
+        result: toNum(it?.netWeight, toNum(it?.result, toNum(it?.pure, 0))).toFixed(3),
+        calc: toNum(it?.calc, 0).toFixed(3),
+        pure: toNum(it?.netWeight, toNum(it?.result, toNum(it?.pure, 0))).toFixed(3),
+      }));
+      const issueRowsToSave = isB2BBill ? safeIssueItems : b2cIssueRows;
+      const receiptRowsToSave = isB2BBill ? safeReceiptItems : b2cReceiptRows;
+      const totalIssueWeightToSave = isB2BBill
+        ? toNum(summary?.issue, toNum(totalIssuePure, 0))
+        : b2cIssueRows.reduce((sum, row) => sum + toNum(row?.pure, 0), 0);
+      const totalReceiptWeightToSave = isB2BBill
+        ? toNum(summary?.receipt, toNum(totalReceiptPure, 0))
+        : b2cReceiptRows.reduce((sum, row) => sum + toNum(row?.netWeight, 0), 0);
+      const oldBalanceForSave = isB2CBill
+        ? b2cNextOldBalance
+        : toNum(customer?.oldBalance, summaryOB);
+      const advanceBalanceForSave = isB2CBill
+        ? b2cNextAdvanceBalance
+        : toNum(customer?.advanceBalance, summaryAB);
+      const availableBalanceForSave = isB2CBill
+        ? toNum(oldBalanceForSave, 0) - toNum(advanceBalanceForSave, 0)
+        : toNum(summary?.current, toNum(displaySummary?.current, finalBalance));
 
-      const { uri } = await Print.printToFileAsync({ html, width: 204, height: 842 });
-      const phone = await getCustomerPhoneForBill(bill);
-      if (!phone) throw new Error("Customer WhatsApp number not found.");
+      const payload = {
+        customerId: String(customerId),
+        customerName: customer?.name || customer?.customerName || "Unknown",
+        ...(billNo ? { billNo: String(billNo) } : {}),
+        billType,
+        dealerType: isDealerPreview ? (customer?.type || customer?.customerType || previewTx?.dealerType || "Dealer") : "",
+        receiptImage: dealerProofImageUri || null,
+        proofImage: dealerProofImageUri || null,
+        image: dealerProofImageUri || null,
+        issueItems: issueRowsToSave,
+        receiptItems: receiptRowsToSave,
+        ...(isB2BBill ? {} : { items: b2cItems }),
+        totalIssueWeight: totalIssueWeightToSave,
+        totalReceiptWeight: totalReceiptWeightToSave,
+        cashAmount: toNum(report?.cash, toNum(displaySummary?.cash, toNum(summary?.cash, 0))),
+        kadaiAmount: isB2CBill ? Math.max(0, toNum(kadaiAmount, 0)) : 0,
+        manualCashAmount: isB2CBill ? b2cCashReceivedNum.toFixed(2) : (hasManualCashForB2C ? parsedCashAmount.toFixed(2) : ""),
+        upiAmount: hasManualCashForB2C ? parsedUpiAmount.toFixed(2) : "",
+        b2cUpiGoldValue: b2cConversion.applied ? b2cUpiGoldValue.toFixed(3) : "",
+        isConvertedToGold: Boolean(b2cConversion.applied || transactions?.[0]?.isConvertedToGold),
+        goldRate: toNum(customer?.goldRate, currentB2CGoldRate),
+        advanceBalance: advanceBalanceForSave,
+        oldBalance: oldBalanceForSave,
+        availableBalance: availableBalanceForSave,
+        currentBalance: availableBalanceForSave,
+        createdAt: new Date().toISOString(),
+        cashTable: safeCashTable,
+        summary,
+        gst,
+        ...(!isB2BBill && billNo ? { invoiceNo: String(billNo) } : {}),
+        date: (() => {
+          const d = customer?.date;
+          if (!d || typeof d !== 'string' || d.toLowerCase().includes('invalid')) return new Date().toISOString().split('T')[0];
+          if (d.includes('/')) return d.split("/").reverse().join("-");
+          if (d.includes('-')) {
+             const parts = d.split("-");
+             if (parts[0].length === 2) return parts.reverse().join("-");
+             return d;
+          }
+          return d;
+        })(),
+      };
 
-      const cleanPhone = String(phone).replace(/[^0-9]/g, "");
-      const waPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-      const waUrl = `whatsapp://send?phone=${waPhone}&text=${encodeURIComponent(message)}`;
-      await Linking.openURL(waUrl).catch(async () => {
-        const webUrl = `https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`;
-        await Linking.openURL(webUrl);
+      if (isB2CBill) {
+        const customerEndpoint = `${base_url}/customersB2C/${customerId}`;
+        const currentRes = await fetch(customerEndpoint);
+        const currentData = currentRes.ok ? await currentRes.json() : {};
+        const updatedCustomer = {
+          ...currentData,
+          oldBalance: toNum(oldBalanceForSave, 0).toFixed(3),
+          advanceBalance: toNum(advanceBalanceForSave, 0).toFixed(3),
+          currentBalance: toNum(availableBalanceForSave, 0).toFixed(3),
+          availableBalance: toNum(availableBalanceForSave, 0).toFixed(3),
+        };
+        const updateRes = await fetch(customerEndpoint, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedCustomer),
+        });
+        if (!updateRes.ok) {
+          const err = await updateRes.text();
+          throw new Error(err || "Failed to update B2C customer old balance");
+        }
+      }
+
+      const res = await fetch(`${base_url}/billSummary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(uri, {
-          mimeType: "application/pdf",
-          dialogTitle: `Bill ${billNo}`,
-          UTI: ".pdf",
-        });
-      } else {
-        await Share.share({ message, title: `Bill ${billNo}` });
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(err || "Failed to save bill");
       }
+
+      Alert.alert("Success", "Bill saved successfully");
     } catch (error) {
-      console.error("WhatsApp share failed:", error);
-      Alert.alert("Error", `Failed to open WhatsApp share: ${error.message || "Unknown error"}`);
-    } finally {
-      setSharingBillId(null);
+      console.error("Save Bill error:", error);
+      Alert.alert("Error", `Failed to save bill: ${error.message}`);
     }
   };
 
-  // ── BALANCE DISPLAY HELPER ─────────────────────────────────────────
-  const getBalanceDisplay = (item) => {
-    const bal = getBalanceFromBill(item);
-    return bal.label ? { label: bal.label, value: bal.value } : null;
-  };
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      style={{ flex: 1, backgroundColor: '#fff' }}
+    >
+      <View style={{ flex: 1 }}>
+        {/* FIXED HEADER BAR */}
+        {!isPrinting && (
+          <View style={styles.buttonContainer}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <TouchableOpacity style={styles.headerBtn} onPress={() => {
+                if (customer && (customer.customerId || customer.id) && !items) {
+                  navigation.navigate("BillHistory", { customer: customer });
+                } else {
+                  navigation.navigate(order ? "Order" : estimate ? "Estimate" : isB2C ? "B2CCalculationPage" : "B2BCalculationPage" );
+                }
+              }}>
+                <Icon name="arrow-left" size={22} color="#1E88E5" />
+              </TouchableOpacity>
 
-  // ── RENDER CARD ─────────────────────────────────────────────────────
-  const renderBillItem = ({ item }) => {
-    const activityDate = item.updatedAt || item.createdAt || null;
-    const activityDateObj = activityDate ? new Date(activityDate) : null;
-    const createdDate = activityDateObj
-      ? activityDateObj.toLocaleDateString()
-      : item.date || "N/A";
-    const createdTime = activityDateObj
-      ? activityDateObj.toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: true,
-        })
-      : "N/A";
-    const gstBill = isGstBill(item);
-    const itemType = gstBill ? "GST" : resolveDisplayTypeFromContext(item, customer);
-    const billNumber = item.billNo || item.invoiceNo || "00000";
-    const balanceDisplay = getBalanceDisplay(item);
-    const isSharing = sharingBillId === item._id;
-    const displayCustomerName = item.customerName || customer?.customerName || customer?.name || "N/A";
-    const displayPhone = item.phoneNumber || item.phone || customer?.phoneNumber || customer?.phone || "N/A";
-    const displayGstin = item.gstin || customer?.gstin || "N/A";
-    const displayTotalAmount = resolveBillTotalAmount(item);
+              <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate("Home")}>
+                <Icon name="home" size={22} color="#1E88E5" />
+              </TouchableOpacity>
 
-    return (
-      <View style={styles.billCard}>
-        {/* ── Tappable area (view full bill) ── */}
-        <TouchableOpacity onPress={() => handleViewBill(item)} activeOpacity={0.8}>
-          <View style={styles.billHeader}>
-            <Text style={styles.billDate}>Date: {createdDate}  Time: {createdTime}</Text>
-            <Text style={styles.billType}>{itemType}</Text>
-            <View style={styles.billNoBadge}>
-              <Text style={styles.billNoText}>
-                Bill No: {billNumber}
-              </Text>
+              <TouchableOpacity style={styles.headerBtn} onPress={handlePrint}>
+                <Icon name="printer" size={22} color="#1E88E5" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={[styles.actionIcon, isSharing && { opacity: 0.5 }]}
+                onPress={openDirectWhatsApp}
+                disabled={isSharing}
+              >
+                <Icon name="whatsapp" size={24} color="#25D366" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionIcon, isSharing && { opacity: 0.5 }]}
+                onPress={handleWhatsAppShare}
+                disabled={isSharing}
+              >
+                <Icon name="share-variant" size={24} color="#1E88E5" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionIcon, isSharing && { opacity: 0.5 }]}
+                onPress={handleDownload}
+                disabled={isSharing}
+              >
+                <Icon name="download" size={24} color="#1E88E5" />
+              </TouchableOpacity>
             </View>
           </View>
+        )}
 
-          {gstBill ? (
-            <View style={styles.gstInfoBox}>
-              <Text style={styles.gstInfoText}>Customer: {displayCustomerName}</Text>
-              <Text style={styles.gstInfoText}>Phone: {displayPhone}</Text>
-              <Text style={styles.gstInfoText}>GST No: {displayGstin}</Text>
-              <Text style={styles.gstInfoText}>
-                Total Amount: ₹{Number(displayTotalAmount || 0).toFixed(2)}
-              </Text>
-            </View>
-          ) : null}
-
-          {balanceDisplay ? (
-            <View style={styles.balanceRow}>
-              <Text
-                style={[
-                  styles.balanceLabel,
-                  balanceDisplay.label === "OB" ? styles.obLabel : styles.abLabel,
-                ]}
-              >
-                {balanceDisplay.label === "OB" ? "Old Balance" : "Advance Balance"}
-              </Text>
-              <Text
-                style={[
-                  styles.balanceValue,
-                  balanceDisplay.label === "OB" ? styles.obValue : styles.abValue,
-                ]}
-              >
-                {balanceDisplay.value.toFixed(3)} g
-              </Text>
-            </View>
-          ) : null}
-
-          <Text style={styles.billDescription}>
-            {item.description ||
-              (item.issueItems?.length > 0
-                ? `${item.issueItems.length} item(s)`
-                : "Transaction details")}
-          </Text>
-        </TouchableOpacity>
-
-        {/* ── Action Buttons ── */}
-        <View style={styles.actionRow}>
-          {/* View */}
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => handleViewBill(item)}
-          >
-            <Icon name="eye" size={16} color="#2196F3" />
-            <Text style={[styles.actionText, { color: "#2196F3" }]}>View</Text>
-          </TouchableOpacity>
-
-          {/* Delete */}
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => handleDeleteBill(item)}
-          >
-            <Icon name="delete" size={16} color="#F44336" />
-            <Text style={[styles.actionText, { color: "#F44336" }]}>Delete</Text>
-          </TouchableOpacity>
-
-          {/* Print */}
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => handlePrintBill(item)}
-          >
-            <Icon name="printer" size={16} color="#FF6F00" />
-            <Text style={[styles.actionText, { color: "#FF6F00" }]}>Print</Text>
-          </TouchableOpacity>
-
-          {/* Share */}
-          <TouchableOpacity
-            style={[styles.actionButton, isSharing && { opacity: 0.6 }]}
-            onPress={() => !isSharing && handleWhatsAppShare(item)}
-            disabled={isSharing}
-          >
-            {isSharing ? (
-              <ActivityIndicator size={16} color="#25D366" />
-            ) : (
-              <Icon name="share-variant" size={16} color="#25D366" />
-            )}
-            <Text style={[styles.actionText, { color: "#2E7D32" }]}>
-              {isSharing ? "..." : "Share"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-
-  // ── LOADING STATE ──────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loading}>
-          <ActivityIndicator size="large" color="#1B4D1B" />
-          <Text style={{ marginTop: 10, color: "#666" }}>
-            Loading bill history...
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ── MAIN RENDER ────────────────────────────────────────────────────
-  return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <CommonHeader
-        title="Bill History"
-        subtitle={customer?.customerName || "Unknown Customer"}
-        onBack={() => navigation.goBack()}
-        backgroundColor="#1B4D1B"
-        insideSafeArea
-        right={
-          <TouchableOpacity onPress={() => navigation.navigate("Home")}>
-            <Icon name="home-outline" size={26} color="#fff" />
-          </TouchableOpacity>
-        }
-      />
-
-      {/* Customer Balance Summary Card */}
-      <View style={styles.customerBalanceCard}>
-        <View style={styles.balanceInfo}>
-          <Text style={styles.customerNameMain}>
-            {customer?.customerName || customer?.name || "N/A"}
-          </Text>
-          <Text style={styles.shopNameText}>
-            {customer?.shopName || customer?.companyName || "No Shop Name"}
-          </Text>
-        </View>
-        <View style={styles.balanceBadgeContainer}>
-          {(Number(customer?.ob || 0) > 0 || !Number(customer?.ab || 0)) ? (
-            <View style={[styles.balanceBadge, styles.obBadge]}>
-              <Text style={styles.badgeLabel}>OB</Text>
-              <Text style={styles.badgeValue}>{Number(customer?.ob || 0).toFixed(3)}g</Text>
-            </View>
-          ) : (
-            <View style={[styles.balanceBadge, styles.abBadge]}>
-              <Text style={styles.badgeLabel}>AB</Text>
-              <Text style={styles.badgeValue}>{Number(customer?.ab || 0).toFixed(3)}g</Text>
+        <ScrollView
+          style={styles.page}
+          contentContainerStyle={{ flexGrow: 1, paddingBottom: 160 }}
+          showsVerticalScrollIndicator={true}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          nestedScrollEnabled={true}
+          bounces={true}
+        >
+          {/* TRANSFER BUTTONS FOR ESTIMATE */}
+          {estimate && (
+            <View style={styles.transferContainer}>
+              <TouchableOpacity style={styles.transferBtnB2B} onPress={handleTransferToB2B}>
+                <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 5 }} />
+                <Text style={styles.transferBtnText}>Transfer to B2B</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.transferBtnB2C} onPress={handleTransferToB2C}>
+                <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 5 }} />
+                <Text style={styles.transferBtnText}>Transfer to B2C</Text>
+              </TouchableOpacity>
             </View>
           )}
-        </View>
-      </View>
 
-      {/* Bill Number Search Bar */}
-      <View style={styles.searchBarWrapper}>
-        <Icon name="magnify" size={20} color="#666" style={{ marginRight: 8 }} />
-        <TextInput
-          style={styles.searchBarInput}
-          placeholder="Search by bill number..."
-          placeholderTextColor="#999"
-          value={billSearch}
-          onChangeText={setBillSearch}
-          clearButtonMode="while-editing"
-        />
-        {billSearch.length > 0 && (
-          <TouchableOpacity onPress={() => setBillSearch("")}>
-            <Icon name="close-circle" size={18} color="#999" />
-          </TouchableOpacity>
-        )}
-      </View>
+          <View style={styles.headerBox}>
+            <Text style={styles.billTitle}>{estimate ? 'ESTIMATE BILL' : suspense ? 'SUSPENSE BILL' : order ? 'ORDER RECEIPT' : 'BILL'}</Text>
 
-      {/* Date Filter Card */}
-      <View style={styles.filterCard}>
-        <Text style={styles.filterTitle}>Filter by Date</Text>
-        <View style={styles.dateRow}>
-          <View style={styles.dateField}>
-            <Text style={styles.dateLabel}>From</Text>
-            <TouchableOpacity
-              style={styles.inputWrapper}
-              onPress={() => setShowFromPicker(true)}
-            >
-              <Icon
-                name="calendar"
-                size={20}
-                color="#666"
-                style={{ marginRight: 8 }}
-              />
-              <Text style={[styles.dateText, !fromDate && { color: "#999" }]}>
-                {fromDate
-                  ? new Date(fromDate).toLocaleDateString()
-                  : "DD-MM-YYYY"}
-              </Text>
-            </TouchableOpacity>
-            {showFromPicker && (
-              <DateTimePicker
-                value={fromDate ? new Date(fromDate) : new Date()}
-                mode="date"
-                display="default"
-                onChange={(event, selectedDate) => {
-                  setShowFromPicker(false);
-                  if (selectedDate)
-                    setFromDate(selectedDate.toISOString().split("T")[0]);
-                }}
-              />
-            )}
+            <View style={styles.headerRow}>
+              <View style={styles.headerColLeft}>
+                {!estimate && !suspense && !order && <Text style={styles.headerText}>Bill No : {currentBillNo || 'N/A'}</Text>}
+                {order && <Text style={styles.headerText}>Order No : {order.orderNo}</Text>}
+                <Text style={styles.headerText}>Name : {estimate ? (estimate.itemName || "Estimate Customer") : order ? order.customer : customer.name}</Text>
+                {!estimate && <Text style={styles.headerText}>Phone : {order ? order.phone : (customer.phone || customer.phoneNumber || customer.customerNumber || 'N/A')}</Text>}
+                <Text style={styles.headerText}>Address : {customer?.address || 'N/A'}</Text>
+                <Text style={styles.headerText}>GST No : {customer?.gstin || 'N/A'}</Text>
+              </View>
+
+              <View style={styles.headerColRight}>
+                <Text style={[styles.headerText, styles.headerTextRight]}>Type : {estimate ? 'Estimate' : order ? 'Order' : customer.type}</Text>
+                <Text style={[styles.headerText, styles.headerTextRight]}>Date : {estimate ? new Date().toLocaleDateString() : order ? order.date : customer.date}</Text>
+                {estimate ? (
+                  <Text style={[styles.headerText, styles.headerTextRight]}>OD : N/A</Text>
+                ) : (
+                  <>
+                    {customer.oldBalance && parseFloat(customer.oldBalance) !== 0 ? (
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Old Balance : {customer.oldBalance}</Text>
+                    ) : null}
+                    {customer.advanceBalance && parseFloat(customer.advanceBalance) !== 0 ? (
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Advance Balance : {customer.advanceBalance}</Text>
+                    ) : null}
+                    {isB2C && customer.advanceBalance && parseFloat(customer.advanceBalance) !== 0 && toNum(b2cGoldRateAtPurchase, 0) > 0 ? (
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Gold Rate (Past) : {"\u20B9"}{toNum(b2cGoldRateAtPurchase).toFixed(2)}/g</Text>
+                    ) : null}
+                    {isB2C && homeGoldRateNum > 0 ? (
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Gold Rate Today : {"\u20B9"}{toNum(homeGoldRateNum).toFixed(2)}/g</Text>
+                    ) : null}
+                  </>
+                )}
+              </View>
+            </View>
           </View>
 
-          <View style={styles.dateField}>
-            <Text style={styles.dateLabel}>To</Text>
-            <TouchableOpacity
-              style={styles.inputWrapper}
-              onPress={() => setShowToPicker(true)}
-            >
-              <Icon
-                name="calendar"
-                size={20}
-                color="#666"
-                style={{ marginRight: 8 }}
+          {!estimate && !suspense && !order && !isB2C && isDealerPreview && dealerProofImageUri ? (
+            <View style={styles.sectionBox}>
+              <Text style={styles.sectionTitle}>RECEIPT PROOF :</Text>
+              <Image
+                source={{ uri: dealerProofImageUri }}
+                style={{ width: "100%", height: 170, borderRadius: 8, borderWidth: 1, borderColor: "#ddd" }}
+                resizeMode="cover"
               />
-              <Text style={[styles.dateText, !toDate && { color: "#999" }]}>
-                {toDate
-                  ? new Date(toDate).toLocaleDateString()
-                  : "DD-MM-YYYY"}
+            </View>
+          ) : null}
+
+          {estimate ? (
+            <>
+              {/* ESTIMATE DETAILS */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ESTIMATE DETAILS :</Text>
+
+                {/* Table Header */}
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.cell, { flex: 2 }]}>Item Name</Text>
+                  <Text style={styles.cell}>Wt (g)</Text>
+                  <Text style={styles.cell}>W%</Text>
+                  <Text style={styles.cell}>Gross Wt</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Net Amt</Text>
+                  {estimate.enableGST && <Text style={styles.cell}>GST</Text>}
+                  <Text style={styles.cell}>Total</Text>
+                </View>
+
+                {/* Multi-item list OR single-item fallback */}
+                {estimate.items && estimate.items.length > 0
+                  ? estimate.items.map((item, idx) => (
+                    <View key={item.id || idx} style={styles.tableRow}>
+                      <Text style={[styles.cell, { flex: 2 }]}>{item.itemName}</Text>
+                      <Text style={styles.cell}>{item.weight}</Text>
+                      <Text style={styles.cell}>{item.wastagePercent}</Text>
+                      <Text style={styles.cell}>{item.grossWeight}</Text>
+                      <Text style={styles.cell}>{formatIndianNumber(item.goldRate)}</Text>
+                      <Text style={styles.cell}>â‚¹{formatIndianNumber(item.netAmount)}</Text>
+                      {estimate.enableGST && <Text style={styles.cell}>â‚¹{formatIndianNumber(item.gst)}</Text>}
+                      <Text style={[styles.cell, { fontWeight: 'bold' }]}>â‚¹{formatIndianNumber(item.totalAmount)}</Text>
+                    </View>
+                  ))
+                  : (
+                    <View style={styles.tableRow}>
+                      <Text style={[styles.cell, { flex: 2 }]}>{estimate.itemName}</Text>
+                      <Text style={styles.cell}>{estimate.weight}</Text>
+                      <Text style={styles.cell}>{estimate.wastagePercent || 0}</Text>
+                      <Text style={styles.cell}>{estimate.grossWeight}</Text>
+                      <Text style={styles.cell}>{formatIndianNumber(estimate.goldRate)}</Text>
+                      <Text style={styles.cell}>â‚¹{formatIndianNumber(estimate.netAmount)}</Text>
+                      {estimate.enableGST && <Text style={styles.cell}>â‚¹{formatIndianNumber(estimate.gst || 0)}</Text>}
+                      <Text style={[styles.cell, { fontWeight: 'bold' }]}>â‚¹{formatIndianNumber(estimate.totalAmount)}</Text>
+                    </View>
+                  )
+                }
+              </View>
+
+              {estimateGSTEnabled && (
+                <View style={styles.sectionBox}>
+                  <Text style={styles.sectionTitle}>GST SUMMARY :</Text>
+                  <View style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>Subtotal</Text>
+                    <Text style={[styles.cell, { flex: 2 }]}>{"\u20B9"}{estimateSubTotal.toFixed(2)}</Text>
+                  </View>
+                  <View style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>GST Percentage</Text>
+                    <Text style={[styles.cell, { flex: 2 }]}>{estimateGstPercent.toFixed(2)}%</Text>
+                  </View>
+                  <View style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>GST Amount</Text>
+                    <Text style={[styles.cell, { flex: 2 }]}>{"\u20B9"}{estimateGstAmount.toFixed(2)}</Text>
+                  </View>
+                  <View style={[styles.tableRow, { backgroundColor: '#f0f0f0' }]}>
+                    <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>Final Total (Incl. GST)</Text>
+                    <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>{"\u20B9"}{estimateFinalTotal.toFixed(2)}</Text>
+                  </View>
+                </View>
+              )}
+              {/* ESTIMATE GRAND TOTAL */}
+              <View style={styles.estimateTotalBox}>
+                <Text style={styles.estimateTotalLabel}>TOTAL ESTIMATE AMOUNT</Text>
+                <Text style={styles.estimateTotalValue}>
+                  {"\u20B9"}{formatIndianNumber(estimateFinalTotal)}
+                </Text>
+              </View>
+            </>
+          ) : suspense ? (
+            <>
+              {/* SUSPENSE DETAILS */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ISSUE ITEMS :</Text>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.cell, { flex: 2 }]}>Item</Text>
+                  <Text style={styles.cell}>Wght</Text>
+                  <Text style={styles.cell}>Qty</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Pure</Text>
+                  <Text style={styles.cell}>Amt</Text>
+                </View>
+                {suspense.issueItems.map((item, idx) => (
+                  <View key={idx} style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>{item.name}</Text>
+                    <Text style={styles.cell}>{item.weight.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.count}</Text>
+                    <Text style={styles.cell}>{item.rate}</Text>
+                    <Text style={styles.cell}>{item.pure.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.amount.toFixed(2)}</Text>
+                  </View>
+                ))}
+                <View style={[styles.tableRow, { backgroundColor: '#f0f0f0' }]}>
+                  <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>Total</Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalIssuePure.toFixed(3)}</Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalIssueAmount.toFixed(2)}</Text>
+                </View>
+              </View>
+
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>RECEIPT ITEMS :</Text>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.cell, { flex: 2 }]}>Item</Text>
+                  <Text style={styles.cell}>Wght</Text>
+                  <Text style={styles.cell}>Qty</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Pure</Text>
+                  <Text style={styles.cell}>Amt</Text>
+                </View>
+                {suspense.receiptItems.map((item, idx) => (
+                  <View key={idx} style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>{item.name}</Text>
+                    <Text style={styles.cell}>{item.weight.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.count}</Text>
+                    <Text style={styles.cell}>{item.rate}</Text>
+                    <Text style={styles.cell}>{item.pure.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.amount.toFixed(2)}</Text>
+                  </View>
+                ))}
+                <View style={[styles.tableRow, { backgroundColor: '#f0f0f0' }]}>
+                  <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>Total</Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalReceiptPure.toFixed(3)}</Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalReceiptAmount.toFixed(2)}</Text>
+                </View>
+              </View>
+
+              <View style={styles.cashBox}>
+                <Text style={styles.sectionTitle}>SUMMARY :</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                  <Text style={{ fontWeight: 'bold' }}>Net Pure Gold:</Text>
+                  <Text style={{ fontWeight: 'bold', color: suspense.netPure >= 0 ? '#D32F2F' : '#2E7D32' }}>{suspense.netPure.toFixed(3)} g</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ fontWeight: 'bold' }}>Net Amount:</Text>
+                  <Text style={{ fontWeight: 'bold' }}>â‚¹{suspense.netAmount.toFixed(2)}</Text>
+                </View>
+              </View>
+            </>
+          ) : order ? (
+            <>
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ORDER DETAILS :</Text>
+                <View style={{ padding: 10, flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Order No: {order.orderNo}</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Item: {order.type}</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Weight: {order.weight} GMS</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Payment: {order.payment}</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Pending Balance: â‚¹{order.balance}</Text>
+                  </View>
+                  {order.image && (
+                    <View style={{ width: 120, height: 120, borderRadius: 10, overflow: 'hidden', backgroundColor: '#f9f9f9', borderWidth: 1, borderColor: '#eee' }}>
+                      <Image
+                        source={{ uri: order.image.startsWith('data:') || order.image.startsWith('http') ? order.image : `${base_url}/${order.image}` }}
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="cover"
+                      />
+                    </View>
+                  )}
+                </View>
+              </View>
+
+
+
+              <View style={styles.kuralContainer}>
+                <Text style={styles.kuralText}>{thirukkural}</Text>
+                <Text style={styles.visitAgainText}>Thank you for choosing NJT Jewellery!</Text>
+              </View>
+            </>
+          ) : isB2C ? (
+            <>
+              {/* B2C ITEMS */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ITEMS :</Text>
+
+                <View style={styles.tableHeader}>
+                  <Text style={styles.cell}>Item</Text>
+                  <Text style={styles.cell}>Weight</Text>
+                  <Text style={styles.cell}>Touch</Text>
+                  <Text style={styles.cell}>W/M</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Total</Text>
+                  <Text style={styles.cell}>GST</Text>
+                  <Text style={styles.cell}>Final</Text>
+                </View>
+
+                {normalizedB2CItems.length > 0 ? (
+                  normalizedB2CItems.map((item, i) => (
+                    <View key={i} style={styles.tableRow}>
+                      <Text style={styles.cell}>{item.displayItemName || item.itemName}</Text>
+                      <Text style={styles.cell}>{item.weight}</Text>
+                      <Text style={styles.cell}>{item.touch}</Text>
+                      <Text style={styles.cell}>{item.wastage}</Text>
+                      <Text style={styles.cell}>{item.rate}</Text>
+                      <Text style={styles.cell}>{item.total}</Text>
+                      <Text style={styles.cell}>{item.gst}</Text>
+                      <Text style={styles.cell}>{item.final}</Text>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.noData}>No items</Text>
+                )}
+              </View>
+
+              {/* B2C RECEIPT / OLD GOLD ITEMS */}
+              {normalizedB2CReceiptItems.length > 0 && (
+                <View style={styles.sectionBox}>
+                  <Text style={styles.sectionTitle}>RECEIPT / OLD GOLD :</Text>
+
+                  <View style={styles.tableHeader}>
+                    <Text style={styles.cell}>Item</Text>
+                    <Text style={styles.cell}>Wt</Text>
+                    <Text style={styles.cell}>Sub</Text>
+                    <Text style={styles.cell}>Net Wt</Text>
+                    <Text style={styles.cell}>Rate</Text>
+                    <Text style={styles.cell}>Amt</Text>
+                  </View>
+
+                  {normalizedB2CReceiptItems.map((item, i) => (
+                    <View key={i} style={styles.tableRow}>
+                      <Text style={styles.cell}>{item.name}</Text>
+                      <Text style={styles.cell}>{item.weight}</Text>
+                      <Text style={styles.cell}>{item.sub}</Text>
+                      <Text style={styles.cell}>{item.netWeight}</Text>
+                      <Text style={styles.cell}>{item.rate}</Text>
+                      <Text style={styles.cell}>{item.amount}</Text>
+                    </View>
+                  ))}
+
+                  <View style={styles.totalRow}>
+                    <Text style={styles.totalCell}>Total Old Gold Amount:</Text>
+                    <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>
+                      â‚¹{totalB2COldGoldAmount.toFixed(2)}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* B2C CASH RECEIVED */}
+              {safeCashTable && safeCashTable.length > 0 && (
+                <View style={styles.sectionBox}>
+                  <Text style={styles.sectionTitle}>CASH RECEIVED :</Text>
+
+                  <View style={styles.tableHeader}>
+                    <Text style={styles.cell}>Rupees</Text>
+                    <Text style={styles.cell}>FT Rate</Text>
+                    <Text style={styles.cell}>Pure</Text>
+                  </View>
+
+                  {safeCashTable.map((entry, i) => (
+                    <View key={i} style={styles.tableRow}>
+                      <Text style={styles.cell}>{entry.rupees}</Text>
+                      <Text style={styles.cell}>{entry.goldRate}</Text>
+                      <Text style={styles.cell}>{entry.pure}</Text>
+                    </View>
+                  ))}
+
+                  <View style={styles.totalRow}>
+                    <Text style={styles.totalCell}>Total Cash Pure:</Text>
+                    <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>
+                      {safeCashTable.reduce((sum, c) => sum + toNum(c?.pure, 0), 0).toFixed(3)} g
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* GST */}
+              {gst && gst.enabled && (
+                <View style={styles.cashBox}>
+                  <Text style={styles.sectionTitle}>GST :</Text>
+                  <Text>GST Percentage: {gst.percentage}%</Text>
+                  <Text>GST Amount: ₹{gst.amount}</Text>
+                </View>
+              )}
+
+              {/* Professional B2C Total Summary Card */}
+              <View style={styles.b2cProfessionalCard}>
+                <View style={styles.b2cCardHeader}>
+                  <Icon name="sigma" size={20} color="#1B4D1B" />
+                  <Text style={styles.b2cCardTitle}>TOTAL SUMMARY</Text>
+                </View>
+
+                <View style={styles.b2cCardBody}>
+                  <View style={styles.b2cNormalRow}>
+                    <View style={styles.b2cRowLeft}>
+                      <Text style={styles.b2cLabel}>Total Cash Amount</Text>
+                    </View>
+                    <View style={styles.b2cRowRight}>
+                      <Text style={styles.b2cValue} numberOfLines={1}>
+                        {"\u20B9"} {toNum(b2cTotalCashAmount).toFixed(2)}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.b2cNormalRow}>
+                    <View style={styles.b2cRowLeft}>
+                      <Text style={styles.b2cLabel}>{b2cBalanceLabel}</Text>
+                      <Text style={styles.b2cFormulaText} numberOfLines={2}>
+                        ({toNum(b2cBalanceWeight).toFixed(3)} g x {"\u20B9"} {toNum(currentB2CGoldRate).toFixed(2)}/g)
+                      </Text>
+                    </View>
+                    <View style={styles.b2cRowRight}>
+                      <Text style={styles.b2cValue} numberOfLines={1}>
+                        {b2cHasAdvanceBalance ? "- " : ""}{"\u20B9"} {Math.abs(toNum(b2cBalanceRupees)).toFixed(2)}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.b2cHighlightRow}>
+                    <View style={styles.b2cRowLeft}>
+                      <Text style={styles.b2cHighlightLabel}>Final Payable Amount</Text>
+                    </View>
+                    <View style={styles.b2cRowRight}>
+                      <Text style={styles.b2cHighlightValue} numberOfLines={1}>
+                        {"\u20B9"} {toNum(b2cFinalPayableAmount).toFixed(2)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Cash Table */}
+                  <View style={styles.b2cCashTable}>
+                    <View style={styles.b2cCashRow}>
+                      <View style={styles.b2cCashCol}>
+                        <Text style={styles.b2cCashLabel}>Cash Received</Text>
+                        <TextInput
+                          style={styles.b2cCashInput}
+                          value={b2cCashReceived}
+                          onChangeText={setB2cCashReceived}
+                          keyboardType="numeric"
+                          placeholder="0.00"
+                          placeholderTextColor="#9aa0a6"
+                        />
+                      </View>
+                      <View style={styles.b2cCashCol}>
+                        <Text style={styles.b2cCashLabel}>Balance</Text>
+                        <View style={styles.b2cCashReadOnly}>
+                          <Text style={styles.b2cCashValue} numberOfLines={1}>
+                            {"\u20B9"} {toNum(b2cBalanceAfterCash).toFixed(2)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={styles.b2cNormalRow}>
+                      <View style={styles.b2cRowLeft}>
+                        <Text style={styles.b2cLabel}>Balance in grams</Text>
+                        <Text style={styles.b2cFormulaText} numberOfLines={2}>
+                          ({"\u20B9"} {toNum(b2cBalanceAfterCash).toFixed(2)} / {"\u20B9"} {toNum(currentB2CGoldRate).toFixed(2)}/g)
+                        </Text>
+                      </View>
+                      <View style={styles.b2cRowRight}>
+                        <Text style={styles.b2cValue} numberOfLines={1}>
+                          {toNum(b2cBalanceAfterCashGrams).toFixed(3)} g
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.b2cNormalRow}>
+                      <View style={styles.b2cRowLeft}>
+                        <Text style={styles.b2cLabel}>Current Balance</Text>
+                      </View>
+                      <View style={styles.b2cRowRight}>
+                        <Text style={styles.b2cValue} numberOfLines={1}>
+                          {toNum(b2cBalanceAfterCashGrams).toFixed(3)} g
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+
+                </View>
+              </View>
+
+              {false && (
+              <View style={styles.b2cInputSection}>
+                <View style={styles.b2cInputWrapper}>
+                  <Text style={styles.b2cInputLabel}>Payment Method</Text>
+                  <View style={styles.paymentSelectorContainer}>
+                    <ScrollView 
+                      horizontal 
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.paymentSelectorScroll}
+                    >
+                      {['Cash', 'GPay', 'PhonePe', 'Paytm', 'Bank Transfer', 'Card', 'Mixed', 'Other'].map((method) => (
+                        <TouchableOpacity 
+                          key={method}
+                          style={[
+                            styles.paymentOptionCompact, 
+                            additionalPhone === method && styles.paymentOptionActive
+                          ]} 
+                          onPress={() => setAdditionalPhone(method)}
+                        >
+                          <Text style={[
+                            styles.paymentOptionTextCompact,
+                            additionalPhone === method && styles.paymentOptionTextActive
+                          ]}>{method}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+
+                  {additionalPhone === 'Other' && (
+                    <View style={{ marginTop: 10 }}>
+                      <TextInput
+                        style={styles.b2cInputField}
+                        placeholder="Enter custom payment method"
+                        value={customPayment}
+                        onChangeText={(txt) => {
+                          setCustomPayment(txt);
+                          // Optionally also set upiAmount if this is used as a amount field in some contexts,
+                          // but usually it's just a method name.
+                          // However, UI shows upiAmount is used for conversion later.
+                        }}
+                      />
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.b2cInputWrapper}>
+                  <Text style={styles.b2cInputLabel}>Cash Amount</Text>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TextInput
+                      style={[styles.b2cInputField, { flex: 1 }]}
+                      placeholder="Enter cash amount"
+                      keyboardType="numeric"
+                      value={cashAmount}
+                      onChangeText={setCashAmount}
+                    />
+                    <TouchableOpacity 
+                      style={[styles.b2cActionButton, { backgroundColor: '#37474f', paddingHorizontal: 15, height: 50, marginTop: 0, elevation: 0 }]} 
+                      onPress={() => setCashAmount(toNum(displayB2CTotalAmount).toFixed(2))}
+                    >
+                      <Text style={[styles.b2cActionButtonText, { fontSize: 13 }]}>Balance Amount</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Conversion Line */}
+                <View style={styles.b2cConversionLineContainer}>
+                  <Text style={styles.b2cConversionLineText}>
+                    {`${toNum(upiAmount || displayB2CTotalAmount).toFixed(2)} / ${toNum(currentB2CGoldRate).toFixed(0)} => ${toNum(toNum(upiAmount || displayB2CTotalAmount) / currentB2CGoldRate).toFixed(3)} g`}
+                  </Text>
+                </View>
+
+                {!(b2cConversion.applied || transactions?.[0]?.isConvertedToGold) && (
+                  <View style={styles.b2cActionButtonsRow}>
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <TouchableOpacity 
+                        style={[styles.b2cActionButton, { backgroundColor: '#2E7D32', flex: 1.2 }]} 
+                        onPress={handleConvertToGold}
+                      >
+                        <Icon name="swap-horizontal" size={20} color="#fff" />
+                        <Text style={[styles.b2cActionButtonText, { fontSize: 14 }]}>Convert to Gold</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={[styles.b2cActionButton, { backgroundColor: '#d32f2f', flex: 0.8 }]} 
+                        onPress={handleNullifyBalance}
+                      >
+                        <Icon name="close-circle-outline" size={20} color="#fff" />
+                        <Text style={[styles.b2cActionButtonText, { fontSize: 14 }]}>Null</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {upiAmount > 0 && (
+                      <TouchableOpacity 
+                        style={[styles.b2cActionButton, { backgroundColor: '#1565C0' }]} 
+                        onPress={() => setShowUpi(true)}
+                      >
+                        <Icon name="qrcode-scan" size={20} color="#fff" />
+                        <Text style={styles.b2cActionButtonText}>Generate QR Code</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
+              )}
+
+
+              {/* QR CODE */}
+              {false && showUpi && upiAmount > 0 && (
+                <View style={styles.qrContainer}>
+                  <Text style={styles.qrLabel}>UPI QR Code for ₹{upiAmount}</Text>
+                  <Text style={styles.upiIdText}>UPI ID: {upiId}</Text>
+                  <TouchableOpacity style={styles.changeUpiBtn} onPress={() => navigation.navigate('UPIControl')}>
+                    <Text style={styles.changeUpiText}>Change UPI ID</Text>
+                  </TouchableOpacity>
+                  <Image
+                    source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent("NTJ Jewellery")}&am=${upiAmount}&cu=INR`)}` }}
+                    style={{ width: 200, height: 200 }}
+                  />
+                  <TouchableOpacity style={styles.printQrBtn} onPress={handlePrintQR}>
+                    <Text style={styles.printQrText}>Print QR Code</Text>
+                  </TouchableOpacity>
+                </View >
+              )}
+
+              {/* Thirukkural Quote for B2C */}
+              <View style={styles.kuralContainer}>
+                <Text style={styles.kuralText}>{thirukkural}</Text>
+                <Text style={styles.visitAgainText}>Thank you for your visit. Please visit again.</Text>
+              </View>
+            </>
+          ) : (
+            <>
+              {/* ISSUE */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ISSUE :</Text>
+
+                <View style={styles.tableHeader}>
+                  <Text style={styles.cell}>Name</Text>
+                  <Text style={styles.cell}>G.Weight</Text>
+                  {showIssueMColumn && <Text style={styles.cell}>M</Text>}
+                  {showIssueNetWeightColumn && <Text style={styles.cell}>N.Weight</Text>}
+                  <Text style={styles.cell}>Calc</Text>
+                  <Text style={styles.cell}>Pure</Text>
+                </View>
+
+                {issueItems.map((row, i) => (
+                  <View key={i} style={styles.tableRow}>
+                    <Text style={styles.cell}>{row.name}</Text>
+                    <Text style={styles.cell}>{row.gross}</Text>
+                    {showIssueMColumn && <Text style={styles.cell}>{row.m}</Text>}
+                    {showIssueNetWeightColumn && <Text style={styles.cell}>{row.net}</Text>}
+                    <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
+                    <Text style={styles.cell}>{row.pure}</Text>
+                  </View>
+                ))}
+
+                {/* ISSUE TOTAL */}
+                <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
+                  <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalIssueTW}</Text>
+                  {showIssueNetWeightColumn && (
+                    <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalIssueNW}</Text>
+                  )}
+                  <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalIssuePure}</Text>
+                </View>
+              </View>
+
+              {/* RECEIPT */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>RECEIPT :</Text>
+
+                <View style={styles.tableHeader}>
+                  <Text style={styles.cell}>Name</Text>
+                  <Text style={styles.cell}>Weight</Text>
+                  <Text style={styles.cell}>Result</Text>
+                  <Text style={styles.cell}>Calc</Text>
+                  <Text style={styles.cell}>Pure</Text>
+                </View>
+
+                {receiptItems && receiptItems.length > 0 ? (
+                  receiptItems.map((row, i) => (
+                    <View key={i} style={styles.tableRow}>
+                      <Text style={styles.cell}>{row.name}</Text>
+                      <Text style={styles.cell}>{row.weight}</Text>
+                      <Text style={styles.cell}>{row.result}</Text>
+                      <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
+                      <Text style={styles.cell}>{row.pure}</Text>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.noData}>No receipt items</Text>
+                )}
+
+                {/* RECEIPT TOTAL */}
+                <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
+                  <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalReceiptTW}</Text>
+                  <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalReceiptNW}</Text>
+                  <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalReceiptPure}</Text>
+                </View>
+              </View>
+
+              {/* CASH */}
+              <View style={styles.cashBox}>
+                <Text style={styles.sectionTitle}>CASH :</Text>
+                {cashTable && cashTable.length > 0 ? (
+                  <View>
+                    <View style={styles.tableHeader}>
+                      <Text style={styles.cell}>Amount</Text>
+                      <Text style={styles.cell}>Rate</Text>
+                      <Text style={styles.cell}>Pure</Text>
+                    </View>
+                    {cashTable.map((cashEntry, i) => (
+                      <View key={i} style={styles.tableRow}>
+                        <Text style={styles.cell}>{cashEntry.rupees}</Text>
+                        <Text style={styles.cell}>{cashEntry.goldRate}</Text>
+                        <Text style={styles.cell}>{cashEntry.pure}</Text>
+                      </View>
+                    ))}
+                    <View style={styles.totalRow}>
+                      <Text style={styles.totalCell}>Total Cash Pure:</Text>
+                      <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>
+                        {cashTable.reduce((sum, c) => sum + parseFloat(c.pure || 0), 0).toFixed(3)}
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <Text>N/A</Text>
+                )}
+              </View>
+
+              {/* GST */}
+              {gst && gst.enabled && gst.showInBill !== false && (gst.igst > 0 || gst.cgst > 0 || gst.sgst > 0) && (
+                <View style={styles.cashBox}>
+                  <Text style={styles.sectionTitle}>GST BREAKDOWN :</Text>
+
+                  {/* Dynamic Display Logic */}
+                  {parseFloat(gst.igst) > 0 ? (
+                    // IGST Case
+                    <View>
+                      <Text>IGST {gst.igst}% : â‚¹{gst.amount}</Text>
+                    </View>
+                  ) : (parseFloat(gst.sgst) > 0 || parseFloat(gst.cgst) > 0) ? (
+                    // SGST + CGST Case
+                    <View>
+                      <Text>SGST {gst.sgst || 0}% : â‚¹{(parseFloat(gst.amount) / 2).toFixed(2)}</Text>
+                      <Text>CGST {gst.cgst || 0}% : â‚¹{(parseFloat(gst.amount) / 2).toFixed(2)}</Text>
+                    </View>
+                  ) : (
+                    // Fallback (Legacy or Total only)
+                    <View>
+                      <Text>GST Percentage: {gst.percentage}%</Text>
+                      <Text>GST Amount: â‚¹{gst.amount}</Text>
+                    </View>
+                  )}
+
+                  {(parseFloat(gst.igst) > 0 || parseFloat(gst.sgst) > 0) && (
+                    <Text style={{ marginTop: 4, fontWeight: 'bold' }}>Total GST Amount: â‚¹{gst.amount}</Text>
+                  )}
+                </View>
+              )}
+
+              {/* SUMMARY */}
+              <View style={styles.summaryBox}>
+                <Text style={styles.sectionTitle}>SUMMARY :</Text>
+
+                {/* Conditional rendering based on OB or AB */}
+                {summaryOB !== 0 ? (
+                  // OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | [Old Balance or Advance Balance]
+                  <>
+                    <View style={styles.summaryHeader}>
+                      <Text style={styles.sumCell}>Old Balance</Text>
+                      <Text style={styles.sumCell}>ISSUE</Text>
+                      <Text style={styles.sumCell}>RECEIPT</Text>
+                      <Text style={styles.sumCell}>CASH</Text>
+                      <Text style={styles.sumCell}>{toNum(displaySummary.current) >= 0 ? "Old Balance" : "Advance Balance"}</Text>
+                    </View>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.sumCell}>{summaryOB.toFixed(3)}</Text>
+                      <Text style={styles.sumCell}>{displaySummary.issue}</Text>
+                      <Text style={styles.sumCell}>{displaySummary.receipt}</Text>
+                      <Text style={styles.sumCell}>{displaySummary.cash}</Text>
+                      <Text style={styles.sumCell}>{toNum(displaySummary.current) >= 0 ? toNum(displaySummary.current).toFixed(3) : Math.abs(toNum(displaySummary.current)).toFixed(3)}</Text>
+                    </View>
+
+                    <View style={styles.finalSummaryRow}>
+                      <Text style={styles.sumCell}>
+                        {(summaryOB + toNum(displaySummary.issue)).toFixed(3)}
+                      </Text>
+                      <Text style={styles.sumCell}>-</Text>
+                      <Text style={styles.sumCell}>{displaySummary.receiptPlusCash}</Text>
+                      <Text style={styles.sumCell}>=</Text>
+                      <Text style={styles.sumCell}>{toNum(displaySummary.current) >= 0 ? toNum(displaySummary.current).toFixed(3) : Math.abs(toNum(displaySummary.current)).toFixed(3)}</Text>
+                    </View>
+                  </>
+                ) : (
+                  // AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | [Advance Balance or Old Balance]
+                  <>
+                    <View style={styles.summaryHeader}>
+                      <Text style={styles.sumCell}>ISSUE</Text>
+                      <Text style={styles.sumCell}>Advance Balance</Text>
+                      <Text style={styles.sumCell}>RECEIPT</Text>
+                      <Text style={styles.sumCell}>CASH</Text>
+                      <Text style={styles.sumCell}>{(summaryAB + toNum(displaySummary.receipt) + toNum(displaySummary.cash) - toNum(displaySummary.issue)) >= 0 ? "Advance Balance" : "Old Balance"}</Text>
+                    </View>
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.sumCell}>{displaySummary.issue}</Text>
+                      <Text style={styles.sumCell}>
+                        {summaryAB.toFixed(3)}
+                      </Text>
+                      <Text style={styles.sumCell}>{displaySummary.receipt}</Text>
+                      <Text style={styles.sumCell}>{displaySummary.cash}</Text>
+                      <Text style={styles.sumCell}>
+                        {(() => {
+                          const val = summaryAB + toNum(displaySummary.receipt) + toNum(displaySummary.cash) - toNum(displaySummary.issue);
+                          return Math.abs(val).toFixed(3);
+                        })()}
+                      </Text>
+                    </View>
+
+                    <View style={styles.finalSummaryRow}>
+                      <Text style={[styles.sumCell, { flex: 2.5 }]}>
+                        {summaryAB.toFixed(3)} + {displaySummary.receipt} + {displaySummary.cash} - {displaySummary.issue}
+                      </Text>
+                      <Text style={[styles.sumCell, { flex: 0.5 }]}>=</Text>
+                      <Text style={[styles.sumCell, { flex: 1 }]}>
+                        {(() => {
+                          const val = summaryAB + toNum(displaySummary.receipt) + toNum(displaySummary.cash) - toNum(displaySummary.issue);
+                          return Math.abs(val).toFixed(3);
+                        })()}
+                      </Text>
+                    </View>
+                  </>
+                )}
+              </View>
+            </>
+          )}
+
+          {/* B2B / B2C and Print Again Buttons */}
+          <View style={styles.transferContainer}>
+            {customer?.type === "B2B" ? (
+              <TouchableOpacity
+                style={styles.transferBtnB2B}
+                onPress={() => navigation.navigate("B2BCalculationPage", { printAgain: true, lastBill: route.params })}
+              >
+                <Icon name="file-document-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.transferBtnText}>B2B</Text>
+              </TouchableOpacity>
+            ) : customer?.type === "B2C" ? (
+              <TouchableOpacity
+                style={styles.transferBtnB2C}
+                onPress={handleTransferToB2C}
+              >
+                <Icon name="file-document-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.transferBtnText}>Transfer to B2C</Text>
+              </TouchableOpacity>
+            ) : customer?.type === "Estimate" ? (
+              <>
+                <TouchableOpacity
+                  style={styles.transferBtnB2B}
+                  onPress={handleTransferToB2B}
+                >
+                  <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.transferBtnText}>Transfer to B2B</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.transferBtnB2C}
+                  onPress={handleTransferToB2C}
+                >
+                  <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.transferBtnText}>Transfer to B2C</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+
+            <TouchableOpacity
+              style={[styles.transferBtnB2B, { backgroundColor: '#17a2b8' }]} // Teal for Print Again
+              onPress={handlePrint}
+            >
+              <Icon name="printer" size={20} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.transferBtnText}>Print Again</Text>
+            </TouchableOpacity>
+          </View>
+          
+
+          {/* Save Button */}
+          <View style={{ alignItems: 'center', marginTop: 10 }}>
+            <TouchableOpacity
+              style={styles.saveButton}
+              onPress={handleSaveBill}
+              activeOpacity={0.8}
+            >
+              <Icon name="content-save-outline" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>Save Bill</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* WhatsApp – Send A4 Bill PDF directly to customer chat */}
+          <View style={{ alignItems: 'center', marginTop: 10 }}>
+            <TouchableOpacity
+              style={[
+                styles.saveButton,
+                { backgroundColor: '#25D366', paddingHorizontal: 28 },
+                isSharing && { opacity: 0.6 },
+              ]}
+              onPress={sendA4BillViaWhatsApp}
+              disabled={isSharing}
+              activeOpacity={0.8}
+            >
+              <Icon name="whatsapp" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>
+                {isSharing ? 'Preparing PDF…' : 'Send Bill via WhatsApp'}
               </Text>
             </TouchableOpacity>
-            {showToPicker && (
-              <DateTimePicker
-                value={toDate ? new Date(toDate) : new Date()}
-                mode="date"
-                display="default"
-                onChange={(event, selectedDate) => {
-                  setShowToPicker(false);
-                  if (selectedDate)
-                    setToDate(selectedDate.toISOString().split("T")[0]);
-                }}
-              />
-            )}
           </View>
-        </View>
 
-        <TouchableOpacity
-          style={styles.searchBtn}
-          onPress={() => {
-            setLoading(true);
-            fetchBills();
-          }}
-        >
-          <Icon
-            name="magnify"
-            size={20}
-            color="#fff"
-            style={{ marginRight: 5 }}
-          />
-          <Text style={styles.searchBtnText}>Search History</Text>
-        </TouchableOpacity>
+          {/* Share Bill PDF (generic share sheet) */}
+          <View style={{ alignItems: 'center', marginTop: 10 }}>
+            <TouchableOpacity
+              style={[styles.saveButton, { backgroundColor: '#FF9800' }, isSharing && { opacity: 0.6 }]}
+              onPress={shareBillPdfOnly}
+              disabled={isSharing}
+              activeOpacity={0.8}
+            >
+              <Icon name="file-pdf-box" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>Share Bill PDF</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Bottom Home Button */}
+          <View style={styles.homeButtonWrapper}>
+            <TouchableOpacity
+              style={styles.homeButton}
+              onPress={() => navigation.navigate('Home')}
+              activeOpacity={0.8}
+            >
+              <Icon name="home-outline" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>Home</Text>
+            </TouchableOpacity>
+          </View>
+
+        </ScrollView>
       </View>
-
-      {filteredBills.length === 0 ? (
-        <View style={styles.noBills}>
-          <Icon name="file-document-outline" size={48} color="#ccc" />
-          <Text style={styles.noBillsText}>
-            {billSearch.trim()
-              ? `No bills found for "#${billSearch}".`
-              : "No bills found for this customer."}
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={filteredBills}
-          keyExtractor={(item, index) =>
-            item?._id?.toString() || index.toString()
-          }
-          renderItem={renderBillItem}
-          contentContainerStyle={styles.listContainer}
-        />
-      )}
-    </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F2F4F6" },
-  header: {
-    backgroundColor: "#1B4D1B",
-    paddingTop: 60,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    borderBottomLeftRadius: 25,
-    borderBottomRightRadius: 25,
-  },
-  headerRow: { flexDirection: "row", alignItems: "center" },
-  fileTitle: { color: "#fff", fontSize: 20, fontWeight: "bold" },
-  customerName: { color: "#FFD54F", fontSize: 14, marginTop: 4 },
-  loading: { flex: 1, justifyContent: "center", alignItems: "center" },
-  noBills: { flex: 1, justifyContent: "center", alignItems: "center", gap: 10 },
-  noBillsText: { fontSize: 15, color: "#666", textAlign: "center", paddingHorizontal: 30 },
-  listContainer: { padding: 10, paddingBottom: 30 },
+  page: { padding: 10, backgroundColor: "#fff", flex: 1, alignSelf: 'center', width: '100%', maxWidth: 350 },
 
-  // ── Search Bar ──
-  searchBarWrapper: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    marginHorizontal: 15,
-    marginTop: 14,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 46,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-  },
-  searchBarInput: { flex: 1, fontSize: 14, color: "#333" },
-
-  // ── Card ──
-  billCard: {
-    backgroundColor: "#fff",
-    marginVertical: 5,
-    borderRadius: 10,
-    padding: 15,
-    elevation: 2,
-  },
-  billHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 8,
-  },
-  billDate: { fontSize: 13, color: "#666" },
-  billType: { fontSize: 13, fontWeight: "bold", color: "#2E7D32" },
-  billNoBadge: {
-    backgroundColor: "#E8F5E9",
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderWidth: 1,
-    borderColor: "#A5D6A7",
-  },
-  billNoText: { fontSize: 11, fontWeight: "bold", color: "#1B4D1B" },
-
-  gstInfoBox: {
-    backgroundColor: "#F7FBFF",
-    borderWidth: 1,
-    borderColor: "#E3F2FD",
-    borderRadius: 8,
-    padding: 8,
-    marginBottom: 6,
-  },
-  gstInfoText: { fontSize: 12, color: "#455A64", marginBottom: 2 },
-
-  // ── Balance Row ──
-  balanceRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 6,
-  },
-  balanceLabel: { fontSize: 13, fontWeight: "600" },
-  balanceValue: { fontSize: 16, fontWeight: "bold" },
-  obLabel: { color: "#C62828" },
-  obValue: { color: "#C62828" },
-  abLabel: { color: "#1565C0" },
-  abValue: { color: "#1565C0" },
-
-  billDescription: { fontSize: 13, color: "#666", marginTop: 2 },
-
-  // ── Action Row ──
-  actionRow: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    marginTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#eee",
-    paddingTop: 10,
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  actionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 5,
-    backgroundColor: "#f5f5f5",
-    borderRadius: 6,
-    paddingHorizontal: 9,
-    gap: 4,
-  },
-  actionText: { fontSize: 12, fontWeight: "600" },
-
-  // ── Filter Card ──
-  filterCard: {
-    backgroundColor: "#fff",
-    margin: 15,
-    borderRadius: 15,
-    padding: 15,
-    elevation: 3,
-  },
-  filterTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#1B4D1B",
-    marginBottom: 10,
-  },
-  dateRow: { flexDirection: "row", justifyContent: "space-between", gap: 15 },
-  dateField: { flex: 1 },
-  dateLabel: {
-    fontSize: 13,
-    color: "#555",
-    marginBottom: 5,
-    fontWeight: "600",
-  },
-  inputWrapper: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F1F3F6",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    height: 45,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-  },
-  dateText: { flex: 1, fontSize: 14, color: "#333" },
-  searchBtn: {
-    backgroundColor: "#1B4D1B",
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: "center",
-    marginTop: 15,
-    flexDirection: "row",
-    justifyContent: "center",
-  },
-  searchBtnText: { color: "#fff", fontWeight: "bold", fontSize: 15 },
-
-  // ── Customer Balance Card ──
-  customerBalanceCard: {
-    backgroundColor: "#fff",
-    marginHorizontal: 15,
-    marginTop: 15,
-    borderRadius: 15,
-    padding: 15,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    paddingTop: Platform.OS === "ios" ? 50 : 40,
+    paddingBottom: 25,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
     elevation: 4,
-    shadowColor: "#000",
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
+    shadowRadius: 3,
+    zIndex: 10,
+  },
+
+  headerBtn: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F5',
+    top: 15,
+  },
+
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    top: 15,
+  },
+
+  actionIcon: {
+    padding: 8,
+  },
+
+  button: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#007bff', padding: 10, borderRadius: 5 },
+
+  buttonText: { color: '#fff', marginLeft: 5, fontWeight: 'bold' },
+
+  billTitle: { textAlign: "center", fontWeight: "bold", marginBottom: 5, fontSize: 14, textTransform: 'uppercase' },
+
+  headerBox: { padding: 5, marginBottom: 8, borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
+
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 4 },
+  headerColLeft: { flex: 1, paddingRight: 8 },
+  headerColRight: { flex: 1, paddingLeft: 8, alignItems: "flex-end" },
+  headerText: { flexShrink: 1, fontSize: 11, lineHeight: 16 },
+  headerTextRight: { textAlign: "right", alignSelf: "stretch" },
+
+  sectionBox: { marginBottom: 8 },
+
+  sectionTitle: { marginVertical: 4, fontWeight: "bold", fontSize: 11, alignSelf: 'flex-start', borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
+
+  tableHeader: { flexDirection: "row", borderBottomWidth: 1, borderTopWidth: 1, borderColor: '#000' },
+
+  tableRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000' },
+
+  cell: { flex: 1, textAlign: "center", paddingVertical: 4, paddingHorizontal: 1, fontSize: 8 },
+
+  cashBox: { padding: 5, marginBottom: 8, borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
+
+  summaryBox: { padding: 5, marginBottom: 8, borderTopWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
+
+  finalSummaryRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000', justifyContent: 'center' },
+
+  summaryHeader: { flexDirection: "row", borderBottomWidth: 1, borderTopWidth: 1, borderColor: '#000' },
+
+  summaryRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000' },
+
+  sumCell: { flex: 1, textAlign: "center", padding: 4, paddingHorizontal: 1, fontWeight: "bold", fontSize: 9 },
+
+  totalRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000', justifyContent: "space-between" },
+
+  totalCell: { paddingVertical: 4, fontSize: 13, fontWeight: 'bold', left: 5, top: 2 },
+
+  row: {
+    marginBottom: 12,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  kadaiInputWrap: {
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  kadaiLabel: {
+    fontSize: 12,
+    marginBottom: 3,
+  },
+  kadaiInput: {
+    minWidth: 150,
+    maxWidth: 200,
+    height: 34,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: "#fff",
+  },
+  input: {
+    backgroundColor: "#fff",
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#ddd",
+  },
+  upiRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  upiInput: {
+    flex: 1,
+  },
+  convertBtn: {
+    backgroundColor: "#2E7D32",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  convertBtnText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 12,
+  },
+  toggleBtn: {
+    backgroundColor: "#28a745",
+    padding: 10,
+    borderRadius: 5,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  toggleText: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  submitBtn: {
+    backgroundColor: "#007bff",
+    padding: 10,
+    borderRadius: 5,
+    alignItems: "center",
+    marginTop: 20,
+    bottom: 10,
+  },
+  submitText: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  qrContainer: {
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  qrLabel: {
+    fontSize: 16,
+    fontWeight: "bold",
+    marginBottom: 10,
+  },
+  upiIdText: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 5,
+  },
+  changeUpiBtn: {
+    backgroundColor: "#ffc107",
+    padding: 6,
+    borderRadius: 4,
+    marginBottom: 10,
+  },
+  changeUpiText: {
+    fontSize: 12,
+    color: "#000",
+    fontWeight: "bold",
+  },
+  printQrBtn: {
+    backgroundColor: "#17a2b8",
+    padding: 8,
+    borderRadius: 5,
+    marginTop: 10,
+  },
+  printQrText: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  kuralContainer: {
+    alignItems: "center",
+    marginTop: 20,
+    padding: 15,
+    borderTopWidth: 1,
+    borderTopColor: "#eee",
+    marginBottom: 20,
+  },
+  visitAgainText: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 8,
+  },
+  kuralText: {
+    fontSize: 14,
+    color: "#1B4D1B",
+    fontWeight: "bold",
+    textAlign: "center",
+    fontStyle: "italic",
+    lineHeight: 22,
+    fontFamily: tamilFontFamily,
+  },
+  estimateTotalBox: {
+    backgroundColor: '#1b5e20',
+    borderRadius: 10,
+    padding: 16,
+    marginTop: 10,
+    marginBottom: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  estimateTotalLabel: {
+    color: '#c8e6c9',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  estimateTotalValue: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+
+  homeButtonWrapper: {
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 30,
+  },
+  homeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1B4D1B',
+    paddingVertical: 13,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    gap: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
     shadowRadius: 4,
   },
-  balanceInfo: { flex: 1 },
-  customerNameMain: { fontSize: 18, fontWeight: "bold", color: "#1B4D1B" },
-  shopNameText: { fontSize: 12, color: "#666", marginTop: 2 },
-  balanceBadgeContainer: { marginLeft: 15 },
-  balanceBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    alignItems: "center",
-    minWidth: 80,
+  homeButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
-  obBadge: { backgroundColor: "#FFEBEE" },
-  abBadge: { backgroundColor: "#E8F5E9" },
-  badgeLabel: { fontSize: 10, fontWeight: "bold", color: "#888" },
-  badgeValue: { fontSize: 16, fontWeight: "bold", color: "#333" },
-});
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0056b3', // Premium Blue
+    paddingVertical: 13,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    gap: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  transferContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 10,
+    gap: 10,
+    marginTop: 5,
+    marginBottom: 5,
+  },
+  transferBtnB2B: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#1e3d59',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  transferBtnB2C: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#135F25',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  transferBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
 
+  // ── B2C Professional Styles ──
+  b2cProfessionalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+  },
+  b2cCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAF9',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    gap: 10,
+  },
+  b2cCardTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1B4D1B',
+    letterSpacing: 1,
+  },
+  b2cCardBody: {
+    padding: 16,
+  },
+  b2cNormalRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 8,
+    gap: 10,
+  },
+  b2cRowLeft: {
+    flex: 1,
+    minWidth: 0,
+  },
+  b2cRowRight: {
+    minWidth: 110,
+    maxWidth: 150,
+    alignItems: "flex-end",
+    justifyContent: "flex-start",
+  },
+  b2cLabel: {
+    fontSize: 13,
+    color: '#757575',
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  b2cFormulaText: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#8a8a8a',
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  b2cValue: {
+    fontSize: 14,
+    color: '#212121',
+    fontWeight: '600',
+    textAlign: "right",
+  },
+  b2cHighlightRow: {
+    flexDirection: 'row',
+    alignItems: "center",
+    justifyContent: 'space-between',
+    backgroundColor: '#E8F5E9',
+    padding: 12,
+    borderRadius: 10,
+    marginVertical: 10,
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+  },
+  b2cHighlightLabel: {
+    fontSize: 14,
+    color: '#1B5E20',
+    fontWeight: '700',
+  },
+  b2cHighlightValue: {
+    fontSize: 16,
+    color: '#1B5E20',
+    fontWeight: '900',
+  },
+  b2cCashTable: {
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  b2cCashRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+  },
+  b2cCashCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  b2cCashLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  b2cCashInput: {
+    height: 42,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+    color: '#111',
+  },
+  b2cCashReadOnly: {
+    height: 42,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#F8F9FA',
+    justifyContent: 'center',
+  },
+  b2cCashValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111',
+    textAlign: 'right',
+  },
+  b2cDividerLine: {
+    height: 1,
+    backgroundColor: '#F0F0F0',
+    marginVertical: 8,
+  },
+  b2cGoldHighlightRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFF8E1',
+    padding: 12,
+    borderRadius: 10,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#FFECB3',
+  },
+  b2cGoldLabel: {
+    fontSize: 13,
+    color: '#7F6D17',
+    fontWeight: '700',
+  },
+  b2cGoldValue: {
+    fontSize: 14,
+    color: '#7F6D17',
+    fontWeight: '800',
+  },
+  b2cGoldRateText: {
+    fontSize: 12,
+    color: '#7F6D17',
+    opacity: 0.85,
+    marginTop: 2,
+    fontWeight: '700',
+  },
+
+  b2cInputSection: {
+    paddingHorizontal: 4,
+    marginBottom: 20,
+  },
+  b2cInputWrapper: {
+    marginBottom: 16,
+  },
+  b2cInputLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#444',
+    marginBottom: 8,
+    marginLeft: 2,
+  },
+  b2cInputField: {
+    backgroundColor: '#fff',
+    height: 50,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#E0E0E0',
+    paddingHorizontal: 16,
+    fontSize: 16,
+    color: '#333',
+  },
+  b2cConversionLineContainer: {
+    alignItems: 'center',
+    marginVertical: 15,
+    paddingVertical: 10,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+  },
+  b2cConversionLineText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1B4D1B',
+    letterSpacing: 1,
+  },
+  b2cActionButtonsRow: {
+    gap: 12,
+    marginTop: 10,
+  },
+  b2cActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 54,
+    borderRadius: 14,
+    gap: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  b2cActionButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+
+  // ── Payment Selector Styles ──
+  paymentSelectorContainer: {
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F5',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  paymentSelectorScroll: {
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+  },
+  paymentOptionCompact: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginHorizontal: 4,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#D1D1D1',
+  },
+  paymentOptionActive: {
+    backgroundColor: '#2E7D32',
+    borderColor: '#2E7D32',
+  },
+  paymentOptionTextCompact: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  paymentOptionTextActive: {
+    color: '#fff',
+  },
+});
