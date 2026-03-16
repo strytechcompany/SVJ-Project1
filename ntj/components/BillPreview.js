@@ -11,6 +11,23 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from "axios";
 import { base_url } from "./config";
 
+// `react-native-share` requires a native module ("RNShare"). In Expo Go (and any build
+// where that native module isn't included), importing it crashes at startup.
+// Load it lazily so we can fall back to `expo-sharing` when unavailable.
+let _rnShare;
+let _rnShareTried = false;
+const getRNShare = () => {
+  if (_rnShareTried) return _rnShare;
+  _rnShareTried = true;
+  try {
+    const mod = require('react-native-share');
+    _rnShare = mod?.default ?? mod;
+  } catch (_) {
+    _rnShare = null;
+  }
+  return _rnShare;
+};
+
 // Format numbers in Indian comma style: 1,230 / 12,035 / 1,23,456
 const formatIndianNumber = (value) => {
   const num = parseFloat(value);
@@ -1195,6 +1212,507 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     customer?.image,
   ]);
 
+  // ─── A4 HTML Generator ─────────────────────────────────────────────────────
+  const generateA4HTML = () => {
+    const shopName = 'NTJ JEWELLERY';
+    const shopAddress = 'Salem, Tamil Nadu';
+    const shopPhone = '';
+    const billDate = estimate
+      ? new Date().toLocaleDateString('en-IN')
+      : order
+        ? (order.date || new Date().toLocaleDateString('en-IN'))
+        : (customer?.date || new Date().toLocaleDateString('en-IN'));
+
+    const billTitle = estimate ? 'ESTIMATE BILL'
+      : suspense ? 'SUSPENSE BILL'
+      : order ? 'ORDER RECEIPT'
+      : 'TAX INVOICE';
+
+    const custName = estimate ? (estimate.itemName || 'Customer')
+      : order ? order.customer
+      : (customer?.name || '');
+    const custPhone = order ? order.phone : (customer?.phone || customer?.phoneNumber || customer?.customerNumber || '');
+    const custAddress = order ? (order.address || '') : (customer?.address || '');
+    const custGST = order ? (order.gstin || '') : (customer?.gstin || '');
+    const billNo = currentBillNo || order?.orderNo || '';
+
+    // ── Issue rows ──
+    const issueRowsHtml = safeIssueItems.length > 0 ? safeIssueItems.map((row, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${row.name || ''}</td>
+        <td>${row.gross || ''}</td>
+        <td>${row.m || ''}</td>
+        <td>${row.net || ''}</td>
+        <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+        <td><strong>${row.pure || ''}</strong></td>
+      </tr>`).join('') : '<tr><td colspan="7" style="text-align:center">No issue items</td></tr>';
+
+    const receiptRowsHtml = safeReceiptItems.length > 0 ? safeReceiptItems.map((row, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${row.name || ''}</td>
+        <td>${row.weight || ''}</td>
+        <td>${row.result || ''}</td>
+        <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+        <td>${row.pure || ''}</td>
+      </tr>`).join('') : '<tr><td colspan="6" style="text-align:center">No receipt items</td></tr>';
+
+    const cashRowsHtml = safeCashTable.length > 0 ? safeCashTable.map((c, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>&#8377;${c.rupees || ''}</td>
+        <td>${c.goldRate || ''}</td>
+        <td>${c.pure || ''}</td>
+      </tr>`).join('') : '<tr><td colspan="4" style="text-align:center">No cash entries</td></tr>';
+
+    // B2C items
+    const b2cItemRowsHtml = normalizedB2CItems.length > 0 ? normalizedB2CItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.displayItemName || item.itemName || ''}</td>
+        <td>${item.weight}</td>
+        <td>${item.touch}</td>
+        <td>${item.wastage}</td>
+        <td>${item.rate}</td>
+        <td>&#8377;${item.total.toFixed(2)}</td>
+        <td>&#8377;${item.gst.toFixed(2)}</td>
+        <td>&#8377;${item.final.toFixed(2)}</td>
+      </tr>`).join('') : '<tr><td colspan="9" style="text-align:center">No items</td></tr>';
+
+    const b2cOldGoldRowsHtml = normalizedB2CReceiptItems.length > 0 ? normalizedB2CReceiptItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.name || ''}</td>
+        <td>${item.weight}</td>
+        <td>${item.sub}</td>
+        <td>${item.netWeight}</td>
+        <td>${item.rate}</td>
+        <td>&#8377;${item.amount}</td>
+      </tr>`).join('') : '';
+
+    // Estimate items
+    const estimateItems = Array.isArray(estimate?.items) && estimate.items.length > 0 ? estimate.items : null;
+    const estimateRowsHtml = estimateItems
+      ? estimateItems.map((item, i) => `
+        <tr>
+          <td>${i + 1}</td>
+          <td>${item.itemName || ''}</td>
+          <td>${item.weight || ''}</td>
+          <td>${item.wastagePercent || 0}%</td>
+          <td>${item.grossWeight || ''}</td>
+          <td>&#8377;${formatIndianNumber(item.goldRate)}</td>
+          <td>&#8377;${formatIndianNumber(item.netAmount)}</td>
+          ${estimate.enableGST ? `<td>&#8377;${formatIndianNumber(item.gst || 0)}</td>` : ''}
+          <td><strong>&#8377;${formatIndianNumber(item.totalAmount)}</strong></td>
+        </tr>`).join('')
+      : estimate ? `
+        <tr>
+          <td>1</td>
+          <td>${estimate.itemName || ''}</td>
+          <td>${estimate.weight || ''}</td>
+          <td>${estimate.wastagePercent || 0}%</td>
+          <td>${estimate.grossWeight || ''}</td>
+          <td>&#8377;${formatIndianNumber(estimate.goldRate)}</td>
+          <td>&#8377;${formatIndianNumber(estimate.netAmount)}</td>
+          ${estimate && estimate.enableGST ? `<td>&#8377;${formatIndianNumber(estimate.gst || 0)}</td>` : ''}
+          <td><strong>&#8377;${formatIndianNumber(estimate.totalAmount)}</strong></td>
+        </tr>` : '';
+
+    // Suspense items
+    const suspIssueRowsHtml = suspense ? suspense.issueItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.name}</td>
+        <td>${item.weight.toFixed(3)}</td>
+        <td>${item.count}</td>
+        <td>${item.rate}</td>
+        <td>${item.pure.toFixed(3)}</td>
+        <td>&#8377;${item.amount.toFixed(2)}</td>
+      </tr>`).join('') : '';
+    const suspReceiptRowsHtml = suspense ? suspense.receiptItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.name}</td>
+        <td>${item.weight.toFixed(3)}</td>
+        <td>${item.count}</td>
+        <td>${item.rate}</td>
+        <td>${item.pure.toFixed(3)}</td>
+        <td>&#8377;${item.amount.toFixed(2)}</td>
+      </tr>`).join('') : '';
+
+    const orderItemsHtml = order ? `
+      <tr><td>Item</td><td>${order.type || ''}</td></tr>
+      <tr><td>Weight</td><td>${order.weight || ''} GMS</td></tr>
+      <tr><td>Payment</td><td>${order.payment || ''}</td></tr>
+      <tr><td>Pending Balance</td><td>&#8377;${order.balance || ''}</td></tr>` : '';
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    @page { size: A4; margin: 15mm 12mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+      color: #111;
+      background: #fff;
+    }
+    .page { width: 100%; }
+
+    /* ── Shop Header ── */
+    .header {
+      text-align: center;
+      border-bottom: 3px double #222;
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+    }
+    .shop-name {
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: #1B4D1B;
+      text-transform: uppercase;
+    }
+    .shop-sub {
+      font-size: 12px;
+      color: #444;
+      margin-top: 2px;
+    }
+    .bill-badge {
+      display: inline-block;
+      background: #1B4D1B;
+      color: #fff;
+      font-size: 13px;
+      font-weight: bold;
+      padding: 4px 18px;
+      border-radius: 4px;
+      margin-top: 6px;
+      letter-spacing: 1px;
+    }
+
+    /* ── Customer / Bill Info ── */
+    .info-grid {
+      display: flex;
+      justify-content: space-between;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin-bottom: 10px;
+      background: #FAFAFA;
+    }
+    .info-col { flex: 1; }
+    .info-col + .info-col { border-left: 1px dashed #ccc; padding-left: 12px; }
+    .info-row { margin-bottom: 3px; font-size: 11px; }
+    .info-label { font-weight: bold; color: #333; }
+
+    /* ── Tables ── */
+    .section-title {
+      font-size: 12px;
+      font-weight: bold;
+      background: #1B4D1B;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 3px;
+      margin-bottom: 4px;
+      margin-top: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 6px;
+      font-size: 10px;
+    }
+    th {
+      background: #E8F5E9;
+      border: 1px solid #999;
+      padding: 4px 3px;
+      text-align: center;
+      font-weight: bold;
+      font-size: 10px;
+    }
+    td {
+      border: 1px solid #ccc;
+      padding: 4px 3px;
+      text-align: center;
+    }
+    .total-row td {
+      background: #F1F8E9;
+      font-weight: bold;
+    }
+
+    /* ── Summary Box ── */
+    .summary-box {
+      border: 2px solid #1B4D1B;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-top: 10px;
+      background: #F9FBF9;
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+      border-bottom: 1px dashed #ddd;
+      font-size: 11px;
+    }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-label { color: #444; font-weight: 600; }
+    .summary-value { font-weight: bold; color: #111; }
+    .summary-total {
+      background: #1B4D1B;
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      text-align: center;
+      margin-top: 18px;
+      padding-top: 10px;
+      border-top: 1px dashed #aaa;
+      font-size: 10px;
+      color: #555;
+    }
+    .kural {
+      font-style: italic;
+      font-size: 12px;
+      font-weight: bold;
+      color: #1B4D1B;
+      margin-bottom: 4px;
+    }
+    .sign-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 30px;
+      font-size: 10px;
+    }
+    .sign-col { text-align: center; border-top: 1px solid #999; padding-top: 4px; min-width: 120px; }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Shop Header -->
+  <div class="header">
+    <div class="shop-name">${shopName}</div>
+    <div class="shop-sub">${shopAddress}${shopPhone ? ' | ' + shopPhone : ''}</div>
+    <div class="bill-badge">${billTitle}</div>
+  </div>
+
+  <!-- Customer & Bill Info -->
+  <div class="info-grid">
+    <div class="info-col">
+      <div class="info-row"><span class="info-label">Name:</span> ${custName}</div>
+      <div class="info-row"><span class="info-label">Phone:</span> ${custPhone || 'N/A'}</div>
+      <div class="info-row"><span class="info-label">Address:</span> ${custAddress || 'N/A'}</div>
+      <div class="info-row"><span class="info-label">GST No:</span> ${custGST || 'N/A'}</div>
+    </div>
+    <div class="info-col">
+      ${billNo ? `<div class="info-row"><span class="info-label">Bill No:</span> ${billNo}</div>` : ''}
+      <div class="info-row"><span class="info-label">Date:</span> ${billDate}</div>
+      <div class="info-row"><span class="info-label">Type:</span> ${estimate ? 'Estimate' : order ? 'Order' : (customer?.type || '')}</div>
+      ${!estimate && !order && summaryOB ? `<div class="info-row"><span class="info-label">Old Balance:</span> ${summaryOB.toFixed(3)} g</div>` : ''}
+      ${!estimate && !order && summaryAB ? `<div class="info-row"><span class="info-label">Adv Balance:</span> ${summaryAB.toFixed(3)} g</div>` : ''}
+    </div>
+  </div>
+
+  ${estimate ? `
+  <!-- Estimate Items -->
+  <div class="section-title">ESTIMATE DETAILS</div>
+  <table>
+    <thead><tr>
+      <th>#</th><th>Item Name</th><th>Wt (g)</th><th>W%</th><th>Gross Wt</th><th>Rate</th><th>Net Amt</th>
+      ${estimate.enableGST ? '<th>GST</th>' : ''}<th>Total</th>
+    </tr></thead>
+    <tbody>${estimateRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="${estimate.enableGST ? 8 : 7}" style="text-align:right">TOTAL ESTIMATE AMOUNT:</td>
+      <td>&#8377;${formatIndianNumber(estimateFinalTotal)}</td>
+    </tr></tfoot>
+  </table>
+  ${estimateGSTEnabled ? `
+  <div class="section-title">GST SUMMARY</div>
+  <table><tbody>
+    <tr><td style="text-align:left">Subtotal</td><td>&#8377;${estimateSubTotal.toFixed(2)}</td></tr>
+    <tr><td style="text-align:left">GST %</td><td>${estimateGstPercent.toFixed(2)}%</td></tr>
+    <tr><td style="text-align:left">GST Amount</td><td>&#8377;${estimateGstAmount.toFixed(2)}</td></tr>
+    <tr class="total-row"><td style="text-align:left">Final Total (Incl. GST)</td><td>&#8377;${estimateFinalTotal.toFixed(2)}</td></tr>
+  </tbody></table>` : ''}
+  ` : order ? `
+  <!-- Order Details -->
+  <div class="section-title">ORDER DETAILS</div>
+  <table><tbody>${orderItemsHtml}</tbody></table>
+  ` : suspense ? `
+  <!-- Suspense Issue -->
+  <div class="section-title">ISSUE ITEMS</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Weight(g)</th><th>Qty</th><th>Rate</th><th>Pure(g)</th><th>Amount</th></tr></thead>
+    <tbody>${suspIssueRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="5">Total Issue</td>
+      <td>${suspense.totalIssuePure.toFixed(3)}</td>
+      <td>&#8377;${suspense.totalIssueAmount.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>
+  <!-- Suspense Receipt -->
+  <div class="section-title">RECEIPT ITEMS</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Weight(g)</th><th>Qty</th><th>Rate</th><th>Pure(g)</th><th>Amount</th></tr></thead>
+    <tbody>${suspReceiptRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="5">Total Receipt</td>
+      <td>${suspense.totalReceiptPure.toFixed(3)}</td>
+      <td>&#8377;${suspense.totalReceiptAmount.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>
+  <!-- Suspense Summary -->
+  <div class="summary-box">
+    <div class="summary-row"><span class="summary-label">Gold Rate</span><span class="summary-value">&#8377;${suspense.goldRate}/g</span></div>
+    <div class="summary-row"><span class="summary-label">Net Pure Gold</span><span class="summary-value" style="color:${suspense.netPure >= 0 ? '#c62828' : '#2e7d32'}">${suspense.netPure.toFixed(3)} g</span></div>
+    <div class="summary-row"><span class="summary-label">Net Amount</span><span class="summary-value">&#8377;${suspense.netAmount.toFixed(2)}</span></div>
+  </div>
+  ` : isB2C ? `
+  <!-- B2C Items -->
+  <div class="section-title">ITEMS ISSUED</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Wt</th><th>Touch</th><th>Wastage</th><th>Rate</th><th>Amount</th><th>GST</th><th>Final</th></tr></thead>
+    <tbody>${b2cItemRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="8" style="text-align:right">Total:</td>
+      <td>&#8377;${totalB2CItemFinal.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>
+  ${normalizedB2CReceiptItems.length > 0 ? `
+  <div class="section-title">OLD GOLD / RECEIPT</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Wt(g)</th><th>Sub(g)</th><th>Net Wt(g)</th><th>Rate</th><th>Amount</th></tr></thead>
+    <tbody>${b2cOldGoldRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="6" style="text-align:right">Total Old Gold:</td>
+      <td>&#8377;${totalB2COldGoldAmount.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>` : ''}
+  <div class="summary-box">
+    <div class="summary-row"><span class="summary-label">Total Bill Amount</span><span class="summary-value">&#8377;${displayB2CTotalAmount.toFixed(2)}</span></div>
+    ${cashAmount ? `<div class="summary-row"><span class="summary-label">Cash Paid</span><span class="summary-value">&#8377;${cashAmount}</span></div>` : ''}
+    ${upiAmount && parseFloat(upiAmount) > 0 ? `<div class="summary-row"><span class="summary-label">UPI Amount</span><span class="summary-value">&#8377;${upiAmount}</span></div>` : ''}
+    <div class="summary-row"><span class="summary-label">Old Balance</span><span class="summary-value">${effectiveB2COldBalance.toFixed(3)} g</span></div>
+    <div class="summary-row"><span class="summary-label">Advance Balance</span><span class="summary-value">${effectiveB2CAdvanceBalance.toFixed(3)} g</span></div>
+    ${displayConvertedGoldValue > 0 ? `<div class="summary-row"><span class="summary-label">Converted Gold</span><span class="summary-value">${displayConvertedGoldValue.toFixed(3)} g</span></div>` : ''}
+  </div>
+  ` : `
+  <!-- B2B Issue -->
+  <div class="section-title">ISSUE</div>
+  <table>
+    <thead><tr>
+      <th>#</th><th>Name</th><th>G.Weight</th>
+      ${showIssueMColumn ? '<th>M</th>' : ''}
+      ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
+      <th>Calc</th><th>Pure (g)</th>
+    </tr></thead>
+    <tbody>${issueRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="2">Totals</td>
+      <td>TW: ${totalIssueTW}</td>
+      ${showIssueMColumn ? '<td>-</td>' : ''}
+      ${showIssueNetWeightColumn ? `<td>NW: ${totalIssueNW}</td>` : ''}
+      <td>-</td><td>Pure: ${totalIssuePure}</td>
+    </tr></tfoot>
+  </table>
+
+  <!-- B2B Receipt -->
+  <div class="section-title">RECEIPT</div>
+  <table>
+    <thead><tr><th>#</th><th>Name</th><th>Weight</th><th>Result</th><th>Calc</th><th>Pure (g)</th></tr></thead>
+    <tbody>${receiptRowsHtml}</tbody>
+    ${safeReceiptItems.length > 0 ? `<tfoot><tr class="total-row">
+      <td colspan="2">Totals</td>
+      <td>TW: ${totalReceiptTW}</td>
+      <td>NW: ${totalReceiptNW}</td>
+      <td>-</td>
+      <td>Pure: ${totalReceiptPure}</td>
+    </tr></tfoot>` : ''}
+  </table>
+
+  <!-- Cash Table -->
+  <div class="section-title">CASH</div>
+  <table>
+    <thead><tr><th>#</th><th>Rupees</th><th>FT Rate</th><th>Pure (g)</th></tr></thead>
+    <tbody>${cashRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="3" style="text-align:right">Total Cash Pure:</td>
+      <td>${safeCashTable.reduce((s, c) => s + toNum(c?.pure, 0), 0).toFixed(3)} g</td>
+    </tr></tfoot>
+  </table>
+
+  <!-- Summary -->
+  <div class="section-title">SUMMARY</div>
+  <div class="summary-box">
+    ${summaryOB !== 0 ? `
+    <div class="summary-row"><span class="summary-label">Old Balance (OB)</span><span class="summary-value">${summaryOB.toFixed(3)} g</span></div>` : ''}
+    ${summaryAB !== 0 ? `
+    <div class="summary-row"><span class="summary-label">Advance Balance (AB)</span><span class="summary-value">${summaryAB.toFixed(3)} g</span></div>` : ''}
+    <div class="summary-row"><span class="summary-label">Issue</span><span class="summary-value">${displaySummary.issue} g</span></div>
+    <div class="summary-row"><span class="summary-label">Receipt</span><span class="summary-value">${displaySummary.receipt} g</span></div>
+    <div class="summary-row"><span class="summary-label">Cash</span><span class="summary-value">${displaySummary.cash} g</span></div>
+    ${parseFloat(displaySummary.gstPure) > 0 ? `<div class="summary-row"><span class="summary-label">GST Pure</span><span class="summary-value">${displaySummary.gstPure} g</span></div>` : ''}
+    <div class="summary-total">
+      <span>Current Balance</span>
+      <span>${displaySummary.current} g</span>
+    </div>
+  </div>
+  `}
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="kural">${thirukkural}</div>
+    <div>Thank you for your visit. Please visit again!</div>
+    <div class="sign-row">
+      <div class="sign-col">Customer Signature</div>
+      <div class="sign-col">Authorised Signature</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>`;
+  };
+
+  // ─── Generate A4 PDF ───────────────────────────────────────────────────────
+  const generateA4BillPdf = async () => {
+    const html = generateA4HTML();
+    // A4 in points: 595 x 842
+    const tryPrint = async (payload, useFixed = true) => {
+      if (useFixed) {
+        return Print.printToFileAsync({ html: payload, width: 595, height: 842 });
+      }
+      return Print.printToFileAsync({ html: payload });
+    };
+    try {
+      const { uri } = await tryPrint(html, true);
+      return uri;
+    } catch {
+      try {
+        const { uri } = await tryPrint(html, false);
+        return uri;
+      } catch {
+        const stripped = String(html).replace(/<img\b[^>]*>/gi, '');
+        const { uri } = await tryPrint(stripped, false);
+        return uri;
+      }
+    }
+  };
+
   const generateBillPdf = async () => {
     const html = generateHTML();
     const tryPrint = async (payload, useFixedPage = true) => {
@@ -1296,11 +1814,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	    return normalizePhoneWithCountryCode(registeredPhone || getCustomerPhone());
 	  };
 
-	  const sharePdfViaDeviceWhatsApp = async ({ waPhone, pdfUri, isAuto = false } = {}) => {
-	    const canShare = await Sharing.isAvailableAsync();
-	    if (!canShare) {
-	      throw new Error("File sharing is not available on this device.");
-	    }
+		  const sharePdfViaDeviceWhatsApp = async ({ waPhone, pdfUri, isAuto = false } = {}) => {
+		    const canShare = await Sharing.isAvailableAsync();
+		    if (!canShare) {
+		      throw new Error("File sharing is not available on this device.");
+		    }
 
 	    // Verify file exists
 	    const fileInfo = await FileSystem.getInfoAsync(pdfUri);
@@ -1319,19 +1837,30 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	      const newUri = `${FileSystem.cacheDirectory}Bill_${cleanBillNo}.pdf`;
 	      await FileSystem.copyAsync({ from: pdfUri, to: newUri });
 	      sharingUri = newUri;
-	    } catch (e) {
-	      console.warn("Renaming failed, sharing original URI", e);
-	    }
+		    } catch (e) {
+		      console.warn("Renaming failed, sharing original URI", e);
+		    }
 
-	    // On Android, calling Linking.openURL before Sharing.shareAsync often blocks the share sheet.
-	    // We only open the chat if NOT doing auto-share, or as a fallback.
-	    // For standard PDF sharing, shareAsync is much more reliable.
-	    await Sharing.shareAsync(sharingUri, {
-	      mimeType: "application/pdf",
-	      dialogTitle: "Send Bill on WhatsApp",
-	      UTI: "com.adobe.pdf",
-	    });
-	  };
+		    // WhatsApp (and some Android share targets) can't reliably consume `file://` URIs.
+		    // Convert to a `content://` URI when possible.
+		    let uriToShare = sharingUri;
+		    if (Platform.OS === "android") {
+		      try {
+		        uriToShare = await FileSystem.getContentUriAsync(sharingUri);
+		      } catch (e) {
+		        console.warn("getContentUriAsync failed, falling back to file URI", e);
+		      }
+		    }
+
+		    // On Android, calling Linking.openURL before Sharing.shareAsync often blocks the share sheet.
+		    // We only open the chat if NOT doing auto-share, or as a fallback.
+		    // For standard PDF sharing, shareAsync is much more reliable.
+		    await Sharing.shareAsync(uriToShare, {
+		      mimeType: "application/pdf",
+		      dialogTitle: "Send Bill on WhatsApp",
+		      UTI: "com.adobe.pdf",
+		    });
+		  };
 
 	  const sendBillPdfViaWhatsAppCloudApi = async ({ waPhone, pdfUri } = {}) => {
 	    const billNoHint =
@@ -1378,46 +1907,42 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	    return json || { ok: true };
 	  };
 
-	  const shareBillPdfOnly = async () => {
-	    if (isSharingRef.current) return;
-	    try {
-	      isSharingRef.current = true;
-	      const pdfUri = await prepareBillPdf();
-	      if (!pdfUri) throw new Error("Could not generate bill PDF.");
-	      
-	      const waPhone = await resolveCustomerWhatsAppPhone();
-	      if (!waPhone) throw new Error("Customer phone number not found.");
+		  const shareBillPdfOnly = async () => {
+		    if (isSharingRef.current) return;
+		    try {
+		      isSharingRef.current = true;
+		      const pdfUri = await prepareBillPdf();
+		      if (!pdfUri) throw new Error("Could not generate bill PDF.");
+		      const waPhone = await resolveCustomerWhatsAppPhone();
 
-	      // 1. Try direct Cloud API delivery first (most direct)
-	      let sentViaCloud = false;
-	      try {
-	        const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
-	        if (cloudRes?.ok) {
-	          sentViaCloud = true;
-	          Alert.alert("Success", `Bill PDF sent directly to ${waPhone}`);
-	          await openWhatsAppChat(waPhone); // Open chat to show the sent document
-	          return;
-	        }
-	      } catch (e) {
-	        console.log("Cloud API skipped/failed");
-	      }
+		      // 1. Try direct Cloud API delivery first (most direct)
+		      let sentViaCloud = false;
+		      if (waPhone) {
+		        try {
+		          const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
+		          if (cloudRes?.ok) {
+		            sentViaCloud = true;
+		            Alert.alert("Success", `Bill PDF sent directly to ${waPhone}`);
+		            await openWhatsAppChat(waPhone); // Open chat to show the sent document
+		            return;
+		          }
+		        } catch (e) {
+		          console.log("Cloud API skipped/failed");
+		        }
+		      }
 
-	      // 2. Fallback: Open Direct Chat + Trigger Share Sheet
-	      if (!sentViaCloud) {
-	        // Open the specific person's WhatsApp chat directly
-	        await openWhatsAppChat(waPhone);
-	        
-	        // Small delay to allow WhatsApp to open, then show the share sheet
-	        setTimeout(async () => {
-	          await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri, isAuto: false });
-	        }, 1200);
-	      }
-	    } catch (error) {
-	      Alert.alert("Error", error.message || "Failed to share PDF.");
-	    } finally {
-	      isSharingRef.current = false;
-	    }
-	  };
+		      // 2. Fallback: Share the PDF via the OS share sheet.
+		      // Note: WhatsApp deep-links cannot pre-attach files reliably; opening WhatsApp first
+		      // often prevents the share sheet from appearing (app goes background).
+		      if (!sentViaCloud) {
+		        await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri, isAuto: false });
+		      }
+		    } catch (error) {
+		      Alert.alert("Error", error.message || "Failed to share PDF.");
+		    } finally {
+		      isSharingRef.current = false;
+		    }
+		  };
 
 	  const openCustomerChatOnly = async () => {
 	    try {
@@ -1548,35 +2073,126 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
 	  const openDirectWhatsApp = async () => {
 	    if (isSharingRef.current) return;
-
 	    try {
 	      isSharingRef.current = true;
 	      setIsSharing(true);
 
 	      const waPhone = await resolveCustomerWhatsAppPhone();
-	      if (!waPhone) {
-	        throw new Error("Customer mobile number is missing or invalid.");
+	      if (!waPhone) throw new Error('Customer mobile number is missing or invalid.');
+
+	      // Generate A4 PDF
+	      const pdfUri = await generateA4BillPdf();
+	      if (!pdfUri) throw new Error('Could not generate A4 bill PDF.');
+
+	      // Give the file a meaningful name
+	      const billNoHint = currentBillNo || order?.orderNo || Date.now();
+	      const cleanBillNo = String(billNoHint).replace(/[^a-zA-Z0-9]/g, '_');
+	      const namedUri = `${FileSystem.cacheDirectory}NTJ_Bill_${cleanBillNo}_A4.pdf`;
+	      try { await FileSystem.copyAsync({ from: pdfUri, to: namedUri }); } catch (_) {}
+	      const fileInfo = await FileSystem.getInfoAsync(namedUri);
+	      const sharableUri = fileInfo.exists ? namedUri : pdfUri;
+
+	      // 1. Try Cloud API (sends directly, no user action needed)
+	      let sentViaCloud = false;
+	      try {
+	        const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri: sharableUri });
+	        if (cloudRes?.ok) {
+	          sentViaCloud = true;
+	          Alert.alert('Sent!', `Bill PDF sent to ${waPhone} on WhatsApp!`);
+	          await openWhatsAppChat(waPhone);
+	        }
+	      } catch (_) {
+	        console.log('Cloud API unavailable, using device share.');
 	      }
 
-	      const pdfUri = await prepareBillPdf();
-	      try {
-	        await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
-	        Alert.alert("Success", "Bill sent to customer's WhatsApp.");
-		      } catch (directError) {
-		        const status = directError?.status;
-		        const directMessage = directError?.message || "Direct WhatsApp send failed.";
-
-		        // 501: backend not configured; 404/405: backend not deployed with this route yet
-		        if (status === 501 || status === 404 || status === 405) {
-		          await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri, isAuto: false });
-		          return;
-		        }
-
-	        throw new Error(directMessage);
+	      if (!sentViaCloud) {
+	        await shareA4PdfToWhatsApp(sharableUri, waPhone);
 	      }
 	    } catch (error) {
-	      Alert.alert("Error", error?.message || "Failed to send bill on WhatsApp.");
-	      console.error("Direct WhatsApp send error:", error);
+	      Alert.alert('Error', error?.message || 'Failed to send bill on WhatsApp.');
+	      console.error('Direct WhatsApp send error:', error);
+	    } finally {
+	      setIsSharing(false);
+	      isSharingRef.current = false;
+	    }
+	  };
+
+	  // ─── Core helper: share A4 PDF directly into WhatsApp ───────────────────
+	  const shareA4PdfToWhatsApp = async (fileUri, waPhone) => {
+	    // react-native-share can target WhatsApp directly and attach a file.
+	    // On Android the uri must be a base64 data-uri OR a content:// uri.
+	    // Expo's FileSystem gives us a file:// uri — we read it as base64 first.
+	    try {
+	      const RNShare = getRNShare();
+	      if (!RNShare) throw new Error('RNShare native module not available');
+
+	      const base64 = await FileSystem.readAsStringAsync(fileUri, {
+	        encoding: FileSystem.EncodingType.Base64,
+	      });
+	      const dataUri = `data:application/pdf;base64,${base64}`;
+
+	      await RNShare.shareSingle({
+	        social: RNShare.Social.WHATSAPP,
+	        url: dataUri,
+	        type: 'application/pdf',
+	        filename: `NTJ_Bill.pdf`,
+	        title: 'NTJ Bill PDF',
+	        message: waPhone ? `Bill for ${waPhone}` : 'Please find your bill attached.',
+	      });
+	    } catch (rnShareErr) {
+	      // RNShare throws if user cancels or WhatsApp not installed — fall back to generic sheet
+	      console.warn('RNShare WhatsApp failed, falling back to expo-sharing:', rnShareErr?.message);
+	      try {
+	        await Sharing.shareAsync(fileUri, {
+	          mimeType: 'application/pdf',
+	          dialogTitle: waPhone ? `Send Bill PDF to ${waPhone}` : 'Send Bill PDF',
+	          UTI: 'com.adobe.pdf',
+	        });
+	      } catch (sharingErr) {
+	        throw new Error('Could not open share sheet. Please try again.');
+	      }
+	    }
+	  };
+
+	  const sendA4BillViaWhatsApp = async () => {
+	    if (isSharingRef.current) return;
+	    try {
+	      isSharingRef.current = true;
+	      setIsSharing(true);
+
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) throw new Error('Customer WhatsApp number not found.');
+
+	      // Generate full A4 PDF
+	      const pdfUri = await generateA4BillPdf();
+	      if (!pdfUri) throw new Error('Could not generate A4 bill PDF.');
+
+	      // Give it a clean filename
+	      const billNoHint = currentBillNo || order?.orderNo || Date.now();
+	      const cleanBillNo = String(billNoHint).replace(/[^a-zA-Z0-9]/g, '_');
+	      const namedUri = `${FileSystem.cacheDirectory}NTJ_Bill_${cleanBillNo}_A4.pdf`;
+	      try { await FileSystem.copyAsync({ from: pdfUri, to: namedUri }); } catch (_) {}
+	      const fileInfo = await FileSystem.getInfoAsync(namedUri);
+	      const sharableUri = fileInfo.exists ? namedUri : pdfUri;
+
+	      // 1. Try Cloud API first (sends without user interaction)
+	      let cloudSent = false;
+	      try {
+	        const res = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri: sharableUri });
+	        if (res?.ok) {
+	          cloudSent = true;
+	          Alert.alert('Sent!', `Bill PDF sent to WhatsApp (${waPhone})`);
+	          // Only open the chat AFTER the cloud send succeeded
+	          await openWhatsAppChat(waPhone);
+	        }
+	      } catch (_) {}
+
+	      // 2. Fallback: open WhatsApp directly with PDF attached via react-native-share
+	      if (!cloudSent) {
+	        await shareA4PdfToWhatsApp(sharableUri, waPhone);
+	      }
+	    } catch (error) {
+	      Alert.alert('Error', error?.message || 'Failed to send PDF via WhatsApp.');
 	    } finally {
 	      setIsSharing(false);
 	      isSharingRef.current = false;
@@ -2771,23 +3387,31 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             </TouchableOpacity>
           </View>
 
-          {/* WhatsApp Direct Chat Button */}
+          {/* WhatsApp – Send A4 Bill PDF directly to customer chat */}
           <View style={{ alignItems: 'center', marginTop: 10 }}>
             <TouchableOpacity
-              style={[styles.saveButton, { backgroundColor: '#25D366' }]}
-              onPress={openCustomerChatOnly}
+              style={[
+                styles.saveButton,
+                { backgroundColor: '#25D366', paddingHorizontal: 28 },
+                isSharing && { opacity: 0.6 },
+              ]}
+              onPress={sendA4BillViaWhatsApp}
+              disabled={isSharing}
               activeOpacity={0.8}
             >
               <Icon name="whatsapp" size={22} color="#fff" />
-              <Text style={styles.homeButtonText}>WhatsApp Chat</Text>
+              <Text style={styles.homeButtonText}>
+                {isSharing ? 'Preparing PDF…' : 'Send Bill via WhatsApp'}
+              </Text>
             </TouchableOpacity>
           </View>
 
-          {/* Share PDF Button */}
+          {/* Share Bill PDF (generic share sheet) */}
           <View style={{ alignItems: 'center', marginTop: 10 }}>
             <TouchableOpacity
-              style={[styles.saveButton, { backgroundColor: '#FF9800' }]}
+              style={[styles.saveButton, { backgroundColor: '#FF9800' }, isSharing && { opacity: 0.6 }]}
               onPress={shareBillPdfOnly}
+              disabled={isSharing}
               activeOpacity={0.8}
             >
               <Icon name="file-pdf-box" size={22} color="#fff" />
