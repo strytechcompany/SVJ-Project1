@@ -63,6 +63,10 @@ const customerB2CSchema = new mongoose.Schema({
   lastBillAmount: { type: Number, default: 0 },
   lastBillWeight: { type: Number, default: 0 },
   lastBillPureWeight: { type: Number, default: 0 },
+  customerType: {
+    type: String,
+    default: "B2C",
+  },
 }, 
 { timestamps: true });
 
