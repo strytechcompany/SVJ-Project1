@@ -50,6 +50,7 @@ const createCustomer = async (req, res) => {
             advanceBalance: advanceBalance || 0,
             gstin: gstin || "",
             billCurrentBalance: 0,
+            customerType: req.body.customerType || "B2B",
         });
 
         const newCustomer = await customer.save();
@@ -92,6 +93,7 @@ const updateCustomer = async (req, res) => {
         if (availableBalance !== undefined) customer.availableBalance = availableBalance;
         if (lastTransactionDate !== undefined) customer.lastTransactionDate = lastTransactionDate;
         if (lastTransactionType !== undefined) customer.lastTransactionType = lastTransactionType;
+        if (req.body.customerType !== undefined) customer.customerType = req.body.customerType;
 
         // Additional fields from original route
         if (req.body.gstPercentage !== undefined) customer.gstPercentage = req.body.gstPercentage;
@@ -122,11 +124,32 @@ const deleteCustomer = async (req, res) => {
     }
 };
 
+// @desc    Delete all B2B customers
+// @route   DELETE /api/customers
+const deleteAllB2BCustomers = async (req, res) => {
+    try {
+        const result = await Customer.deleteMany({
+            $or: [
+                { customerType: "B2B" },
+                { customerType: { $exists: false } },
+            ],
+        });
+
+        res.json({
+            message: "All B2B customers deleted successfully",
+            deletedCount: result.deletedCount || 0,
+        });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
 module.exports = {
     getCustomers,
     getCustomerById,
     createCustomer,
     updateCustomer,
     deleteCustomer,
+    deleteAllB2BCustomers,
 };
  
