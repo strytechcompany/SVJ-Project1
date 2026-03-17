@@ -41,6 +41,9 @@ const billSummarySchema = new mongoose.Schema(
   {
     customerId: { type: String, required: true, index: true },
     customerName: { type: String, required: true },
+    phoneNumber: { type: String, default: '' },
+    address: { type: String, default: '' },
+    gstin: { type: String, default: '' },
     billNo: { type: String, required: true },
     billType: { type: String, enum: ['B2B', 'B2C'], required: true, index: true },
 
@@ -59,7 +62,7 @@ const billSummarySchema = new mongoose.Schema(
     availableBalance: { type: Number, default: 0 },
 
     // Backward-compatible fields used by existing screens/reports
-    customerType: { type: String, enum: ['B2B', 'B2C'], default: 'B2B' },
+    customerType: { type: String, enum: ['B2B', 'B2C', 'DEALER'], default: 'B2B' },
     // Preserve original SD classification while storing in B2B collection.
     dealerType: { type: String, default: '' },
     invoiceNo: { type: String, default: 'N/A' },
