@@ -56,7 +56,7 @@ export default function CreateCustomerMaster({ navigation, route }) {
     const trimmedPhone = String(customerNumber || "").trim();
     const normalizedType =
       customerType === "Dealer" ? "dealer" : customerType === "B2C" ? "b2c" : "b2b";
-    const normalizedCustomerType = customerType === "Dealer" ? "Dealer" : customerType;
+    const normalizedCustomerType = customerType === "Dealer" ? "DEALER" : customerType;
     const normalizedShopName = String(shopName || "").trim();
 
     const newCustomer = {
@@ -142,7 +142,8 @@ export default function CreateCustomerMaster({ navigation, route }) {
   const getListScreenName = (type) => {
     switch (type) {
       case "B2B": return "B2BCalculationPage";
-      case "Dealer": return "Dealer";
+      case "Dealer": 
+      case "DEALER": return "Dealer";
       default: return "B2CCalculationPage"; // B2C default
     }
   };
