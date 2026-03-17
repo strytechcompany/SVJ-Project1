@@ -88,6 +88,16 @@ export default function CreateTransaction({ navigation }) {
   const [billTypeLabel, setBillTypeLabel] = useState("");
   const [phone, setPhone] = useState("");
 
+  const normalizeCustomerType = (value, fallback = "B2B") => {
+    const raw = String(value || fallback || "").toUpperCase();
+    if (raw === "B2C") return "B2C";
+    if (raw === "DEALER") return "DEALER";
+    return "B2B";
+  };
+
+  const resolveCustomerRecordId = (customer) =>
+    customer?.id || customer?._id || customer?.customerId || "";
+
   // ── TOTALS (after useState, before useEffect) ───────────────
   const totalIssuePure = issueItems.reduce(
     (acc, it) => acc + Number(it.purity || 0),
@@ -198,6 +208,11 @@ export default function CreateTransaction({ navigation }) {
       return false;
     }
   }, []);
+  // Load latest B2B GST settings from DB on mount
+  useEffect(() => {
+    fetchLatestB2BGstSettings();
+  }, [fetchLatestB2BGstSettings]);
+
 
   // ✅ Load latest B2B GST settings from DB whenever page is focused
   useFocusEffect(
@@ -326,13 +341,15 @@ export default function CreateTransaction({ navigation }) {
       const b2bResponse = await fetch(`${base_url}/customers`);
       const b2bData = await b2bResponse.json();
 
-      
-
       const b2bCustomers = b2bData
-        .filter((customer) => customer.customerName) // ✅ filter empty names
+        .filter((customer) => {
+          if (!customer.customerName) return false;
+          const normalizedType = normalizeCustomerType(customer.customerType, "B2B");
+          return normalizedType === "B2B";
+        })
         .map((customer) => ({
           ...customer,
-          customerType: "B2B",
+          customerType: normalizeCustomerType(customer.customerType, "B2B"),
           customerNumber: customer.phoneNumber,
           customerId: customer.customerId,
           id: customer._id, // ✅ MongoDB _id for API calls
@@ -354,8 +371,6 @@ export default function CreateTransaction({ navigation }) {
           updatedAt: customer.updatedAt || new Date().toISOString(),
         }));
 
-      
-
       setCustomers(b2bCustomers);
     } catch (error) {
       console.error("Error fetching customers:", error);
@@ -373,7 +388,15 @@ export default function CreateTransaction({ navigation }) {
         const data = await resp.json();
         // Extract last 5 unique customer names
         const names = [
-          ...new Set(data.map((t) => t.customerName).filter(Boolean)),
+          ...new Set(
+            data
+              .filter(
+                (t) =>
+                  normalizeCustomerType(t?.customerType || t?.type, "B2B") === "B2B"
+              )
+              .map((t) => t.customerName)
+              .filter(Boolean),
+          ),
         ].slice(0, 5);
         setRecentNames(names);
       }
@@ -465,11 +488,10 @@ export default function CreateTransaction({ navigation }) {
         }
       };
 
-      fetchStock();
+      await fetchStock();
     } catch (error) {
       console.error("Error fetching items:", error);
-      Alert.alert("Error", "Failed to load items from stock master");
-      setItemsList([]);
+      Alert.alert("Error", "Failed to load items");
     } finally {
       setLoadingItems(false);
     }
@@ -492,7 +514,13 @@ export default function CreateTransaction({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       if (route.params?.newCustomer) {
-        const newCust = route.params.newCustomer;
+        const newCust = {
+          ...route.params.newCustomer,
+          customerType: normalizeCustomerType(
+            route.params.newCustomer?.customerType,
+            "B2B",
+          ),
+        };
         setCustomers((prev) => [...prev, newCust]);
         setSelectedCustomer(newCust);
         setPhone(newCust.phone || "");
@@ -660,7 +688,7 @@ export default function CreateTransaction({ navigation }) {
         id: customerId,
         name: c.customerName || c.name || t.customerName || "Unknown",
         phone: c.customerNumber || c.phone || c.phoneNumber || "",
-        customerType: c.customerType || c.type || "B2B",
+        customerType: normalizeCustomerType(c.customerType || c.type, "B2B"),
         gst: c.gstin || "",
         address: c.address || "",
       });
@@ -1285,7 +1313,9 @@ export default function CreateTransaction({ navigation }) {
 
     const transactionData = {
       customerName: selectedCustomer.name,
-      customerId: selectedCustomer.id,
+      customerId: resolveCustomerRecordId(selectedCustomer),
+      customerType: normalizeCustomerType(selectedCustomer.customerType, "B2B"),
+      type: normalizeCustomerType(selectedCustomer.customerType, "B2B"),
       issueTotal: Number(totalIssueWeight.toFixed(3)),
       issuePure: Number(totalIssuePure.toFixed(3)),
       oldBalance: Number(oldBalance.toFixed(3)),
@@ -1316,10 +1346,12 @@ export default function CreateTransaction({ navigation }) {
         console.log("✅ Transaction saved:", savedTransaction);
       }
 
-      const isB2C = selectedCustomer.customerType === "B2C";
+      const customerRecordId = resolveCustomerRecordId(selectedCustomer);
+      const customerType = normalizeCustomerType(selectedCustomer.customerType, "B2B");
+      const isB2C = customerType === "B2C";
       const updateEndpoint = isB2C
-        ? `${base_url}/customersB2C/${selectedCustomer.id}`
-        : `${base_url}/customers/${selectedCustomer.id}`;
+        ? `${base_url}/customersB2C/${selectedCustomer.id || selectedCustomer._id}`
+        : `${base_url}/customers/${selectedCustomer.id || selectedCustomer._id}`;
 
       // Calculate updated balances to save back to master record
       const currentNet = oldBalance - advBalance;
@@ -1368,18 +1400,19 @@ export default function CreateTransaction({ navigation }) {
         }
       }
 
-      const customerType = selectedCustomer.customerType || "B2B";
-
       const billSummaryData = {
-        customerId: selectedCustomer.id,
+        customerId: customerRecordId,
         customerName: selectedCustomer.name,
         customerType: customerType,
+        billType: customerType === "B2C" ? "B2C" : "B2B",
         date: date,
+        oldBalance: Number(final_OB.toFixed(3)),
         ob: Number(oldBalance.toFixed(3)),
         issuePure: Number(totalIssuePure.toFixed(3)),
         receiptPure: Number(totalReceiptPure.toFixed(3)),
         cashPure: Number(totalCashPure.toFixed(3)),
         gstPure: Number((gstEnabled ? gstPureValue : 0).toFixed(3)),
+        advanceBalance: Number(final_AB.toFixed(3)),
         advBal: Number(advBalance.toFixed(3)),
         currentBalance: newNet,
         issueItems: issueItems.map((item) => ({
@@ -1445,8 +1478,9 @@ export default function CreateTransaction({ navigation }) {
       navigation.navigate("BillPreview", {
         customer: {
           name: selectedCustomer.name,
-          id: selectedCustomer.id,
-          customerId: selectedCustomer.id,
+          id: selectedCustomer.id || selectedCustomer._id,
+          customerId: customerRecordId,
+          customerType: customerType,
           billNo: generatedBillNo,
           ...(customerType === "B2C" ? { invoiceNo: generatedBillNo } : {}),
           phone: selectedCustomer.phone || "",
