@@ -78,8 +78,24 @@ const tamilFontFamily = Platform.select({
 });
 
 export default function BillPreview({ route, navigation }) {
-  const { issueItems, receiptItems, cashTable, summary, report, transactions, items, gst, estimate, suspense, order, printAgain } = route.params || {};
+  const routeParams = route.params || {};
+  const {
+    issueItems,
+    receiptItems,
+    cashTable,
+    summary: rawSummary,
+    report,
+    transactions,
+    items,
+    gst,
+    estimate,
+    suspense,
+    order,
+    printAgain,
+  } = routeParams;
+  const summary = rawSummary || {};
   const customer = route.params?.customer || {};
+  const isFromHistory = Boolean(route.params?.fromHistory);
 const toNum = (value, fallback = 0) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -190,6 +206,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const [cashAmount, setCashAmount] = useState('');
   const [upiAmount, setUpiAmount] = useState('');
   const [showUpi, setShowUpi] = useState(false);
+  const [b2cCashReceived, setB2cCashReceived] = useState(() => {
+    const raw = transactions?.[0]?.manualCashAmount;
+    if (raw === null || raw === undefined) return "";
+    const txt = String(raw).trim();
+    return txt && txt !== "0" && txt !== "0.0" && txt !== "0.00" ? txt : "";
+  });
   const [b2cConversion, setB2cConversion] = useState({
     applied: false,
     goldWeight: 0,
@@ -202,6 +224,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const isSharingRef = useRef(false);
   const hasAutoPrintedRef = useRef(false);
   const hasAutoSharedRef = useRef(false);
+  const hasAutoSavedRef = useRef(false);
+  const lastAutoSaveKeyRef = useRef("");
   const preparedPdfUriRef = useRef("");
 
   const [upiId, setUpiId] = useState("kaliyamoorthirengaraj@okaxis");
@@ -214,6 +238,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       : String(existing);
   });
   const [thirukkural, setThirukkural] = useState(DEFAULT_THIRUKKURAL);
+  const [homeGoldRate, setHomeGoldRate] = useState("");
 
   useFocusEffect(
     useCallback(() => {
@@ -252,8 +277,17 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
           setThirukkural(DEFAULT_THIRUKKURAL);
         }
       };
+      const loadHomeGoldRate = async () => {
+        try {
+          const storedGoldRate = await AsyncStorage.getItem("goldRate");
+          setHomeGoldRate(storedGoldRate ? String(storedGoldRate) : "");
+        } catch (error) {
+          console.error("Error loading goldRate from HomeScreen:", error);
+        }
+      };
       loadSelectedUpiId();
       loadThirukkural();
+      loadHomeGoldRate();
     }, [])
   );
   const [qrDataURL, setQrDataURL] = useState('');
@@ -275,6 +309,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const finalBalance = toNum(summary?.current, 0);
   const summaryOB = toNum(summary?.ob, toNum(customer?.oldBalance, 0));
   const summaryAB = toNum(summary?.ab, toNum(customer?.advanceBalance, 0));
+  const summaryCurrent = toNum(summary?.current, NaN);
+  const hasSummaryCurrent = Number.isFinite(summaryCurrent);
 
 
   // Calculate separate totals for issue and receipt
@@ -302,6 +338,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const summaryReceipt = Math.abs(summaryReceiptRaw) < 0.0001 && Math.abs(receiptFromRows) > 0.0001 ? receiptFromRows : summaryReceiptRaw;
   const summaryCash = Math.abs(summaryCashRaw) < 0.0001 && Math.abs(cashFromRows) > 0.0001 ? cashFromRows : summaryCashRaw;
   const summaryGstPure = summaryGstPureRaw;
+  const isB2BPreview = String(customer?.type || customer?.customerType || "").toUpperCase() === "B2B";
+  const isAdvanceBalanceCase = summaryOB === 0 && summaryAB > 0;
+  const computedCurrent = isB2BPreview && isAdvanceBalanceCase
+    ? (summaryAB + summaryIssue - summaryReceipt - summaryCash)
+    : (summaryOB - summaryAB) + summaryIssue + summaryGstPure - summaryReceipt - summaryCash;
   const displaySummary = {
     issue: summaryIssue.toFixed(3),
     receipt: summaryReceipt.toFixed(3),
@@ -310,7 +351,104 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     receiptPlusCash: (summaryReceipt + summaryCash).toFixed(3),
     ob: summaryOB.toFixed(3),
     ab: summaryAB.toFixed(3),
-    current: toNum(summary?.current, (summaryOB - summaryAB) + summaryIssue + summaryGstPure - summaryReceipt - summaryCash).toFixed(3),
+    current: toNum(summary?.current, computedCurrent).toFixed(3),
+  };
+  const summaryStartLabel = summaryOB !== 0 ? "Old Balance" : (summaryAB !== 0 ? "Advance Balance" : "Old Balance");
+  const summaryStartValue = summaryOB !== 0 ? summaryOB : summaryAB;
+  const summaryLeftSum = isAdvanceBalanceCase
+    ? summaryStartValue + toNum(displaySummary.issue, 0)
+    : summaryStartValue + toNum(displaySummary.issue, 0) + toNum(displaySummary.gstPure, 0);
+  const summaryRightSum =
+    toNum(displaySummary.receipt, 0) +
+    toNum(displaySummary.cash, 0);
+  const summaryFinal = (isFromHistory && hasSummaryCurrent)
+    ? summaryCurrent
+    : (summaryLeftSum - summaryRightSum);
+  const summaryFinalLabel = summaryFinal >= 0 ? "Old Balance" : "Advance Balance";
+  const summaryFinalValue = Math.abs(summaryFinal);
+  const dealerOldBalanceValue = toNum(summaryStartValue, 0);
+  const dealerReceiptValue = toNum(displaySummary.receipt, 0);
+  const dealerIssueValue = toNum(displaySummary.issue, 0);
+  const dealerCashValue = toNum(displaySummary.cash, 0);
+  const dealerFinalBalanceRaw = dealerOldBalanceValue + dealerReceiptValue - (dealerIssueValue + dealerCashValue);
+  const dealerFinalIsOldBalance = dealerFinalBalanceRaw >= 0;
+  const dealerFinalBalanceValue = Math.abs(dealerFinalBalanceRaw);
+  const dealerFinalBalanceLabel = dealerFinalIsOldBalance ? "Old Balance" : "Advance Balance";
+  const dealerActiveBalanceLabel = summaryStartLabel;
+  const formatB2BSummaryValue = (value) => toNum(value, 0).toFixed(3);
+  const hasB2BAdvanceBalance = customer?.type === "B2B" && toNum(summaryAB, 0) > 0;
+  const b2bAdvanceBalance = toNum(summaryAB, 0);
+  const b2bTotalIssuePure = toNum(totalIssuePure, 0);
+  const b2bTotalReceiptPure = toNum(totalReceiptPure, 0);
+  const b2bTotalCashPure = toNum(cashFromRows, 0);
+  const b2bFinalAdvanceBalance =
+    b2bAdvanceBalance + b2bTotalIssuePure - b2bTotalReceiptPure - b2bTotalCashPure;
+  const b2bGstPureValue = formatB2BSummaryValue(displaySummary.gstPure);
+  const b2bSummaryValues = {
+    oldBalance: formatB2BSummaryValue(summaryStartValue),
+    issue: formatB2BSummaryValue(displaySummary.issue),
+    receipt: formatB2BSummaryValue(displaySummary.receipt),
+    cash: formatB2BSummaryValue(displaySummary.cash),
+    finalBalance: formatB2BSummaryValue(summaryFinalValue),
+    leftSum: formatB2BSummaryValue(summaryLeftSum),
+    rightSum: formatB2BSummaryValue(summaryRightSum),
+  };
+  const dealerSummaryValues = {
+    oldBalance: formatB2BSummaryValue(dealerOldBalanceValue),
+    receipt: formatB2BSummaryValue(dealerReceiptValue),
+    issue: formatB2BSummaryValue(dealerIssueValue),
+    cash: formatB2BSummaryValue(dealerCashValue),
+    finalBalance: formatB2BSummaryValue(dealerFinalBalanceValue),
+    finalLabel: dealerFinalBalanceLabel,
+    activeLabel: dealerActiveBalanceLabel,
+    finalIsOldBalance: dealerFinalIsOldBalance,
+  };
+
+  useEffect(() => {
+    if (!isDealerPreview) return;
+    if (hasAutoSavedRef.current) return;
+    const customerId = getCustomerIdForLookup();
+    if (!customerId) return;
+    const issueKey = safeIssueItems.length;
+    const receiptKey = safeReceiptItems.length;
+    const cashKey = safeCashTable.length;
+    const totalsKey = [
+      summaryStartValue,
+      displaySummary.issue,
+      displaySummary.receipt,
+      displaySummary.cash,
+      dealerFinalBalanceRaw,
+      currentBillNo || "",
+      customer?.date || "",
+    ].join("|");
+    const autoSaveKey = `${customerId}|${issueKey}|${receiptKey}|${cashKey}|${totalsKey}`;
+    if (lastAutoSaveKeyRef.current === autoSaveKey) return;
+    lastAutoSaveKeyRef.current = autoSaveKey;
+    hasAutoSavedRef.current = true;
+    const timer = setTimeout(() => {
+      handleSaveBill();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [
+    isDealerPreview,
+    safeIssueItems.length,
+    safeReceiptItems.length,
+    safeCashTable.length,
+    summaryStartValue,
+    displaySummary.issue,
+    displaySummary.receipt,
+    displaySummary.cash,
+    dealerFinalBalanceRaw,
+    currentBillNo,
+    customer?.date,
+  ]);
+  const b2bAdvanceSummaryValues = {
+    issue: formatB2BSummaryValue(b2bTotalIssuePure),
+    advanceBalance: formatB2BSummaryValue(b2bAdvanceBalance),
+    receipt: formatB2BSummaryValue(b2bTotalReceiptPure),
+    cash: formatB2BSummaryValue(b2bTotalCashPure),
+    finalAdvanceBalance: formatB2BSummaryValue(b2bFinalAdvanceBalance),
+    expression: `${formatB2BSummaryValue(b2bTotalIssuePure)} + ${formatB2BSummaryValue(b2bAdvanceBalance)} - (${formatB2BSummaryValue(b2bTotalReceiptPure)} + ${formatB2BSummaryValue(b2bTotalCashPure)})`,
   };
   const b2cRateFallback =
     toNum(safeCashTable?.[0]?.goldRate, 0) ||
@@ -358,7 +496,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     };
   });
   const totalB2CItemFinal = normalizedB2CItems.reduce((sum, item) => sum + toNum(item?.final, 0), 0);
+  const totalB2CItemsTotal = normalizedB2CItems.reduce((sum, item) => sum + toNum(item?.total, 0), 0);
   const totalB2COldGoldAmount = normalizedB2CReceiptItems.reduce((sum, item) => sum + toNum(item?.amount, 0), 0);
+  const b2cTotalCashAmount = normalizedB2CReceiptItems.length > 0
+    ? toNum(totalB2CItemFinal, 0) - toNum(totalB2COldGoldAmount, 0)
+    : toNum(totalB2CItemFinal, 0);
   const computedB2CTotalAmount = totalB2CItemFinal - totalB2COldGoldAmount;
   const reportCash = toNum(report?.cash, NaN);
   const displayB2CTotalAmount =
@@ -367,10 +509,17 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       : computedB2CTotalAmount;
   const displayB2COldBalance = toNum(summary?.ob, toNum(customer?.oldBalance, 0));
   const displayB2CAdvanceBalance = toNum(summary?.ab, toNum(customer?.advanceBalance, 0));
+  const homeGoldRateNum = toNum(homeGoldRate, 0);
   const currentB2CGoldRate =
+    (homeGoldRateNum > 0 ? homeGoldRateNum : 0) ||
     toNum(customer?.goldRate, 0) ||
     toNum(normalizedB2CItems?.[0]?.rate, 0) ||
     b2cRateFallback;
+  const b2cGoldRateAtPurchase =
+    toNum(normalizedB2CItems?.[0]?.rate, 0) ||
+    toNum(summary?.goldRate, 0) ||
+    b2cRateFallback ||
+    currentB2CGoldRate;
   const hasManualCashForB2C = isB2C && String(cashAmount || "").trim() !== "";
   const parsedCashAmount = hasManualCashForB2C ? Math.max(0, toNum(cashAmount, 0)) : 0;
   const parsedUpiAmount = hasManualCashForB2C ? Math.max(0, toNum(upiAmount, 0)) : 0;
@@ -383,6 +532,37 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const effectiveB2CAdvanceBalance = b2cConversion.applied
     ? b2cConversion.updatedAB
     : displayB2CAdvanceBalance;
+  const b2cHasOldBalance = Math.abs(toNum(customer?.oldBalance, summaryOB)) > 0.0001 || Math.abs(toNum(summaryOB, 0)) > 0.0001;
+  const b2cHasAdvanceBalance = !b2cHasOldBalance && (Math.abs(toNum(customer?.advanceBalance, summaryAB)) > 0.0001 || Math.abs(toNum(summaryAB, 0)) > 0.0001);
+  const b2cBalanceLabel = b2cHasOldBalance ? "Old Balance" : b2cHasAdvanceBalance ? "Advance Balance" : "Balance";
+  const b2cBalanceWeight = b2cHasOldBalance
+    ? toNum(effectiveB2COldBalance, 0)
+    : b2cHasAdvanceBalance
+      ? toNum(effectiveB2CAdvanceBalance, 0)
+      : 0;
+  const b2cBalanceRupees = toNum(b2cBalanceWeight, 0) * toNum(currentB2CGoldRate, 0);
+  const b2cFinalPayableAmount = toNum(b2cTotalCashAmount, 0) + (b2cHasOldBalance ? b2cBalanceRupees : (b2cHasAdvanceBalance ? -b2cBalanceRupees : 0));
+  const b2cCashReceivedNum = Math.max(0, toNum(b2cCashReceived, 0));
+  const b2cBalanceAfterCash = toNum(b2cFinalPayableAmount, 0) - b2cCashReceivedNum;
+  const b2cBalanceAfterCashGrams =
+    toNum(currentB2CGoldRate, 0) > 0 ? (toNum(b2cBalanceAfterCash, 0) / toNum(currentB2CGoldRate, 0)) : 0;
+
+  // When opening a saved bill from BillHistory, prefer the stored balances instead of re-calculating.
+  const savedTx = transactions?.[0] || {};
+  const savedCurrentBal = toNum(savedTx?.currentBalance, toNum(savedTx?.availableBalance, NaN));
+  const savedOB = toNum(savedTx?.oldBalance, NaN);
+  const savedAB = toNum(savedTx?.advanceBalance, NaN);
+  const savedCurrentFromOBAB =
+    (Number.isFinite(savedOB) ? savedOB : 0) - (Number.isFinite(savedAB) ? savedAB : 0);
+  const savedCurrentGrams = Number.isFinite(savedCurrentBal) ? savedCurrentBal : savedCurrentFromOBAB;
+
+  const b2cDisplayBalanceAfterCash = isFromHistory
+    ? toNum(savedCurrentGrams, 0) * toNum(currentB2CGoldRate, 0)
+    : b2cBalanceAfterCash;
+  const b2cDisplayBalanceAfterCashGrams = isFromHistory ? savedCurrentGrams : b2cBalanceAfterCashGrams;
+
+  const b2cNextOldBalance = Math.max(0, b2cBalanceAfterCashGrams);
+  const b2cNextAdvanceBalance = Math.max(0, -b2cBalanceAfterCashGrams);
   const estimateItems = Array.isArray(estimate?.items) ? estimate.items : [];
   const estimateGSTEnabled = Boolean(estimate?.enableGST);
   const estimateSubTotal = estimateItems.length > 0
@@ -1045,10 +1225,22 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                 </tr>` : ''}
               </table>
             <h2>CASH:</h2>
-            <p>${cashTable && cashTable.length > 0
-          ? cashTable.map(c => `${c.rupees} / ${c.goldRate} â†’ ${c.pure}`).join('<br/>')
-          : 'N/A'
-        }</p>
+            ${cashTable && cashTable.length > 0 ? `
+              <table>
+                <tr>
+                  <th>Amount</th>
+                  <th>Rate</th>
+                  <th style="text-align:right;">Pure</th>
+                </tr>
+                ${cashTable.map(c => `
+                  <tr>
+                    <td>${c.rupees}</td>
+                    <td>${c.goldRate}</td>
+                    <td style="text-align:right;">${c.pure}</td>
+                  </tr>
+                `).join('')}
+              </table>
+            ` : '<p>N/A</p>'}
             ${gst && (gst.enabled || (parseFloat(gst.amount) > 0)) ? `
               <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
               <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
@@ -1085,7 +1277,29 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
             <h2>SUMMARY:</h2>
             <table>
-              ${summaryOB !== 0 ? `
+              ${isDealerPreview ? `
+                <tr>
+                  <th>${dealerSummaryValues.activeLabel}</th>
+                  <th>RECEIPT</th>
+                  <th>ISSUE</th>
+                  <th>CASH</th>
+                  <th>${dealerSummaryValues.activeLabel}</th>
+                </tr>
+                <tr>
+                  <td>${dealerSummaryValues.oldBalance}</td>
+                  <td>${dealerSummaryValues.receipt}</td>
+                  <td>${dealerSummaryValues.issue}</td>
+                  <td>${dealerSummaryValues.cash}</td>
+                  <td>${dealerSummaryValues.finalBalance}</td>
+                </tr>
+                <tr>
+                  <td>${dealerSummaryValues.oldBalance}</td>
+                  <td>+ ${dealerSummaryValues.receipt}</td>
+                  <td>- ${dealerSummaryValues.issue}</td>
+                  <td>- ${dealerSummaryValues.cash}</td>
+                  <td><strong>= ${dealerSummaryValues.finalBalance}</strong></td>
+                </tr>
+              ` : summaryOB !== 0 ? `
                 <!-- OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | Old Balance -->
                 <tr>
                   <th>Old Balance</th>
@@ -1163,6 +1377,32 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     customer?.customerId ||
     transactions?.[0]?.customerId ||
     "";
+
+  const normalizeIdValue = (value) => {
+    if (value === undefined || value === null) return "";
+    const v = String(value).trim();
+    if (!v) return "";
+    const lower = v.toLowerCase();
+    if (lower === "null" || lower === "undefined" || lower === "n/a" || lower === "na" || lower === "-") return "";
+    return v;
+  };
+
+  const getCustomerIdForSave = () => {
+    const candidates = [
+      customer?._id,
+      customer?.id,
+      customer?.customerId,
+      transactions?.[0]?.customerId,
+      transactions?.[0]?.customer?._id,
+      transactions?.[0]?.customer?.id,
+      routeParams?.customerId,
+    ];
+    for (const candidate of candidates) {
+      const normalized = normalizeIdValue(candidate);
+      if (normalized) return normalized;
+    }
+    return "";
+  };
 
   const currentBillNo = resolveBillNoForDisplay(
     customer?.billNo ||
@@ -1658,18 +1898,29 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   <!-- Summary -->
   <div class="section-title">SUMMARY</div>
   <div class="summary-box">
-    ${summaryOB !== 0 ? `
-    <div class="summary-row"><span class="summary-label">Old Balance (OB)</span><span class="summary-value">${summaryOB.toFixed(3)} g</span></div>` : ''}
-    ${summaryAB !== 0 ? `
-    <div class="summary-row"><span class="summary-label">Advance Balance (AB)</span><span class="summary-value">${summaryAB.toFixed(3)} g</span></div>` : ''}
-    <div class="summary-row"><span class="summary-label">Issue</span><span class="summary-value">${displaySummary.issue} g</span></div>
-    <div class="summary-row"><span class="summary-label">Receipt</span><span class="summary-value">${displaySummary.receipt} g</span></div>
-    <div class="summary-row"><span class="summary-label">Cash</span><span class="summary-value">${displaySummary.cash} g</span></div>
-    ${parseFloat(displaySummary.gstPure) > 0 ? `<div class="summary-row"><span class="summary-label">GST Pure</span><span class="summary-value">${displaySummary.gstPure} g</span></div>` : ''}
-    <div class="summary-total">
-      <span>Current Balance</span>
-      <span>${displaySummary.current} g</span>
-    </div>
+    ${isDealerPreview ? `
+      <div class="summary-row"><span class="summary-label">${dealerSummaryValues.activeLabel}</span><span class="summary-value">${dealerSummaryValues.oldBalance} g</span></div>
+      <div class="summary-row"><span class="summary-label">Receipt</span><span class="summary-value">${dealerSummaryValues.receipt} g</span></div>
+      <div class="summary-row"><span class="summary-label">Issue</span><span class="summary-value">${dealerSummaryValues.issue} g</span></div>
+      <div class="summary-row"><span class="summary-label">Cash</span><span class="summary-value">${dealerSummaryValues.cash} g</span></div>
+      <div class="summary-total">
+        <span>${dealerSummaryValues.activeLabel}</span>
+        <span>${dealerSummaryValues.finalBalance} g</span>
+      </div>
+    ` : `
+      ${summaryOB !== 0 ? `
+      <div class="summary-row"><span class="summary-label">Old Balance (OB)</span><span class="summary-value">${summaryOB.toFixed(3)} g</span></div>` : ''}
+      ${summaryAB !== 0 ? `
+      <div class="summary-row"><span class="summary-label">Advance Balance (AB)</span><span class="summary-value">${summaryAB.toFixed(3)} g</span></div>` : ''}
+      <div class="summary-row"><span class="summary-label">Issue</span><span class="summary-value">${displaySummary.issue} g</span></div>
+      <div class="summary-row"><span class="summary-label">Receipt</span><span class="summary-value">${displaySummary.receipt} g</span></div>
+      <div class="summary-row"><span class="summary-label">Cash</span><span class="summary-value">${displaySummary.cash} g</span></div>
+      ${parseFloat(displaySummary.gstPure) > 0 ? `<div class="summary-row"><span class="summary-label">GST Pure</span><span class="summary-value">${displaySummary.gstPure} g</span></div>` : ''}
+      <div class="summary-total">
+        <span>Current Balance</span>
+        <span>${displaySummary.current} g</span>
+      </div>
+    `}
   </div>
   `}
 
@@ -1841,25 +2092,26 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		      console.warn("Renaming failed, sharing original URI", e);
 		    }
 
-		    // WhatsApp (and some Android share targets) can't reliably consume `file://` URIs.
-		    // Convert to a `content://` URI when possible.
-		    let uriToShare = sharingUri;
-		    if (Platform.OS === "android") {
-		      try {
-		        uriToShare = await FileSystem.getContentUriAsync(sharingUri);
-		      } catch (e) {
-		        console.warn("getContentUriAsync failed, falling back to file URI", e);
-		      }
-		    }
+		    // IMPORTANT: expo-sharing only supports local file URLs (file://).
+		    // Do not convert to content:// here; it will be rejected.
+		    const uriToShare = sharingUri;
 
 		    // On Android, calling Linking.openURL before Sharing.shareAsync often blocks the share sheet.
 		    // We only open the chat if NOT doing auto-share, or as a fallback.
 		    // For standard PDF sharing, shareAsync is much more reliable.
-		    await Sharing.shareAsync(uriToShare, {
-		      mimeType: "application/pdf",
-		      dialogTitle: "Send Bill on WhatsApp",
-		      UTI: "com.adobe.pdf",
-		    });
+		    try {
+		      await Sharing.shareAsync(uriToShare, {
+		        mimeType: "application/pdf",
+		        dialogTitle: "Send Bill on WhatsApp",
+		        UTI: "com.adobe.pdf",
+		      });
+		    } catch (shareErr) {
+		      console.error("ExpoSharing.shareAsync failed:", shareErr);
+		      throw new Error(
+		        shareErr?.message ||
+		          "Unable to open share sheet. Please try again."
+		      );
+		    }
 		  };
 
 	  const sendBillPdfViaWhatsAppCloudApi = async ({ waPhone, pdfUri } = {}) => {
@@ -2143,13 +2395,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	      // RNShare throws if user cancels or WhatsApp not installed — fall back to generic sheet
 	      console.warn('RNShare WhatsApp failed, falling back to expo-sharing:', rnShareErr?.message);
 	      try {
-	        await Sharing.shareAsync(fileUri, {
-	          mimeType: 'application/pdf',
-	          dialogTitle: waPhone ? `Send Bill PDF to ${waPhone}` : 'Send Bill PDF',
-	          UTI: 'com.adobe.pdf',
-	        });
+	        // Use the safer sharing flow (checks isAvailableAsync, verifies file exists,
+	        // and converts file:// -> content:// on Android).
+	        await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri: fileUri, isAuto: false });
 	      } catch (sharingErr) {
-	        throw new Error('Could not open share sheet. Please try again.');
+	        throw new Error(sharingErr?.message || 'Could not open share sheet. Please try again.');
 	      }
 	    }
 	  };
@@ -2379,12 +2629,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       const billType = String(customer?.type || customer?.customerType || "B2B").toUpperCase() === "B2C" ? "B2C" : "B2B";
       const isB2BBill = billType === "B2B";
       const isB2CBill = billType === "B2C";
-      const customerId =
-        customer?.id ||
-        customer?._id ||
-        customer?.customerId ||
-        transactions?.[0]?.customerId ||
-        "";
+      const customerId = getCustomerIdForSave();
 
       if (!customerId) {
         Alert.alert("Error", "Customer ID is missing. Please select a valid customer and try again.");
@@ -2398,6 +2643,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         transactions?.[0]?.invoiceNo,
         billType
       );
+      const allowBillNoForSave = !isDealerPreview && Boolean(billNo);
 
       const b2cItems = normalizedB2CItems;
       const b2cIssueRows = b2cItems.map((it) => {
@@ -2442,26 +2688,63 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       }));
       const issueRowsToSave = isB2BBill ? safeIssueItems : b2cIssueRows;
       const receiptRowsToSave = isB2BBill ? safeReceiptItems : b2cReceiptRows;
+      const displayedIssue = toNum(displaySummary?.issue, toNum(summary?.issue, toNum(totalIssuePure, 0)));
+      const displayedReceipt = toNum(displaySummary?.receipt, toNum(summary?.receipt, toNum(totalReceiptPure, 0)));
+      const displayedCash = toNum(displaySummary?.cash, toNum(summary?.cash, 0));
+      const displayedGstPure = toNum(displaySummary?.gstPure, toNum(summary?.gstPure, 0));
       const totalIssueWeightToSave = isB2BBill
-        ? toNum(summary?.issue, toNum(totalIssuePure, 0))
+        ? displayedIssue
         : b2cIssueRows.reduce((sum, row) => sum + toNum(row?.pure, 0), 0);
       const totalReceiptWeightToSave = isB2BBill
-        ? toNum(summary?.receipt, toNum(totalReceiptPure, 0))
+        ? displayedReceipt
         : b2cReceiptRows.reduce((sum, row) => sum + toNum(row?.netWeight, 0), 0);
       const oldBalanceForSave = isB2CBill
-        ? effectiveB2COldBalance
+        ? b2cNextOldBalance
         : toNum(customer?.oldBalance, summaryOB);
       const advanceBalanceForSave = isB2CBill
-        ? effectiveB2CAdvanceBalance
+        ? b2cNextAdvanceBalance
         : toNum(customer?.advanceBalance, summaryAB);
-      const availableBalanceForSave = isB2CBill
+      const b2bFinalNetBalance = summaryFinal;
+      const dealerFinalNetBalance = dealerFinalBalanceRaw;
+      const finalNetBalanceForSave = isB2CBill
         ? toNum(oldBalanceForSave, 0) - toNum(advanceBalanceForSave, 0)
-        : toNum(summary?.current, toNum(displaySummary?.current, finalBalance));
+        : toNum(isDealerPreview ? dealerFinalNetBalance : b2bFinalNetBalance, 0);
+      const availableBalanceForSave = finalNetBalanceForSave;
+      const finalB2BOldBalance = isB2BBill
+        ? (availableBalanceForSave > 0 ? availableBalanceForSave : 0)
+        : oldBalanceForSave;
+      const finalB2BAdvanceBalance = isB2BBill
+        ? (availableBalanceForSave < 0 ? Math.abs(availableBalanceForSave) : 0)
+        : advanceBalanceForSave;
+      const finalDealerOldBalance = isDealerPreview
+        ? (availableBalanceForSave >= 0 ? availableBalanceForSave : 0)
+        : oldBalanceForSave;
+      const finalDealerAdvanceBalance = isDealerPreview
+        ? (availableBalanceForSave < 0 ? Math.abs(availableBalanceForSave) : 0)
+        : advanceBalanceForSave;
+
+      const saveSummary = {
+        ...summary,
+        ob: toNum(summaryStartValue, 0),
+        ab: toNum(summaryAB, 0),
+        issue: displayedIssue,
+        receipt: displayedReceipt,
+        cash: displayedCash,
+        gstPure: displayedGstPure,
+        current: finalNetBalanceForSave,
+      };
 
       const payload = {
         customerId: String(customerId),
         customerName: customer?.name || customer?.customerName || "Unknown",
-        ...(billNo ? { billNo: String(billNo) } : {}),
+        ...(isDealerPreview
+          ? {
+            phoneNumber: customer?.phone || customer?.phoneNumber || customer?.customerNumber || "",
+            address: customer?.address || "",
+            gstin: customer?.gstin || customer?.gst || "",
+          }
+          : {}),
+        ...(allowBillNoForSave ? { billNo: String(billNo) } : {}),
         billType,
         dealerType: isDealerPreview ? (customer?.type || customer?.customerType || previewTx?.dealerType || "Dealer") : "",
         receiptImage: dealerProofImageUri || null,
@@ -2472,20 +2755,26 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         ...(isB2BBill ? {} : { items: b2cItems }),
         totalIssueWeight: totalIssueWeightToSave,
         totalReceiptWeight: totalReceiptWeightToSave,
-        cashAmount: toNum(report?.cash, toNum(displaySummary?.cash, toNum(summary?.cash, 0))),
+        cashAmount: toNum(report?.cash, displayedCash),
         kadaiAmount: isB2CBill ? Math.max(0, toNum(kadaiAmount, 0)) : 0,
-        manualCashAmount: hasManualCashForB2C ? parsedCashAmount.toFixed(2) : "",
+        manualCashAmount: isB2CBill ? b2cCashReceivedNum.toFixed(2) : (hasManualCashForB2C ? parsedCashAmount.toFixed(2) : ""),
         upiAmount: hasManualCashForB2C ? parsedUpiAmount.toFixed(2) : "",
         b2cUpiGoldValue: b2cConversion.applied ? b2cUpiGoldValue.toFixed(3) : "",
         isConvertedToGold: Boolean(b2cConversion.applied || transactions?.[0]?.isConvertedToGold),
         goldRate: toNum(customer?.goldRate, currentB2CGoldRate),
-        advanceBalance: advanceBalanceForSave,
-        oldBalance: oldBalanceForSave,
+        advanceBalance: isDealerPreview ? finalDealerAdvanceBalance : finalB2BAdvanceBalance,
+        oldBalance: isDealerPreview ? finalDealerOldBalance : finalB2BOldBalance,
         availableBalance: availableBalanceForSave,
         currentBalance: availableBalanceForSave,
         createdAt: new Date().toISOString(),
         cashTable: safeCashTable,
-        summary,
+        ...(isB2BBill
+          ? {
+            ob: toNum(oldBalanceForSave, 0),
+            advBal: toNum(advanceBalanceForSave, 0),
+          }
+          : {}),
+        summary: saveSummary,
         gst,
         ...(!isB2BBill && billNo ? { invoiceNo: String(billNo) } : {}),
         date: (() => {
@@ -2501,25 +2790,20 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         })(),
       };
 
-      if (isB2CBill && b2cConversion.applied) {
-        const customerEndpoint = `${base_url}/customersB2C/${customerId}`;
-        const currentRes = await fetch(customerEndpoint);
-        const currentData = currentRes.ok ? await currentRes.json() : {};
-        const updatedCustomer = {
-          ...currentData,
-          oldBalance: toNum(oldBalanceForSave, 0).toFixed(3),
-          advanceBalance: toNum(advanceBalanceForSave, 0).toFixed(3),
-          currentBalance: toNum(availableBalanceForSave, 0).toFixed(3),
-          availableBalance: toNum(availableBalanceForSave, 0).toFixed(3),
-        };
+      if (isB2CBill) {
+        const customerEndpoint = `${base_url}/customersB2C/${customerId}/balances`;
         const updateRes = await fetch(customerEndpoint, {
-          method: "PUT",
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updatedCustomer),
+          body: JSON.stringify({
+            oldBalance: toNum(oldBalanceForSave, 0),
+            advanceBalance: toNum(advanceBalanceForSave, 0),
+            billId: transactions?.[0]?._id || transactions?.[0]?.id || "",
+          }),
         });
         if (!updateRes.ok) {
           const err = await updateRes.text();
-          throw new Error(err || "Failed to update B2C customer old balance");
+          throw new Error(err || "Failed to update B2C customer balance");
         }
       }
 
@@ -2625,27 +2909,33 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             <Text style={styles.billTitle}>{estimate ? 'ESTIMATE BILL' : suspense ? 'SUSPENSE BILL' : order ? 'ORDER RECEIPT' : 'BILL'}</Text>
 
             <View style={styles.headerRow}>
-              <View>
-                {!estimate && !suspense && !order && <Text>Bill No : {currentBillNo || 'N/A'}</Text>}
-                {order && <Text>Order No : {order.orderNo}</Text>}
-                <Text>Name : {estimate ? (estimate.itemName || "Estimate Customer") : order ? order.customer : customer.name}</Text>
-                {!estimate && <Text>Phone : {order ? order.phone : (customer.phone || customer.phoneNumber || customer.customerNumber || 'N/A')}</Text>}
-                <Text>Address : {customer?.address || 'N/A'}</Text>
-                <Text>GST No : {customer?.gstin || 'N/A'}</Text>
+              <View style={styles.headerColLeft}>
+                {!estimate && !suspense && !order && <Text style={styles.headerText}>Bill No : {currentBillNo || 'N/A'}</Text>}
+                {order && <Text style={styles.headerText}>Order No : {order.orderNo}</Text>}
+                <Text style={styles.headerText}>Name : {estimate ? (estimate.itemName || "Estimate Customer") : order ? order.customer : customer.name}</Text>
+                {!estimate && <Text style={styles.headerText}>Phone : {order ? order.phone : (customer.phone || customer.phoneNumber || customer.customerNumber || 'N/A')}</Text>}
+                <Text style={styles.headerText}>Address : {customer?.address || 'N/A'}</Text>
+                <Text style={styles.headerText}>GST No : {customer?.gstin || 'N/A'}</Text>
               </View>
 
-              <View>
-                <Text>Type : {estimate ? 'Estimate' : order ? 'Order' : customer.type}</Text>
-                <Text>Date : {estimate ? new Date().toLocaleDateString() : order ? order.date : customer.date}</Text>
+              <View style={styles.headerColRight}>
+                <Text style={[styles.headerText, styles.headerTextRight]}>Type : {estimate ? 'Estimate' : order ? 'Order' : customer.type}</Text>
+                <Text style={[styles.headerText, styles.headerTextRight]}>Date : {estimate ? new Date().toLocaleDateString() : order ? order.date : customer.date}</Text>
                 {estimate ? (
-                  <Text>OD : N/A</Text>
+                  <Text style={[styles.headerText, styles.headerTextRight]}>OD : N/A</Text>
                 ) : (
                   <>
                     {customer.oldBalance && parseFloat(customer.oldBalance) !== 0 ? (
-                      <Text>Old Balance : {customer.oldBalance}</Text>
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Old Balance : {customer.oldBalance}</Text>
                     ) : null}
                     {customer.advanceBalance && parseFloat(customer.advanceBalance) !== 0 ? (
-                      <Text>Advance Balance : {customer.advanceBalance}</Text>
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Advance Balance : {customer.advanceBalance}</Text>
+                    ) : null}
+                    {isB2C && customer.advanceBalance && parseFloat(customer.advanceBalance) !== 0 && toNum(b2cGoldRateAtPurchase, 0) > 0 ? (
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Gold Rate (Past) : {"\u20B9"}{toNum(b2cGoldRateAtPurchase).toFixed(2)}/g</Text>
+                    ) : null}
+                    {isB2C && homeGoldRateNum > 0 ? (
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Gold Rate Today : {"\u20B9"}{toNum(homeGoldRateNum).toFixed(2)}/g</Text>
                     ) : null}
                   </>
                 )}
@@ -2961,37 +3251,97 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
                 <View style={styles.b2cCardBody}>
                   <View style={styles.b2cNormalRow}>
-                    <Text style={styles.b2cLabel}>Total Cash Amount</Text>
-                    <Text style={styles.b2cValue}>₹ {toNum(totalB2CItemFinal).toFixed(2)}</Text>
+                    <View style={styles.b2cRowLeft}>
+                      <Text style={styles.b2cLabel}>Total Cash Amount</Text>
+                    </View>
+                    <View style={styles.b2cRowRight}>
+                      <Text style={styles.b2cValue} numberOfLines={1}>
+                        {"\u20B9"} {toNum(b2cTotalCashAmount).toFixed(2)}
+                      </Text>
+                    </View>
                   </View>
                   
                   <View style={styles.b2cNormalRow}>
-                    <Text style={styles.b2cLabel}>Receipt Amount</Text>
-                    <Text style={styles.b2cValue}>₹ {toNum(totalB2COldGoldAmount).toFixed(2)}</Text>
+                    <View style={styles.b2cRowLeft}>
+                      <Text style={styles.b2cLabel}>{b2cBalanceLabel}</Text>
+                      <Text style={styles.b2cFormulaText} numberOfLines={2}>
+                        ({toNum(b2cBalanceWeight).toFixed(3)} g x {"\u20B9"} {toNum(currentB2CGoldRate).toFixed(2)}/g)
+                      </Text>
+                    </View>
+                    <View style={styles.b2cRowRight}>
+                      <Text style={styles.b2cValue} numberOfLines={1}>
+                        {b2cHasAdvanceBalance ? "- " : ""}{"\u20B9"} {Math.abs(toNum(b2cBalanceRupees)).toFixed(2)}
+                      </Text>
+                    </View>
                   </View>
                   
                   <View style={styles.b2cHighlightRow}>
-                    <Text style={styles.b2cHighlightLabel}>Final Payable Amount</Text>
-                    <Text style={styles.b2cHighlightValue}>₹ {toNum(displayB2CTotalAmount).toFixed(2)}</Text>
+                    <View style={styles.b2cRowLeft}>
+                      <Text style={styles.b2cHighlightLabel}>Final Payable Amount</Text>
+                    </View>
+                    <View style={styles.b2cRowRight}>
+                      <Text style={styles.b2cHighlightValue} numberOfLines={1}>
+                        {"\u20B9"} {toNum(b2cFinalPayableAmount).toFixed(2)}
+                      </Text>
+                    </View>
                   </View>
 
-                  <View style={styles.b2cDividerLine} />
-                  
-                  <View style={styles.b2cNormalRow}>
-                    <Text style={styles.b2cLabel}>Today Gold Rate</Text>
-                    <Text style={styles.b2cValue}>₹ {toNum(currentB2CGoldRate).toFixed(2)}</Text>
+                  {/* Cash Table */}
+                  <View style={styles.b2cCashTable}>
+                    <View style={styles.b2cCashRow}>
+                      <View style={styles.b2cCashCol}>
+                        <Text style={styles.b2cCashLabel}>Cash Received</Text>
+                        <TextInput
+                          style={styles.b2cCashInput}
+                          value={b2cCashReceived}
+                          onChangeText={setB2cCashReceived}
+                          keyboardType="numeric"
+                          placeholder="0.00"
+                          placeholderTextColor="#9aa0a6"
+                          editable={!isFromHistory}
+                        />
+                      </View>
+                      <View style={styles.b2cCashCol}>
+                        <Text style={styles.b2cCashLabel}>Balance</Text>
+                        <View style={styles.b2cCashReadOnly}>
+                          <Text style={styles.b2cCashValue} numberOfLines={1}>
+                            {"\u20B9"} {toNum(b2cDisplayBalanceAfterCash).toFixed(2)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={styles.b2cNormalRow}>
+                      <View style={styles.b2cRowLeft}>
+                        <Text style={styles.b2cLabel}>Balance in grams</Text>
+                        <Text style={styles.b2cFormulaText} numberOfLines={2}>
+                          ({"\u20B9"} {toNum(b2cDisplayBalanceAfterCash).toFixed(2)} / {"\u20B9"} {toNum(currentB2CGoldRate).toFixed(2)}/g)
+                        </Text>
+                      </View>
+                      <View style={styles.b2cRowRight}>
+                        <Text style={styles.b2cValue} numberOfLines={1}>
+                          {toNum(b2cDisplayBalanceAfterCashGrams).toFixed(3)} g
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.b2cNormalRow}>
+                      <View style={styles.b2cRowLeft}>
+                        <Text style={styles.b2cLabel}>Current Balance</Text>
+                      </View>
+                      <View style={styles.b2cRowRight}>
+                        <Text style={styles.b2cValue} numberOfLines={1}>
+                          {toNum(b2cDisplayBalanceAfterCashGrams).toFixed(3)} g
+                        </Text>
+                      </View>
+                    </View>
                   </View>
-                  <View style={styles.b2cNormalRow}>
-                    <Text style={styles.b2cLabel}>Cash Paid</Text>
-                    <Text style={styles.b2cValue}>₹ {toNum(cashAmount || 0).toFixed(2)}</Text>
-                  </View>
-                  <View style={styles.b2cGoldHighlightRow}>
-                    <Text style={styles.b2cGoldLabel}>Old Balance / Pure Weight</Text>
-                    <Text style={styles.b2cGoldValue}>{toNum(effectiveB2COldBalance).toFixed(3)} g</Text>
-                  </View>
+
+
                 </View>
               </View>
 
+              {false && (
               <View style={styles.b2cInputSection}>
                 <View style={styles.b2cInputWrapper}>
                   <Text style={styles.b2cInputLabel}>Payment Method</Text>
@@ -3094,10 +3444,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                   </View>
                 )}
               </View>
+              )}
 
 
               {/* QR CODE */}
-              {showUpi && upiAmount > 0 && (
+              {false && showUpi && upiAmount > 0 && (
                 <View style={styles.qrContainer}>
                   <Text style={styles.qrLabel}>UPI QR Code for ₹{upiAmount}</Text>
                   <Text style={styles.upiIdText}>UPI ID: {upiId}</Text>
@@ -3113,6 +3464,18 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                   </TouchableOpacity>
                 </View >
               )}
+
+              {/* Nil (Complete Settlement) */}
+              <View style={{ alignItems: 'center', marginTop: 10 }}>
+                <TouchableOpacity
+                  style={[styles.saveButton, { backgroundColor: '#d32f2f' }]}
+                  onPress={handleNullifyBalance}
+                  activeOpacity={0.8}
+                >
+                  <Icon name="close-circle-outline" size={22} color="#fff" />
+                  <Text style={styles.homeButtonText}>Nil</Text>
+                </TouchableOpacity>
+              </View>
 
               {/* Thirukkural Quote for B2C */}
               <View style={styles.kuralContainer}>
@@ -3135,7 +3498,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                   <Text style={styles.cell}>Pure</Text>
                 </View>
 
-                {issueItems.map((row, i) => (
+                {safeIssueItems.map((row, i) => (
                   <View key={i} style={styles.tableRow}>
                     <Text style={styles.cell}>{row.name}</Text>
                     <Text style={styles.cell}>{row.gross}</Text>
@@ -3168,8 +3531,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                   <Text style={styles.cell}>Pure</Text>
                 </View>
 
-                {receiptItems && receiptItems.length > 0 ? (
-                  receiptItems.map((row, i) => (
+                {safeReceiptItems.length > 0 ? (
+                  safeReceiptItems.map((row, i) => (
                     <View key={i} style={styles.tableRow}>
                       <Text style={styles.cell}>{row.name}</Text>
                       <Text style={styles.cell}>{row.weight}</Text>
@@ -3193,14 +3556,14 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
               {/* CASH */}
               <View style={styles.cashBox}>
                 <Text style={styles.sectionTitle}>CASH :</Text>
-                {cashTable && cashTable.length > 0 ? (
+                {safeCashTable.length > 0 ? (
                   <View>
                     <View style={styles.tableHeader}>
                       <Text style={styles.cell}>Amount</Text>
                       <Text style={styles.cell}>Rate</Text>
                       <Text style={styles.cell}>Pure</Text>
                     </View>
-                    {cashTable.map((cashEntry, i) => (
+                    {safeCashTable.map((cashEntry, i) => (
                       <View key={i} style={styles.tableRow}>
                         <Text style={styles.cell}>{cashEntry.rupees}</Text>
                         <Text style={styles.cell}>{cashEntry.goldRate}</Text>
@@ -3210,7 +3573,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                     <View style={styles.totalRow}>
                       <Text style={styles.totalCell}>Total Cash Pure:</Text>
                       <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>
-                        {cashTable.reduce((sum, c) => sum + parseFloat(c.pure || 0), 0).toFixed(3)}
+                        {safeCashTable.reduce((sum, c) => sum + parseFloat(c.pure || 0), 0).toFixed(3)}
                       </Text>
                     </View>
                   </View>
@@ -3254,75 +3617,82 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
               <View style={styles.summaryBox}>
                 <Text style={styles.sectionTitle}>SUMMARY :</Text>
 
-                {/* Conditional rendering based on OB or AB */}
-                {summaryOB !== 0 ? (
-                  // OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | [Old Balance or Advance Balance]
-                  <>
-                    <View style={styles.summaryHeader}>
-                      <Text style={styles.sumCell}>Old Balance</Text>
-                      <Text style={styles.sumCell}>ISSUE</Text>
-                      <Text style={styles.sumCell}>RECEIPT</Text>
-                      <Text style={styles.sumCell}>CASH</Text>
-                      <Text style={styles.sumCell}>{toNum(displaySummary.current) >= 0 ? "Old Balance" : "Advance Balance"}</Text>
-                    </View>
+                {customer?.type === "B2B" ? (
+                  hasB2BAdvanceBalance ? (
+                    <View style={styles.b2bSummaryTable}>
+                      <View style={styles.b2bSummaryHeaderRow}>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>ISSUE</Text>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>Advance Balance</Text>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>RECEIPT</Text>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>CASH</Text>
+                        <Text style={styles.b2bSummaryHeaderCell}>Advance Balance</Text>
+                      </View>
 
-                    <View style={styles.summaryRow}>
-                      <Text style={styles.sumCell}>{summaryOB.toFixed(3)}</Text>
-                      <Text style={styles.sumCell}>{displaySummary.issue}</Text>
-                      <Text style={styles.sumCell}>{displaySummary.receipt}</Text>
-                      <Text style={styles.sumCell}>{displaySummary.cash}</Text>
-                      <Text style={styles.sumCell}>{toNum(displaySummary.current) >= 0 ? toNum(displaySummary.current).toFixed(3) : Math.abs(toNum(displaySummary.current)).toFixed(3)}</Text>
-                    </View>
+                      <View style={styles.b2bSummaryRow}>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bAdvanceSummaryValues.issue}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bAdvanceSummaryValues.advanceBalance}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bAdvanceSummaryValues.receipt}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bAdvanceSummaryValues.cash}</Text>
+                        <Text style={styles.b2bSummaryCell}>{b2bAdvanceSummaryValues.finalAdvanceBalance}</Text>
+                      </View>
 
-                    <View style={styles.finalSummaryRow}>
-                      <Text style={styles.sumCell}>
-                        {(summaryOB + toNum(displaySummary.issue)).toFixed(3)}
-                      </Text>
-                      <Text style={styles.sumCell}>-</Text>
-                      <Text style={styles.sumCell}>{displaySummary.receiptPlusCash}</Text>
-                      <Text style={styles.sumCell}>=</Text>
-                      <Text style={styles.sumCell}>{toNum(displaySummary.current) >= 0 ? toNum(displaySummary.current).toFixed(3) : Math.abs(toNum(displaySummary.current)).toFixed(3)}</Text>
+                      <View style={styles.b2bSummaryEquationRow}>
+                        <Text style={[styles.b2bSummaryCell, { flex: 3, borderRightWidth: 1 }]}>{b2bAdvanceSummaryValues.expression}</Text>
+                        <Text style={[styles.b2bSummaryCell, { flex: 0.6, borderRightWidth: 1 }]}>=</Text>
+                        <Text style={[styles.b2bSummaryCell, { flex: 1 }]}>{b2bAdvanceSummaryValues.finalAdvanceBalance}</Text>
+                      </View>
                     </View>
-                  </>
+                  ) : (
+                    <View style={styles.b2bSummaryTable}>
+                      <View style={styles.b2bSummaryHeaderRow}>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>Old Balance</Text>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>ISSUE</Text>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>RECEIPT</Text>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>CASH</Text>
+                        <Text style={styles.b2bSummaryHeaderCell}>Final Balance</Text>
+                      </View>
+
+                      <View style={styles.b2bSummaryRow}>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bSummaryValues.oldBalance}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bSummaryValues.issue}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bSummaryValues.receipt}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bSummaryValues.cash}</Text>
+                        <Text style={styles.b2bSummaryCell}>{b2bSummaryValues.finalBalance}</Text>
+                      </View>
+
+                      <View style={styles.b2bSummaryEquationRow}>
+                        <Text style={[styles.b2bSummaryCell, { flex: 1 }]}>
+                          {`${b2bSummaryValues.oldBalance} + ${b2bSummaryValues.issue} + ${b2bGstPureValue} - (${b2bSummaryValues.receipt} + ${b2bSummaryValues.cash}) = ${b2bSummaryValues.finalBalance}`}
+                        </Text>
+                      </View>
+                    </View>
+                  )
                 ) : (
-                  // AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | [Advance Balance or Old Balance]
-                  <>
-                    <View style={styles.summaryHeader}>
-                      <Text style={styles.sumCell}>ISSUE</Text>
-                      <Text style={styles.sumCell}>Advance Balance</Text>
-                      <Text style={styles.sumCell}>RECEIPT</Text>
-                      <Text style={styles.sumCell}>CASH</Text>
-                      <Text style={styles.sumCell}>{(summaryAB + toNum(displaySummary.receipt) + toNum(displaySummary.cash) - toNum(displaySummary.issue)) >= 0 ? "Advance Balance" : "Old Balance"}</Text>
+                  <View style={styles.dealerSummaryTable}>
+                    <View style={styles.dealerSummaryHeaderRow}>
+                      <Text style={styles.dealerSummaryHeaderCell}>{dealerSummaryValues.activeLabel}</Text>
+                      <Text style={styles.dealerSummaryHeaderCell}>RECEIPT</Text>
+                      <Text style={styles.dealerSummaryHeaderCell}>ISSUE</Text>
+                      <Text style={styles.dealerSummaryHeaderCell}>CASH</Text>
+                      <Text style={styles.dealerSummaryHeaderCell}>{dealerSummaryValues.activeLabel}</Text>
                     </View>
 
-                    <View style={styles.summaryRow}>
-                      <Text style={styles.sumCell}>{displaySummary.issue}</Text>
-                      <Text style={styles.sumCell}>
-                        {summaryAB.toFixed(3)}
-                      </Text>
-                      <Text style={styles.sumCell}>{displaySummary.receipt}</Text>
-                      <Text style={styles.sumCell}>{displaySummary.cash}</Text>
-                      <Text style={styles.sumCell}>
-                        {(() => {
-                          const val = summaryAB + toNum(displaySummary.receipt) + toNum(displaySummary.cash) - toNum(displaySummary.issue);
-                          return Math.abs(val).toFixed(3);
-                        })()}
-                      </Text>
+                    <View style={styles.dealerSummaryRow}>
+                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.oldBalance}</Text>
+                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.receipt}</Text>
+                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.issue}</Text>
+                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.cash}</Text>
+                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.finalBalance}</Text>
                     </View>
 
-                    <View style={styles.finalSummaryRow}>
-                      <Text style={[styles.sumCell, { flex: 2.5 }]}>
-                        {summaryAB.toFixed(3)} + {displaySummary.receipt} + {displaySummary.cash} - {displaySummary.issue}
-                      </Text>
-                      <Text style={[styles.sumCell, { flex: 0.5 }]}>=</Text>
-                      <Text style={[styles.sumCell, { flex: 1 }]}>
-                        {(() => {
-                          const val = summaryAB + toNum(displaySummary.receipt) + toNum(displaySummary.cash) - toNum(displaySummary.issue);
-                          return Math.abs(val).toFixed(3);
-                        })()}
-                      </Text>
+                    <View style={styles.dealerSummaryRow}>
+                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.oldBalance}</Text>
+                      <Text style={styles.dealerSummaryCell}>{`+ ${dealerSummaryValues.receipt}`}</Text>
+                      <Text style={styles.dealerSummaryCell}>{`- ${dealerSummaryValues.issue}`}</Text>
+                      <Text style={styles.dealerSummaryCell}>{`- ${dealerSummaryValues.cash}`}</Text>
+                      <Text style={styles.dealerSummaryCell}>{`= ${dealerSummaryValues.finalBalance}`}</Text>
                     </View>
-                  </>
+                  </View>
                 )}
               </View>
             </>
@@ -3484,7 +3854,11 @@ const styles = StyleSheet.create({
 
   headerBox: { padding: 5, marginBottom: 8, borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
 
-  headerRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 4 },
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 4 },
+  headerColLeft: { flex: 1, paddingRight: 8 },
+  headerColRight: { flex: 1, paddingLeft: 8, alignItems: "flex-end" },
+  headerText: { flexShrink: 1, fontSize: 11, lineHeight: 16 },
+  headerTextRight: { textAlign: "right", alignSelf: "stretch" },
 
   sectionBox: { marginBottom: 8 },
 
@@ -3500,6 +3874,45 @@ const styles = StyleSheet.create({
 
   summaryBox: { padding: 5, marginBottom: 8, borderTopWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
 
+  b2bSummaryTable: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#000',
+  },
+  b2bSummaryHeaderRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderColor: '#000',
+  },
+  b2bSummaryRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderColor: '#000',
+  },
+  b2bSummaryEquationRow: {
+    flexDirection: "row",
+    borderTopWidth: 0.5,
+    borderColor: '#000',
+  },
+  b2bSummaryHeaderCell: {
+    flex: 1,
+    textAlign: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    fontWeight: "bold",
+    fontSize: 9,
+    borderColor: '#000',
+  },
+  b2bSummaryCell: {
+    flex: 1,
+    textAlign: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    fontSize: 9,
+    fontWeight: "600",
+    borderColor: '#000',
+  },
+
   finalSummaryRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000', justifyContent: 'center' },
 
   summaryHeader: { flexDirection: "row", borderBottomWidth: 1, borderTopWidth: 1, borderColor: '#000' },
@@ -3507,6 +3920,38 @@ const styles = StyleSheet.create({
   summaryRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000' },
 
   sumCell: { flex: 1, textAlign: "center", padding: 4, paddingHorizontal: 1, fontWeight: "bold", fontSize: 9 },
+
+  dealerSummaryTable: {
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderColor: '#000',
+  },
+  dealerSummaryHeaderRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderColor: '#000',
+  },
+  dealerSummaryRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderColor: '#000',
+  },
+  dealerSummaryHeaderCell: {
+    flex: 1,
+    textAlign: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    fontWeight: "bold",
+    fontSize: 9,
+  },
+  dealerSummaryCell: {
+    flex: 1,
+    textAlign: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    fontSize: 9,
+    fontWeight: "600",
+  },
 
   totalRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000', justifyContent: "space-between" },
 
@@ -3782,21 +4227,42 @@ const styles = StyleSheet.create({
   },
   b2cNormalRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     paddingVertical: 8,
+    gap: 10,
+  },
+  b2cRowLeft: {
+    flex: 1,
+    minWidth: 0,
+  },
+  b2cRowRight: {
+    minWidth: 110,
+    maxWidth: 150,
+    alignItems: "flex-end",
+    justifyContent: "flex-start",
   },
   b2cLabel: {
     fontSize: 13,
     color: '#757575',
     fontWeight: '500',
+    flexShrink: 1,
+  },
+  b2cFormulaText: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#8a8a8a',
+    fontWeight: '500',
+    flexShrink: 1,
   },
   b2cValue: {
     fontSize: 14,
     color: '#212121',
     fontWeight: '600',
+    textAlign: "right",
   },
   b2cHighlightRow: {
     flexDirection: 'row',
+    alignItems: "center",
     justifyContent: 'space-between',
     backgroundColor: '#E8F5E9',
     padding: 12,
@@ -3814,6 +4280,51 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#1B5E20',
     fontWeight: '900',
+  },
+  b2cCashTable: {
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  b2cCashRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+  },
+  b2cCashCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  b2cCashLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  b2cCashInput: {
+    height: 42,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+    color: '#111',
+  },
+  b2cCashReadOnly: {
+    height: 42,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#F8F9FA',
+    justifyContent: 'center',
+  },
+  b2cCashValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111',
+    textAlign: 'right',
   },
   b2cDividerLine: {
     height: 1,
@@ -3839,6 +4350,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#7F6D17',
     fontWeight: '800',
+  },
+  b2cGoldRateText: {
+    fontSize: 12,
+    color: '#7F6D17',
+    opacity: 0.85,
+    marginTop: 2,
+    fontWeight: '700',
   },
 
   b2cInputSection: {
