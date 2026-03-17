@@ -98,6 +98,7 @@ export default function EditCustomerMaster({ navigation, route }) {
         oldBalance: parseFloat(oldBalance) || 0,
         advanceBalance: parseFloat(advanceBalance) || 0,
         workerName: workerName.trim(),
+        customerType: customerType === "Dealer" ? "DEALER" : customerType,
         image: selectedImage,
       };
 
