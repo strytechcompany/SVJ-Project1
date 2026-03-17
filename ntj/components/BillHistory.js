@@ -162,12 +162,27 @@ const getBillTimestamp = (bill = {}) => {
   return Number.isFinite(t) ? t : 0;
 };
 
-const resolveBillTypeFromContext = (bill = {}, customer = {}) => {
-  const contextType = String(customer?.customerType || customer?.type || "").toUpperCase();
-  if (contextType === "B2C") return "B2C";
-  if (contextType === "B2B") return "B2B";
-  return resolveBillType(bill);
-};
+  const resolveBillTypeFromContext = (bill = {}, customer = {}) => {
+    const contextType = String(customer?.customerType || customer?.type || "").toUpperCase();
+    if (contextType === "B2C") return "B2C";
+    if (contextType === "B2B") return "B2B";
+    return resolveBillType(bill);
+  };
+
+  const resolveHeaderBalance = (cust = {}) => {
+    const rawCurrent = Number(cust?.balance ?? cust?.currentBalance ?? cust?.availableBalance);
+    const rawOB = Number(cust?.ob ?? cust?.oldBalance);
+    const rawAB = Number(cust?.ab ?? cust?.advanceBalance);
+    if (Number.isFinite(rawCurrent)) {
+      return {
+        label: rawCurrent < 0 ? "AB" : "OB",
+        value: Math.abs(rawCurrent),
+      };
+    }
+    if (Number.isFinite(rawAB) && rawAB > 0) return { label: "AB", value: rawAB };
+    if (Number.isFinite(rawOB) && rawOB > 0) return { label: "OB", value: rawOB };
+    return { label: "OB", value: 0 };
+  };
 
 const resolveDisplayTypeFromContext = (bill = {}, customer = {}) => {
   const contextType = String(customer?.customerType || customer?.type || "").toUpperCase();
@@ -216,9 +231,21 @@ const resolveBillTotalAmount = (bill = {}) => {
 };
 
 const getBalanceFromBill = (bill = {}, fallbackBalance = null) => {
-  const rawCurrent = Number(bill?.currentBalance ?? bill?.availableBalance);
-  const rawOB = Number(bill?.oldBalance ?? bill?.ob);
-  const rawAB = Number(bill?.advanceBalance ?? bill?.advBal);
+  const rawCurrent = Number(
+    bill?.summary?.current ??
+    bill?.currentBalance ??
+    bill?.availableBalance
+  );
+  const rawOB = Number(
+    bill?.oldBalance ??
+    bill?.ob ??
+    bill?.summary?.ob
+  );
+  const rawAB = Number(
+    bill?.advanceBalance ??
+    bill?.advBal ??
+    bill?.summary?.ab
+  );
 
   const hasCurrent = Number.isFinite(rawCurrent);
   const hasOB = Number.isFinite(rawOB);
@@ -362,9 +389,12 @@ const buildSummaryForPreview = (bill = {}, bal = { ob: 0, ab: 0, current: 0 }) =
   );
   const gstPure = num(bill?.gstPure, num(bill?.summary?.gstPure, 0));
 
+  const openingOb = num(bill?.summary?.ob, num(bill?.ob, num(bill?.oldBalance, num(bal?.ob, 0))));
+  const openingAb = num(bill?.summary?.ab, num(bill?.advBal, num(bill?.advanceBalance, num(bal?.ab, 0))));
+
   return {
-    ob: num(bal?.ob, 0).toFixed(3),
-    ab: num(bal?.ab, 0).toFixed(3),
+    ob: openingOb.toFixed(3),
+    ab: openingAb.toFixed(3),
     issue: issue.toFixed(3),
     receipt: receipt.toFixed(3),
     cash: cash.toFixed(3),
@@ -464,6 +494,7 @@ export default function BillHistory({ navigation, route }) {
         customer
       );
       if (primary.length > 0) { setBills(primary); return; }
+      if (customerId) { setBills([]); return; }
 
       // Fallback 1: fetch bill summary list and match by customerName
       // (covers old records stored with wrong customerId like "N/A")
@@ -1141,17 +1172,16 @@ export default function BillHistory({ navigation, route }) {
           </Text>
         </View>
         <View style={styles.balanceBadgeContainer}>
-          {(Number(customer?.ob || 0) > 0 || !Number(customer?.ab || 0)) ? (
-            <View style={[styles.balanceBadge, styles.obBadge]}>
-              <Text style={styles.badgeLabel}>OB</Text>
-              <Text style={styles.badgeValue}>{Number(customer?.ob || 0).toFixed(3)}g</Text>
-            </View>
-          ) : (
-            <View style={[styles.balanceBadge, styles.abBadge]}>
-              <Text style={styles.badgeLabel}>AB</Text>
-              <Text style={styles.badgeValue}>{Number(customer?.ab || 0).toFixed(3)}g</Text>
-            </View>
-          )}
+          {(() => {
+            const headerBalance = resolveHeaderBalance(customer);
+            const isAB = headerBalance.label === "AB";
+            return (
+              <View style={[styles.balanceBadge, isAB ? styles.abBadge : styles.obBadge]}>
+                <Text style={styles.badgeLabel}>{headerBalance.label}</Text>
+                <Text style={styles.badgeValue}>{Number(headerBalance.value || 0).toFixed(3)}g</Text>
+              </View>
+            );
+          })()}
         </View>
       </View>
 
