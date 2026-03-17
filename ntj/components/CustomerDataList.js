@@ -161,7 +161,7 @@ const getRowImageRaw = (row) =>
   pickFirstImageFromList(row?.items) ||
   "";
 
-  const CustomerCard = ({
+const CustomerCard = ({
     item,
     handleViewBill,
     handlePhonePress,
@@ -728,7 +728,7 @@ export default function CustomerMasterList({ navigation, route }) {
           ...dealer,
           id: dealer._id || dealer.id || dealer.customerId,
           customerId: dealer.customerId || dealer._id || dealer.id,
-          customerType: dealer.customerType || "Dealer",
+          customerType: String(dealer.customerType || "DEALER").toUpperCase(),
           customerName: dealer.customerName,
           customerNumber: dealer.customerNumber || dealer.phoneNumber,
           shopName: dealer.shopName || "No Shop Name",
@@ -765,11 +765,12 @@ export default function CustomerMasterList({ navigation, route }) {
   const filteredData = customers.filter((item) => {
     const custName = (item.customerName || item.name || "").toLowerCase();
     const matchesSearch = custName.includes(search.toLowerCase());
+    const normalizedType = String(item.customerType || "").toUpperCase();
 
     const matchesType =
       filter === "ALL" ||
-      item.customerType === filter ||
-      (filter === "Supplier" && (item.customerType === "Dealer" || item.customerType === "Supplier"));
+      normalizedType === filter ||
+      (filter === "Supplier" && (normalizedType === "DEALER" || normalizedType === "SUPPLIER"));
 
     return matchesSearch && matchesType;
   });
@@ -779,20 +780,35 @@ export default function CustomerMasterList({ navigation, route }) {
   };
 
   const handleDelete = async (customer) => {
-    Alert.alert("Delete Customer", `Delete ${customer.customerName}?`, [
+    const displayName = customer.customerName || customer.name || "this customer";
+    Alert.alert("Delete Customer", `Delete ${displayName}?`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
           try {
+            const normalizedType = String(customer.customerType || "").trim().toUpperCase();
             let endpoint = "";
-            if (customer.customerType === "B2B") endpoint = "/customers";
-            else if (customer.customerType === "B2C") endpoint = "/customersB2C";
-            else if (customer.customerType === "Supplier" || customer.customerType === "Dealer") endpoint = "/customersDealer";
+            if (normalizedType === "B2B") endpoint = "/customers";
+            else if (normalizedType === "B2C") endpoint = "/customersB2C";
+            else if (normalizedType === "DEALER" || normalizedType === "SUPPLIER") endpoint = "/customersDealer";
+
+            if (!endpoint) {
+              Alert.alert("Error", "Unknown customer type. Unable to delete.");
+              return;
+            }
+
+            const customerId =
+              customer._id || customer.id || customer.customerId;
+
+            if (!customerId) {
+              Alert.alert("Error", "Missing customer ID. Unable to delete.");
+              return;
+            }
 
             const response = await fetch(
-              `${base_url}${endpoint}/${customer.customerId || customer.id || customer._id}`,
+              `${base_url}${endpoint}/${customerId}`,
               {
                 method: "DELETE",
               },
@@ -802,13 +818,17 @@ export default function CustomerMasterList({ navigation, route }) {
               setCustomers(
                 customers.filter(
                   (c) =>
-                    (c.customerId || c.id) !==
-                    (customer.customerId || customer.id),
+                    (c.customerId || c.id || c._id) !== customerId,
                 ),
               );
               Alert.alert("Success", "Customer deleted successfully");
             } else {
-              Alert.alert("Error", "Failed to delete customer");
+                  let errorMessage = "Failed to delete customer";
+                  try {
+                    const body = await response.json();
+                    if (body?.message) errorMessage = body.message;
+                  } catch (_) {}
+                  Alert.alert("Error", errorMessage);
             }
           } catch (error) {
             console.error("Error deleting customer:", error);
@@ -855,7 +875,19 @@ export default function CustomerMasterList({ navigation, route }) {
   };
 
   const handleAdd = () => {
-    navigation.navigate("CreateCustomerMaster", { customers });
+    const type =
+      filter === "B2B"
+        ? "B2B"
+        : filter === "B2C"
+          ? "B2C"
+          : filter === "Supplier"
+            ? "Dealer"
+            : undefined;
+    navigation.navigate("CreateCustomerMaster", { customers, type });
+  };
+
+  const handleRefresh = async () => {
+    await fetchCustomers();
   };
 
   const handleViewBill = (customer) => {
@@ -889,17 +921,22 @@ export default function CustomerMasterList({ navigation, route }) {
         backgroundColor="#1B4D1B"
         insideSafeArea
         right={
-          <TouchableOpacity
-            onPress={() => navigation.navigate("AdminNotifications")}
-            style={styles.notificationBtn}
-          >
-            <Icon name="bell-outline" size={24} color="#fff" />
-            {reminderCount > 0 && (
-              <View style={styles.notificationBadge}>
-                <Text style={styles.notificationBadgeText}>{reminderCount > 99 ? "99+" : reminderCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          <View style={styles.headerRightActions}>
+            <TouchableOpacity onPress={handleRefresh} style={styles.refreshBtn}>
+              <Icon name="refresh" size={24} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => navigation.navigate("AdminNotifications")}
+              style={styles.notificationBtn}
+            >
+              <Icon name="bell-outline" size={24} color="#fff" />
+              {reminderCount > 0 && (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>{reminderCount > 99 ? "99+" : reminderCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         }
       >
         <View style={styles.searchBox}>
@@ -1238,6 +1275,14 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   notificationBtn: {
+    padding: 4,
+  },
+  headerRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  refreshBtn: {
     padding: 4,
   },
   notificationBadge: {
