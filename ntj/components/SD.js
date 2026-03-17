@@ -325,7 +325,11 @@ export default function CreateTransaction({ navigation }) {
       const dealerData = await dealerResponse.json();
 
       const dealerCustomers = dealerData
-        .filter((customer) => customer.customerName)
+        .filter((customer) => {
+          if (!customer.customerName) return false;
+          const normalizedType = String(customer.customerType || "DEALER").toUpperCase();
+          return normalizedType === "DEALER";
+        })
         .map((customer) => {
           // Resolve the best available image from the dealer record
           // (the backend /customersDealer GET already merges latestTransactionImage)
@@ -340,7 +344,7 @@ export default function CreateTransaction({ navigation }) {
 
           return {
             ...customer,
-            customerType: "Dealer",
+            customerType: "DEALER",
             customerNumber: customer.phoneNumber,
             customerId: customer.customerId || customer._id,
             id: customer._id || customer.id,
@@ -476,9 +480,13 @@ export default function CreateTransaction({ navigation }) {
       const resp = await fetch(`${base_url}/transactions`);
       if (resp.ok) {
         const data = await resp.json();
-        // Extract last 5 unique customer names
         const names = [
-          ...new Set(data.map((t) => t.customerName).filter(Boolean)),
+          ...new Set(
+            data
+              .filter((t) => String(t?.customerType || t?.type || "").toUpperCase() === "DEALER")
+              .map((t) => t.customerName)
+              .filter(Boolean),
+          ),
         ].slice(0, 5);
         setRecentNames(names);
       }
@@ -571,7 +579,10 @@ export default function CreateTransaction({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       if (route.params?.newCustomer) {
-        const newCust = route.params.newCustomer;
+        const newCust = {
+          ...route.params.newCustomer,
+          customerType: "DEALER",
+        };
         setCustomers((prev) => [...prev, newCust]);
         setSelectedCustomer(newCust);
         setPhone(newCust.phone || "");
@@ -678,7 +689,7 @@ export default function CreateTransaction({ navigation }) {
             : true),
       );
     } else {
-      const detectedType = c.customerType || c.type || "Dealer";
+      const detectedType = String(c.customerType || c.type || "DEALER").toUpperCase();
       setSelectedCustomer({
         id: customerId,
         name: c.customerName || c.name || t.customerName || "Unknown",
@@ -1350,13 +1361,13 @@ export default function CreateTransaction({ navigation }) {
         .toFixed(3),
     );
 
-    const customerType = selectedCustomer.customerType || "Dealer";
-    const normalizedCustomerType = String(customerType).toUpperCase();
+    const customerType = String(selectedCustomer.customerType || "DEALER").toUpperCase();
+    const normalizedCustomerType = customerType;
     const isDealerOrSupplier =
       normalizedCustomerType === "DEALER" || normalizedCustomerType === "SUPPLIER";
 
     // ✅ FIX: Prioritize numeric customerId for B2B/B2C, use ObjectId for Dealer/Supplier
-    const customerRecordId = isDealerOrSupplier 
+    const customerRecordId = isDealerOrSupplier
       ? (selectedCustomer.id || selectedCustomer._id || selectedCustomer.customerId)
       : (selectedCustomer.customerId || selectedCustomer.id || selectedCustomer._id);
 
@@ -1412,19 +1423,14 @@ export default function CreateTransaction({ navigation }) {
     } else {
       console.log("❌ No image to save — proofImage is empty");
     }
-    const normalizedTxType =
-      customerType === "Supplier"
-        ? "SUPPLIER"
-        : customerType === "Dealer"
-          ? "DEALER"
-          : customerType;
+    const normalizedTxType = normalizedCustomerType;
 
     const transactionData = {
       customerName: selectedCustomer.name,
       customerId: customerRecordId,
       customerType: normalizedTxType,
       type: normalizedTxType,
-      dealerType: customerType,
+      dealerType: normalizedCustomerType,
       receiptImage: persistedDealerImage || null,
       proofImage: persistedDealerImage || null,
       image: persistedDealerImage || null,
@@ -1577,13 +1583,16 @@ export default function CreateTransaction({ navigation }) {
       }
 
       // Dealer transactions are stored as B2B in billSummary (schema constraint)
-      const billStorageType = (customerType === "Dealer" || customerType === "Supplier") ? "B2B" : customerType;
+      const billStorageType =
+        (normalizedCustomerType === "DEALER" || normalizedCustomerType === "SUPPLIER")
+          ? "B2B"
+          : normalizedCustomerType;
 
       const billSummaryData = {
         customerId: customerRecordId,
         customerName: selectedCustomer.name,
-        customerType: billStorageType,  // B2B or B2C only (schema constraint)
-        dealerType: customerType,        // preserve Dealer/Supplier label
+        customerType: normalizedCustomerType,
+        dealerType: normalizedCustomerType,        // preserve Dealer/Supplier label
         billType: billStorageType,       // redundant but explicit
         date: (date && typeof date === 'string' && !date.toLowerCase().includes('invalid')) ? date.split("/").reverse().join("-") : new Date().toISOString().split('T')[0],
         ob: Number(oldBalance.toFixed(3)),
@@ -1663,6 +1672,7 @@ export default function CreateTransaction({ navigation }) {
           name: selectedCustomer.name,
           id: customerRecordId,
           customerId: customerRecordId,
+          customerType: normalizedCustomerType,
           billNo: generatedBillNo,
           invoiceNo: generatedBillNo,
           phone:
@@ -1731,7 +1741,7 @@ export default function CreateTransaction({ navigation }) {
             image: persistedDealerImage || null,
             receiptImageShowInBill: showProofImageInBill,
             customerType: normalizedTxType,
-            dealerType: customerType,
+            dealerType: normalizedCustomerType,
           },
         ],
       });
@@ -1894,7 +1904,7 @@ export default function CreateTransaction({ navigation }) {
           </View>
         )}
 
-                {selectedCustomer && (
+        {selectedCustomer && (
           <View style={styles.card}>
             <View style={styles.issueHeader}>
               <View style={[styles.greenDot, { backgroundColor: "#0aa76a" }]} />
@@ -2241,7 +2251,7 @@ export default function CreateTransaction({ navigation }) {
 
 
 
-        
+
         {/* RECEIPT ENTRY */}
 
 
@@ -2338,8 +2348,9 @@ export default function CreateTransaction({ navigation }) {
           </View>
         )}
 
-        {(selectedCustomer?.customerType === "Dealer" ||
-          selectedCustomer?.customerType === "Supplier") && (
+        {["DEALER", "SUPPLIER"].includes(
+          String(selectedCustomer?.customerType || "").toUpperCase(),
+        ) && (
             <View style={styles.card}>
               <View style={styles.issueHeader}>
                 <View style={[styles.greenDot, { backgroundColor: "#8E24AA" }]} />
@@ -3170,3 +3181,4 @@ const styles = StyleSheet.create({
     color: "#333",
   },
 });
+
