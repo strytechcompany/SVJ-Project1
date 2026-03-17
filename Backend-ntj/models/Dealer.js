@@ -29,7 +29,7 @@ const dealerSchema = new mongoose.Schema({
   },
   customerType: {
     type: String,
-    default: "Dealer",
+    default: "DEALER",
   },
   workerName: {
     type: String,
