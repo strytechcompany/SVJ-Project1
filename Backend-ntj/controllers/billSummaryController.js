@@ -156,18 +156,39 @@ const buildBillPayload = (body = {}) => {
         cashTable.reduce((sum, row) => sum + toNumber(row.rupees), 0),
     );
     const kadaiAmount = toNumber(body.kadaiAmount);
-    const oldBalance = toNumber(body.oldBalance ?? body.ob ?? body.summary?.ob);
-    const advanceBalance = toNumber(body.advanceBalance ?? body.advBal ?? body.summary?.ab);
+    const openingOldBalance = toNumber(body.ob ?? body.summary?.ob ?? body.oldBalance);
+    const openingAdvanceBalance = toNumber(body.advBal ?? body.summary?.ab ?? body.advanceBalance);
     const availableBalance = toNumber(
         body.availableBalance ??
         body.currentBalance ??
         body.summary?.current ??
-        (oldBalance - advanceBalance) + totalIssueWeight - totalReceiptWeight - cashAmount,
+        (openingOldBalance - openingAdvanceBalance) +
+            totalIssueWeight +
+            toNumber(body.gstPure ?? body.summary?.gstPure) -
+            totalReceiptWeight -
+            cashAmount,
     );
+    let oldBalance = openingOldBalance;
+    let advanceBalance = openingAdvanceBalance;
+    if (billType === "B2B" && Number.isFinite(availableBalance)) {
+        const isDealerLike = String(body.dealerType || body.customerType || body.type || "").toUpperCase();
+        if (isDealerLike === "DEALER" || isDealerLike === "SUPPLIER") {
+            // Dealer/Supplier uses receipt - (issue + cash)
+            oldBalance = availableBalance > 0 ? availableBalance : 0;
+            advanceBalance = availableBalance < 0 ? Math.abs(availableBalance) : 0;
+        } else {
+            // Standard B2B: (OB - AB) + issue + gst - receipt - cash
+            oldBalance = availableBalance > 0 ? availableBalance : 0;
+            advanceBalance = availableBalance < 0 ? Math.abs(availableBalance) : 0;
+        }
+    }
 
     return {
         customerId: pickCustomerId(body),
         customerName: String(body.customerName || '').trim() || 'Unknown',
+        phoneNumber: String(body.phoneNumber || body.phone || body.customerNumber || body.customerPhone || '').trim(),
+        address: String(body.address || body.customerAddress || '').trim(),
+        gstin: String(body.gstin || body.gstNo || body.gst || '').trim(),
         billNo: pickBillNo(body),
         billType,
         dealerType: String(body.dealerType || body.type || body.customerType || '').trim(),
@@ -185,12 +206,12 @@ const buildBillPayload = (body = {}) => {
         customerType: billType,
         invoiceNo: formatMainBillNo(body.invoiceNo || body.billNo) || 'N/A',
         date: body.date || '',
-        ob: oldBalance,
+        ob: openingOldBalance,
         issuePure: totalIssueWeight,
         receiptPure: totalReceiptWeight,
         cashPure: cashAmount,
         gstPure: toNumber(body.gstPure ?? body.summary?.gstPure),
-        advBal: advanceBalance,
+        advBal: openingAdvanceBalance,
         currentBalance: availableBalance,
         receiptImage:
             typeof body.receiptImage === 'string'
