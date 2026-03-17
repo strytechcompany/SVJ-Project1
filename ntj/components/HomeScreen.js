@@ -149,25 +149,34 @@ export default function HomeScreen({ route }) {
       const normalizeName = (value) => String(value || "").trim().toLowerCase();
       const normalizeType = (row = {}) => {
         const dealerTag = String(row.dealerType || "").toUpperCase();
-        if (dealerTag === "DEALER") return "Dealer";
-        if (dealerTag === "SUPPLIER") return "Supplier";
+        if (dealerTag === "DEALER") return "DEALER";
+        if (dealerTag === "SUPPLIER") return "SUPPLIER";
         const raw = String(row.type || row.customerType || "").toUpperCase();
         if (raw === "B2C") return "B2C";
         if (raw === "B2B") return "B2B";
-        if (raw === "DEALER") return "Dealer";
-        if (raw === "SUPPLIER") return "Supplier";
+        if (raw === "DEALER") return "DEALER";
+        if (raw === "SUPPLIER") return "SUPPLIER";
         if (raw === "RETAIL") return "B2C";
         return "B2B";
       };
       const normalizePhone = (value) => String(value || "").replace(/\D/g, "");
 
-      const [b2bResponse, b2cResponse, dealersRes, customersRes, b2cCustomersRes, billRes] = await Promise.all([
+      const [
+        b2bResponse,
+        b2cResponse,
+        dealersRes,
+        customersRes,
+        b2cCustomersRes,
+        billB2BRes,
+        billB2CRes,
+      ] = await Promise.all([
         fetch(`${base_url}/transactions`),
         fetch(`${base_url}/retail`),
         fetch(`${base_url}/customersDealer`),
         fetch(`${base_url}/customers`),
         fetch(`${base_url}/customersB2C`),
-        fetch(`${base_url}/billSummary`),
+        fetch(`${base_url}/billSummary?billType=B2B`),
+        fetch(`${base_url}/billSummary?billType=B2C`),
       ]);
 
       const b2bData = b2bResponse.ok ? await b2bResponse.json() : [];
@@ -175,7 +184,12 @@ export default function HomeScreen({ route }) {
       const dealers = dealersRes.ok ? await dealersRes.json() : [];
       const customers = customersRes.ok ? await customersRes.json() : [];
       const b2cCustomers = b2cCustomersRes.ok ? await b2cCustomersRes.json() : [];
-      const billRows = billRes.ok ? await billRes.json() : [];
+      const billB2BRows = billB2BRes.ok ? await billB2BRes.json() : [];
+      const billB2CRows = billB2CRes.ok ? await billB2CRes.json() : [];
+      const billRows = [
+        ...(Array.isArray(billB2BRows) ? billB2BRows : []),
+        ...(Array.isArray(billB2CRows) ? billB2CRows : []),
+      ];
 
       const lookup = {};
       const setBal = (key, ob, ab) => {
@@ -211,8 +225,8 @@ export default function HomeScreen({ route }) {
       setBalanceLookup(lookup);
 
       const customerMap = {};
-      dealers.forEach(d => { customerMap[d.customerName] = d.customerType || 'Dealer'; });
-      customers.forEach(c => { customerMap[c.customerName] = c.customerType || 'B2B'; });
+      dealers.forEach(d => { customerMap[d.customerName] = normalizeType(d); });
+      customers.forEach(c => { customerMap[c.customerName] = normalizeType(c); });
       const dealerIdentitySet = new Set();
       dealers.forEach((d) => {
         const keys = [
@@ -260,7 +274,7 @@ export default function HomeScreen({ route }) {
           const dealerHit = isDealerRecord(t);
           return {
             ...t,
-            type: dealerHit ? "Dealer" : derivedType,
+            type: dealerHit ? "DEALER" : derivedType,
             isDealer: dealerHit,
             displayName: name,
             _sourcePriority: 2,
@@ -282,39 +296,52 @@ export default function HomeScreen({ route }) {
         .filter((t) => t.customerName || t.name)
         .map((t) => {
           const dealerHit = isDealerRecord(t);
+          const summaryCurrent = Number(t?.summary?.current);
+          const summaryOb = Number(t?.summary?.ob);
+          const summaryAb = Number(t?.summary?.ab);
+          const hasSummaryCurrent = Number.isFinite(summaryCurrent);
           return {
             ...t,
-            type: dealerHit ? "Dealer" : normalizeType(t),
+            type: dealerHit ? "DEALER" : normalizeType(t),
             isDealer: dealerHit,
             displayName: t.customerName || t.name,
             _sourcePriority: 3,
             _sortTs: toTs(t.updatedAt || t.createdAt || t.date || 0),
-            oldBalance: t.oldBalance ?? t.ob ?? 0,
-            advanceBalance: t.advanceBalance ?? t.advBal ?? 0,
-            advBal: t.advBal ?? t.advanceBalance ?? 0,
+            currentBalance: hasSummaryCurrent ? summaryCurrent : (t.currentBalance ?? t.availableBalance),
+            availableBalance: hasSummaryCurrent ? summaryCurrent : (t.availableBalance ?? t.currentBalance),
+            oldBalance: t.oldBalance ?? t.ob ?? summaryOb ?? 0,
+            advanceBalance: t.advanceBalance ?? t.advBal ?? summaryAb ?? 0,
+            advBal: t.advBal ?? t.advanceBalance ?? summaryAb ?? 0,
+            balance: hasSummaryCurrent ? summaryCurrent : (t.currentBalance ?? t.availableBalance ?? t.balance),
           };
         });
 
-      const merged = [...b2bMapped, ...billMapped, ...b2cMapped].sort(
-        (a, b) =>
-          ((b._sortTs || 0) - (a._sortTs || 0)) ||
-          ((b._sourcePriority || 0) - (a._sourcePriority || 0)),
-      );
+      const buildIdentityKey = (txn) => {
+        const id = txn.customerId || txn._id || txn.id;
+        if (id) return `id:${String(id).trim().toLowerCase()}`;
+        const phoneKey = normalizePhone(
+          txn.phone || txn.phoneNumber || txn.customerNumber || txn.mobileNumber || "",
+        );
+        if (phoneKey) return `p:${phoneKey}`;
+        const name = normalizeName(txn.displayName);
+        if (name) return `n:${name}`;
+        return "";
+      };
 
       const uniqueLatestTransactions = [];
       const seenCustomers = new Set();
 
-      for (const txn of merged) {
-        const name = normalizeName(txn.displayName);
-        const phoneKey = normalizePhone(
-          txn.phone || txn.phoneNumber || txn.customerNumber || txn.mobileNumber || "",
-        );
-        // Use stable person-level identity to avoid id-shape mismatches between tx/bill collections.
-        const dedupeKey = phoneKey || name;
-        if (!seenCustomers.has(dedupeKey)) {
-          seenCustomers.add(dedupeKey);
+      const candidateLists = [billMapped, b2bMapped, b2cMapped];
+      for (const list of candidateLists) {
+        const ordered = [...list].sort((a, b) => (b._sortTs || 0) - (a._sortTs || 0));
+        for (const txn of ordered) {
+          const key = buildIdentityKey(txn);
+          if (!key || seenCustomers.has(key)) continue;
+          seenCustomers.add(key);
           uniqueLatestTransactions.push(txn);
+          if (uniqueLatestTransactions.length >= 10) break;
         }
+        if (uniqueLatestTransactions.length >= 10) break;
       }
 
       setTransactions(uniqueLatestTransactions.slice(0, 10));
@@ -704,13 +731,27 @@ export default function HomeScreen({ route }) {
     }
   };
 
+  const resolveDisplayType = (txn = {}) => {
+    const raw = String(txn.type || txn.customerType || txn.dealerType || "").toUpperCase();
+    if (txn.isDealer || raw === "DEALER" || raw === "SUPPLIER") return "Dealer";
+    if (raw === "B2C") return "B2C";
+    if (raw === "B2B") return "B2B";
+    if (raw) return raw;
+    return "B2B";
+  };
+
+  const resolveDisplayName = (txn = {}) =>
+    txn.displayName || txn.customerName || txn.name || "Unknown";
+
   const filteredTransactions = transactions.filter((txn) => {
-    const name = txn.customerName || txn.name || "";
+    const name = resolveDisplayName(txn);
     const matchesSearch = name.toLowerCase().includes(searchQuery.toLowerCase());
+    const displayType = resolveDisplayType(txn);
     const matchesFilter =
       filterType === "All" ||
-      txn.type === filterType ||
-      txn.customerType === filterType;
+      displayType === filterType ||
+      txn.customerType === filterType ||
+      txn.type === filterType;
     return matchesSearch && matchesFilter;
   });
 
@@ -815,7 +856,7 @@ export default function HomeScreen({ route }) {
             onPress={() => handleMenuNavigation("SD")}
           >
             <Icon name="view-dashboard-outline" size={25} color="#fff" />
-            <Text style={styles.menuText}>SD</Text>
+            <Text style={styles.menuText}>B2D</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1106,9 +1147,9 @@ export default function HomeScreen({ route }) {
             </Text>
           }
           renderItem={({ item }) => {
-            const displayType = item.isDealer ? "Dealer" : item.type;
+            const displayType = resolveDisplayType(item);
             const isB2C = displayType === "B2C";
-            const name = item.displayName;
+            const name = resolveDisplayName(item);
             const { ob, ab } = resolveBalance(item);
 
             let balanceLabel = "OB";
