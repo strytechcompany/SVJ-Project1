@@ -41,7 +41,7 @@ router.post("/", async (req, res) => {
       address,
       oldBalance: oldBalance || 0,
       advanceBalance: advanceBalance || 0,
-      customerType: customerType || "Dealer",
+      customerType: customerType || "DEALER",
       workerName: workerName || "",
     }));
 
