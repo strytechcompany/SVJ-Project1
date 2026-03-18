@@ -705,26 +705,8 @@ export default function CustomerMasterList({ navigation, route }) {
         updatedAt: customer.updatedAt || new Date().toISOString(),
       }));
 
-      const supplierCustomers = dealerData.map((dealer) => {
-        const latestSnapshot = getLatestDealerSnapshot(dealer);
-        const dealerOB = Number(dealer?.oldBalance);
-        const dealerAB = Number(dealer?.advanceBalance);
-        const snapOB = Number(latestSnapshot?.oldBalance);
-        const snapAB = Number(latestSnapshot?.advanceBalance);
-        const dealerTs = toTs(dealer?.updatedAt || dealer?.createdAt || 0);
-        const snapTs = toTs(latestSnapshot?.updatedAt || 0);
-        const snapshotHasBalance =
-          (Number.isFinite(snapOB) && Math.abs(snapOB) >= 0) ||
-          (Number.isFinite(snapAB) && Math.abs(snapAB) >= 0);
-        const preferSnapshot = snapTs >= dealerTs && snapshotHasBalance;
-        const resolvedOldBalance = preferSnapshot
-          ? (Number.isFinite(snapOB) ? snapOB : (Number.isFinite(dealerOB) ? dealerOB : 0))
-          : (Number.isFinite(dealerOB) ? dealerOB : (Number.isFinite(snapOB) ? snapOB : 0));
-        const resolvedAdvanceBalance = preferSnapshot
-          ? (Number.isFinite(snapAB) ? snapAB : (Number.isFinite(dealerAB) ? dealerAB : 0))
-          : (Number.isFinite(dealerAB) ? dealerAB : (Number.isFinite(snapAB) ? snapAB : 0));
-
-        return enrichWithLatestBill({
+      const supplierCustomers = dealerData.map((dealer) =>
+        enrichWithLatestBill({
           ...dealer,
           id: dealer._id || dealer.id || dealer.customerId,
           customerId: dealer.customerId || dealer._id || dealer.id,
@@ -732,12 +714,12 @@ export default function CustomerMasterList({ navigation, route }) {
           customerName: dealer.customerName,
           customerNumber: dealer.customerNumber || dealer.phoneNumber,
           shopName: dealer.shopName || "No Shop Name",
-          oldBalance: resolvedOldBalance.toFixed(3),
-          advanceBalance: resolvedAdvanceBalance.toFixed(3),
-          latestTransactionImage: latestSnapshot.latestTransactionImage,
-          updatedAt: latestSnapshot.updatedAt || dealer.updatedAt || new Date().toISOString(),
-        });
-      });
+          oldBalance: Number(dealer?.oldBalance || 0).toFixed(3),
+          advanceBalance: Number(dealer?.advanceBalance || 0).toFixed(3),
+          latestTransactionImage: dealer.latestTransactionImage || "",
+          updatedAt: dealer.updatedAt || dealer.createdAt || new Date().toISOString(),
+        }),
+      );
 
       const allCustomers = [...b2bCustomers, ...b2cCustomers, ...supplierCustomers];
       const reminders = buildReminderAlerts({
@@ -755,14 +737,18 @@ export default function CustomerMasterList({ navigation, route }) {
           reminder,
         };
       });
+      const sortedCustomers = [...decoratedCustomers].sort(
+        (a, b) => toTs(b.updatedAt || b.createdAt || 0) - toTs(a.updatedAt || a.createdAt || 0),
+      );
       setReminderCount(reminders.length);
-      setCustomers(decoratedCustomers);
+      setCustomers(sortedCustomers);
     } catch (error) {
       console.error("Error fetching customers:", error);
     }
   };
 
-  const filteredData = customers.filter((item) => {
+  const filteredData = customers
+    .filter((item) => {
     const custName = (item.customerName || item.name || "").toLowerCase();
     const matchesSearch = custName.includes(search.toLowerCase());
     const normalizedType = String(item.customerType || "").toUpperCase();
@@ -773,7 +759,12 @@ export default function CustomerMasterList({ navigation, route }) {
       (filter === "Supplier" && (normalizedType === "DEALER" || normalizedType === "SUPPLIER"));
 
     return matchesSearch && matchesType;
-  });
+    })
+    .sort((a, b) => toTs(b.updatedAt || b.createdAt || 0) - toTs(a.updatedAt || a.createdAt || 0));
+  const displayData =
+    filter === "ALL" && !search.trim() && filteredData.length === 0 && customers.length > 0
+      ? customers
+      : filteredData;
 
   const handleEdit = (customer) => {
     navigation.navigate("EditCustomerMaster", { customer });
@@ -916,7 +907,7 @@ export default function CustomerMasterList({ navigation, route }) {
       {/* HEADER */}
       <CommonHeader
         title="Customer Data List"
-        subtitle={`Total Customers: ${filteredData.length}`}
+        subtitle={`Total Customers: ${displayData.length}`}
         onBack={() => navigation.goBack()}
         backgroundColor="#1B4D1B"
         insideSafeArea
@@ -988,7 +979,7 @@ export default function CustomerMasterList({ navigation, route }) {
       </View>
 
       <FlatList
-        data={filteredData}
+        data={displayData}
         keyExtractor={(item, index) => index.toString()}
         renderItem={renderItem}
       />
