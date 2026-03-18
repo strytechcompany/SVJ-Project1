@@ -184,6 +184,23 @@ const getBillTimestamp = (bill = {}) => {
     return { label: "OB", value: 0 };
   };
 
+  const getLatestBillFromList = (billList = []) => {
+    if (!Array.isArray(billList) || billList.length === 0) return null;
+    return [...billList].sort((a, b) => getBillTimestamp(b) - getBillTimestamp(a))[0] || null;
+  };
+
+  const resolveHeaderBalanceFromLatestBill = (billList = [], cust = {}) => {
+    const latest = getLatestBillFromList(billList);
+    if (!latest) return resolveHeaderBalance(cust);
+    const isDealerLike = String(latest?.dealerType || latest?.customerType || latest?.type || "").toUpperCase();
+    const finalBalance = Number(latest?.finalBalance ?? latest?.summary?.current ?? latest?.availableBalance);
+    const balanceType = String(latest?.balanceType || latest?.summary?.balanceType || "").toLowerCase();
+    const label = (isDealerLike === "DEALER" || isDealerLike === "SUPPLIER")
+      ? (balanceType.includes("advance") ? "AB" : "OB")
+      : "OB";
+    return { label, value: Math.abs(Number.isFinite(finalBalance) ? finalBalance : 0) };
+  };
+
 const resolveDisplayTypeFromContext = (bill = {}, customer = {}) => {
   const contextType = String(customer?.customerType || customer?.type || "").toUpperCase();
   if (contextType === "DEALER" || contextType === "SUPPLIER") {
@@ -230,44 +247,40 @@ const resolveBillTotalAmount = (bill = {}) => {
   return sum > 0 ? sum : 0;
 };
 
+const getSavedTotalAmount = (bill = {}) => {
+  const snapshot = bill?.previewSnapshot || null;
+  const snapValue = Number(
+    snapshot?.report?.cash ??
+    snapshot?.totals?.totalCashPure ??
+    snapshot?.summary?.cash
+  );
+  if (Number.isFinite(snapValue) && snapValue !== 0) return snapValue;
+  const directAmount = Number(
+    bill?.gst?.finalAmount ??
+    bill?.gst?.taxableAmount ??
+    bill?.totalAmount ??
+    bill?.finalAmount ??
+    bill?.netAmount ??
+    bill?.cashAmount
+  );
+  return Number.isFinite(directAmount) ? directAmount : 0;
+};
+
 const getBalanceFromBill = (bill = {}, fallbackBalance = null) => {
-  const rawCurrent = Number(
-    bill?.summary?.current ??
-    bill?.currentBalance ??
-    bill?.availableBalance
-  );
-  const rawOB = Number(
-    bill?.oldBalance ??
-    bill?.ob ??
-    bill?.summary?.ob
-  );
-  const rawAB = Number(
-    bill?.advanceBalance ??
-    bill?.advBal ??
-    bill?.summary?.ab
-  );
-
-  const hasCurrent = Number.isFinite(rawCurrent);
-  const hasOB = Number.isFinite(rawOB);
-  const hasAB = Number.isFinite(rawAB);
-
-  const hasAnyBalanceField = hasCurrent || hasOB || hasAB;
-  if (!hasAnyBalanceField && fallbackBalance) {
-    return fallbackBalance;
+  const snapshot = bill?.previewSnapshot || null;
+  if (snapshot) {
+    const ob = Number(snapshot?.summary?.ob);
+    const ab = Number(snapshot?.summary?.ab);
+    const current = Number(snapshot?.summary?.current);
+    if (Number.isFinite(ob) && ob !== 0) return { label: "OB", value: Math.abs(ob), current, ob, ab };
+    if (Number.isFinite(ab) && ab !== 0) return { label: "AB", value: Math.abs(ab), current, ob, ab };
   }
-
-  let current = hasCurrent ? rawCurrent : NaN;
-  if (!Number.isFinite(current)) {
-    if (hasOB && rawOB > 0) current = rawOB;
-    else if (hasAB && rawAB > 0) current = -Math.abs(rawAB);
-    else current = 0;
-  }
-
-  const ob = hasOB && rawOB > 0 ? rawOB : (current > 0 ? current : 0);
-  const ab = hasAB && rawAB > 0 ? rawAB : (current < 0 ? Math.abs(current) : 0);
-
-  if (current < 0 || ab > 0) return { label: "AB", value: Math.abs(current || ab), current, ob, ab };
-  if (current > 0 || ob > 0) return { label: "OB", value: current || ob, current, ob, ab };
+  const summaryOb = Number(bill?.summary?.ob);
+  const summaryAb = Number(bill?.summary?.ab);
+  const summaryCurrent = Number(bill?.summary?.current);
+  if (Number.isFinite(summaryOb) && summaryOb !== 0) return { label: "OB", value: Math.abs(summaryOb), current: summaryCurrent, ob: summaryOb, ab: summaryAb };
+  if (Number.isFinite(summaryAb) && summaryAb !== 0) return { label: "AB", value: Math.abs(summaryAb), current: summaryCurrent, ob: summaryOb, ab: summaryAb };
+  if (fallbackBalance) return fallbackBalance;
   return { label: null, value: 0, current: 0, ob: 0, ab: 0 };
 };
 
@@ -296,22 +309,10 @@ const normalizeBills = (rows = [], ctxCustomer = {}) => {
     return true;
   });
   const sorted = unique;
-  return sorted.map((bill) => {
-    const bal = getBalanceFromBill(bill, null);
-    const normalizedBillNo = resolveBillNoForDisplay(bill, ctxCustomer);
-    return {
-      ...bill,
-      billNo: normalizedBillNo,
-      invoiceNo: normalizedBillNo,
-      currentBalance: bal.current,
-      availableBalance: bal.current,
-      oldBalance: bal.ob,
-      ob: bal.ob,
-      advanceBalance: bal.ab,
-      advBal: bal.ab,
-      isConvertedToGold: bill.isConvertedToGold || false,
-    };
-  });
+  return sorted.map((bill) => ({
+    ...bill,
+    isConvertedToGold: bill.isConvertedToGold || false,
+  }));
 };
 
 const enrichBillsWithTransactionImage = (billRows = [], allTx = [], ctxCustomer = {}) => {
@@ -587,7 +588,7 @@ export default function BillHistory({ navigation, route }) {
   // ── CLIENT-SIDE SEARCH ─────────────────────────────────────────────
   const filteredBills = (billSearch.trim()
     ? bills.filter((b) => {
-      const bn = String(b.billNo || b.invoiceNo).toLowerCase();
+      const bn = String(b?.previewSnapshot?.header?.billNo || b.billNo || b.invoiceNo).toLowerCase();
       return bn.includes(billSearch.trim().toLowerCase());
     })
     : bills
@@ -693,14 +694,12 @@ export default function BillHistory({ navigation, route }) {
       }
     }
 
-    const bal = getBalanceFromBill(freshBill);
-    const isB2C = billType === "B2C";
-    const b2cItems = isB2C ? normalizeB2CItems(freshBill) : (freshBill.items || []);
-    const b2cReceiptItems = isB2C
-      ? normalizeB2CReceiptItems(freshBill.receiptItems || [], freshBill)
-      : (freshBill.receiptItems || []);
-    const resolvedReport = isB2C ? buildB2CReport(freshBill, b2cItems, b2cReceiptItems) : (freshBill.report || null);
-    const resolvedSummary = buildSummaryForPreview(freshBill, bal);
+    const snapshot = freshBill?.previewSnapshot || bill?.previewSnapshot || null;
+    const isB2B = String(billType || "").toUpperCase() === "B2B";
+    const isDealerLike = String(freshBill?.dealerType || freshBill?.customerType || freshBill?.type || "").toUpperCase();
+    const prevOB = Number(freshBill?.previousOldBalance);
+    const prevAB = Number(freshBill?.previousAdvanceBalance);
+    const savedFinal = Number(freshBill?.finalBalance);
     const previewImage =
       getRecordImage(freshBill) ||
       normalizeImageUri(customer?.receiptImage, base_url) ||
@@ -711,6 +710,92 @@ export default function BillHistory({ navigation, route }) {
       normalizeImageUri(customer?.lastTransaction?.proofImage, base_url) ||
       normalizeImageUri(customer?.lastTransaction?.image, base_url) ||
       "";
+    if (snapshot) {
+      navigation.navigate("BillPreview", {
+        fromHistory: true,
+        customer: {
+          name: snapshot?.header?.customerName || freshBill.customerName || customer?.customerName || "Unknown",
+          phone: snapshot?.header?.phoneNumber || freshBill?.phone || freshBill?.phoneNumber || freshBill?.customerNumber || customer?.customerNumber || customer?.phoneNumber || customer?.phone || "",
+          address: snapshot?.header?.address || freshBill?.address || customer?.address || "",
+          gstin: snapshot?.header?.gstin || freshBill?.gstin || customer?.gstin || "",
+          type: snapshot?.header?.type || displayType,
+          image: previewImage,
+          proofImage: previewImage,
+          receiptImage: previewImage,
+          receiptImageShowInBill:
+            typeof freshBill?.receiptImageShowInBill === "boolean" ? freshBill.receiptImageShowInBill : true,
+          date: snapshot?.header?.date || freshBill.date || (freshBill.createdAt ? new Date(freshBill.createdAt).toLocaleDateString() : new Date().toLocaleDateString()),
+          oldBalance: snapshot?.header?.oldBalance,
+          advanceBalance: snapshot?.header?.advanceBalance,
+          balance: snapshot?.summary?.current,
+          id: customer?.id || customer?._id || customer?.customerId || "",
+          customerId: customer?.id || customer?._id || customer?.customerId || "",
+          billNo: snapshot?.header?.billNo || freshBill.billNo || freshBill.invoiceNo || "",
+          invoiceNo: snapshot?.header?.billNo || freshBill.billNo || freshBill.invoiceNo || "",
+        },
+        issueItems: snapshot?.issue?.items || freshBill.issueItems || [],
+        receiptItems: snapshot?.receipt?.items || freshBill.receiptItems || [],
+        cashTable: snapshot?.cash?.rows || freshBill.cashTable || [],
+        summary: snapshot?.summary || freshBill.summary || null,
+        report: snapshot?.report || freshBill.report || null,
+        transactions: [freshBill],
+        items: snapshot?.items || freshBill.items || [],
+        gst: snapshot?.gst ?? freshBill.gst ?? null,
+        estimate: freshBill.estimate || null,
+      });
+      return;
+    }
+    if (isB2B && !["DEALER", "SUPPLIER"].includes(isDealerLike) && (Number.isFinite(prevOB) || Number.isFinite(savedFinal))) {
+      navigation.navigate("BillPreview", {
+        fromHistory: true,
+        customer: {
+          name: freshBill.customerName || customer?.customerName || "Unknown",
+          phone:
+            freshBill?.phone ||
+            freshBill?.phoneNumber ||
+            freshBill?.customerNumber ||
+            customer?.customerNumber ||
+            customer?.phoneNumber ||
+            customer?.phone ||
+            "",
+          address: freshBill?.address || customer?.address || "",
+          gstin: freshBill?.gstin || customer?.gstin || "",
+          type: displayType,
+          image: previewImage,
+          proofImage: previewImage,
+          receiptImage: previewImage,
+          receiptImageShowInBill:
+            typeof freshBill?.receiptImageShowInBill === "boolean" ? freshBill.receiptImageShowInBill : true,
+          date:
+            freshBill.date ||
+            (freshBill.createdAt
+              ? new Date(freshBill.createdAt).toLocaleDateString()
+              : new Date().toLocaleDateString()),
+          oldBalance: Number.isFinite(prevOB) ? prevOB : (freshBill?.summary?.ob ?? freshBill?.oldBalance ?? freshBill?.ob),
+          advanceBalance: Number.isFinite(prevAB) ? prevAB : (freshBill?.summary?.ab ?? freshBill?.advanceBalance ?? freshBill?.advBal),
+          balance: Number.isFinite(savedFinal) ? savedFinal : (freshBill?.summary?.current ?? freshBill?.currentBalance ?? freshBill?.availableBalance),
+          id: customer?.id || customer?._id || customer?.customerId || "",
+          customerId: customer?.id || customer?._id || customer?.customerId || "",
+          billNo: freshBill.billNo || freshBill.invoiceNo || "",
+          invoiceNo: freshBill.billNo || freshBill.invoiceNo || "",
+        },
+        issueItems: freshBill.issueItems || [],
+        receiptItems: freshBill.receiptItems || [],
+        cashTable: freshBill.cashTable || [],
+        summary: {
+          ...(freshBill.summary || {}),
+          ob: Number.isFinite(prevOB) ? prevOB : (freshBill?.summary?.ob ?? freshBill?.oldBalance ?? freshBill?.ob ?? 0),
+          ab: Number.isFinite(prevAB) ? prevAB : (freshBill?.summary?.ab ?? freshBill?.advanceBalance ?? freshBill?.advBal ?? 0),
+          current: Number.isFinite(savedFinal) ? savedFinal : (freshBill?.summary?.current ?? freshBill?.currentBalance ?? freshBill?.availableBalance ?? 0),
+        },
+        report: freshBill.report || null,
+        transactions: [freshBill],
+        items: freshBill.items || [],
+        gst: freshBill.gst || null,
+        estimate: freshBill.estimate || null,
+      });
+      return;
+    }
     navigation.navigate("BillPreview", {
       fromHistory: true,
       customer: {
@@ -736,21 +821,21 @@ export default function BillHistory({ navigation, route }) {
           (freshBill.createdAt
             ? new Date(freshBill.createdAt).toLocaleDateString()
             : new Date().toLocaleDateString()),
-        oldBalance: bal.ob,
-        advanceBalance: bal.ab,
-        balance: bal.current,
+        oldBalance: freshBill?.summary?.ob ?? freshBill?.oldBalance ?? freshBill?.ob,
+        advanceBalance: freshBill?.summary?.ab ?? freshBill?.advanceBalance ?? freshBill?.advBal,
+        balance: freshBill?.summary?.current ?? freshBill?.currentBalance ?? freshBill?.availableBalance,
         id: customer?.id || customer?._id || customer?.customerId || "",
         customerId: customer?.id || customer?._id || customer?.customerId || "",
-        billNo: resolveBillNoForDisplay(freshBill, customer),
-        invoiceNo: resolveBillNoForDisplay(freshBill, customer),
+        billNo: freshBill.billNo || freshBill.invoiceNo || "",
+        invoiceNo: freshBill.billNo || freshBill.invoiceNo || "",
       },
       issueItems: freshBill.issueItems || [],
-      receiptItems: b2cReceiptItems,
+      receiptItems: freshBill.receiptItems || [],
       cashTable: freshBill.cashTable || [],
-      summary: resolvedSummary,
-      report: resolvedReport,
+      summary: freshBill.summary || null,
+      report: freshBill.report || null,
       transactions: [freshBill],
-      items: b2cItems,
+      items: freshBill.items || [],
       gst: freshBill.gst || null,
       estimate: freshBill.estimate || null,
     });
@@ -837,12 +922,12 @@ export default function BillHistory({ navigation, route }) {
     // Navigate to BillPreview with printAgain flag so it auto-opens print dialog
     const billType = resolveBillTypeFromContext(bill, customer);
     const displayType = resolveDisplayTypeFromContext(bill, customer);
-    const bal = getBalanceFromBill(bill);
-    const isB2C = billType === "B2C";
-    const b2cItems = isB2C ? normalizeB2CItems(bill) : (bill.items || []);
-    const b2cReceiptItems = isB2C ? normalizeB2CReceiptItems(bill.receiptItems || [], bill) : (bill.receiptItems || []);
-    const resolvedReport = isB2C ? buildB2CReport(bill, b2cItems, b2cReceiptItems) : (bill.report || null);
-    const resolvedSummary = buildSummaryForPreview(bill, bal);
+    const snapshot = bill?.previewSnapshot || null;
+    const isB2B = String(billType || "").toUpperCase() === "B2B";
+    const isDealerLike = String(bill?.dealerType || bill?.customerType || bill?.type || "").toUpperCase();
+    const prevOB = Number(bill?.previousOldBalance);
+    const prevAB = Number(bill?.previousAdvanceBalance);
+    const savedFinal = Number(bill?.finalBalance);
     const previewImage =
       getRecordImage(bill) ||
       normalizeImageUri(customer?.receiptImage, base_url) ||
@@ -853,6 +938,105 @@ export default function BillHistory({ navigation, route }) {
       normalizeImageUri(customer?.lastTransaction?.proofImage, base_url) ||
       normalizeImageUri(customer?.lastTransaction?.image, base_url) ||
       "";
+    if (snapshot) {
+      navigation.navigate("BillPreview", {
+        customer: {
+          name: snapshot?.header?.customerName || bill.customerName || customer?.customerName || "Unknown",
+          phone:
+            snapshot?.header?.phoneNumber ||
+            bill?.phone ||
+            bill?.phoneNumber ||
+            bill?.customerNumber ||
+            customer?.customerNumber ||
+            customer?.phoneNumber ||
+            customer?.phone ||
+            "",
+          address: snapshot?.header?.address || bill?.address || customer?.address || "",
+          gstin: snapshot?.header?.gstin || bill?.gstin || customer?.gstin || "",
+          type: snapshot?.header?.type || displayType,
+          image: previewImage,
+          proofImage: previewImage,
+          receiptImage: previewImage,
+          receiptImageShowInBill:
+            typeof bill?.receiptImageShowInBill === "boolean" ? bill.receiptImageShowInBill : true,
+          date:
+            snapshot?.header?.date ||
+            bill.date ||
+            (bill.createdAt
+              ? new Date(bill.createdAt).toLocaleDateString()
+              : new Date().toLocaleDateString()),
+          oldBalance: snapshot?.header?.oldBalance,
+          advanceBalance: snapshot?.header?.advanceBalance,
+          balance: snapshot?.summary?.current,
+          id: customer?.id || customer?._id || customer?.customerId || "",
+          customerId: customer?.id || customer?._id || customer?.customerId || "",
+          billNo: snapshot?.header?.billNo || bill.billNo || bill.invoiceNo || "",
+          invoiceNo: snapshot?.header?.billNo || bill.billNo || bill.invoiceNo || "",
+        },
+        issueItems: snapshot?.issue?.items || bill.issueItems || [],
+        receiptItems: snapshot?.receipt?.items || bill.receiptItems || [],
+        cashTable: snapshot?.cash?.rows || bill.cashTable || [],
+        summary: snapshot?.summary || bill.summary || null,
+        report: snapshot?.report || bill.report || null,
+        transactions: [bill],
+        items: snapshot?.items || bill.items || [],
+        gst: snapshot?.gst ?? bill.gst ?? null,
+        estimate: bill.estimate || null,
+        printAgain: true,
+      });
+      return;
+    }
+    if (isB2B && !["DEALER", "SUPPLIER"].includes(isDealerLike) && (Number.isFinite(prevOB) || Number.isFinite(savedFinal))) {
+      navigation.navigate("BillPreview", {
+        customer: {
+          name: bill.customerName || customer?.customerName || "Unknown",
+          phone:
+            bill?.phone ||
+            bill?.phoneNumber ||
+            bill?.customerNumber ||
+            customer?.customerNumber ||
+            customer?.phoneNumber ||
+            customer?.phone ||
+            "",
+          address: bill?.address || customer?.address || "",
+          gstin: bill?.gstin || customer?.gstin || "",
+          type: displayType,
+          image: previewImage,
+          proofImage: previewImage,
+          receiptImage: previewImage,
+          receiptImageShowInBill:
+            typeof bill?.receiptImageShowInBill === "boolean" ? bill.receiptImageShowInBill : true,
+          date:
+            bill.date ||
+            (bill.createdAt
+              ? new Date(bill.createdAt).toLocaleDateString()
+              : new Date().toLocaleDateString()),
+          oldBalance: Number.isFinite(prevOB) ? prevOB : (bill?.summary?.ob ?? bill?.oldBalance ?? bill?.ob),
+          advanceBalance: Number.isFinite(prevAB) ? prevAB : (bill?.summary?.ab ?? bill?.advanceBalance ?? bill?.advBal),
+          balance: Number.isFinite(savedFinal) ? savedFinal : (bill?.summary?.current ?? bill?.currentBalance ?? bill?.availableBalance),
+          id: customer?.id || customer?._id || customer?.customerId || "",
+          customerId: customer?.id || customer?._id || customer?.customerId || "",
+          billNo: bill.billNo || bill.invoiceNo || "",
+          invoiceNo: bill.billNo || bill.invoiceNo || "",
+        },
+        issueItems: bill.issueItems || [],
+        receiptItems: bill.receiptItems || [],
+        cashTable: bill.cashTable || [],
+        summary: {
+          ...(bill.summary || {}),
+          ob: Number.isFinite(prevOB) ? prevOB : (bill?.summary?.ob ?? bill?.oldBalance ?? bill?.ob ?? 0),
+          ab: Number.isFinite(prevAB) ? prevAB : (bill?.summary?.ab ?? bill?.advanceBalance ?? bill?.advBal ?? 0),
+          current: Number.isFinite(savedFinal) ? savedFinal : (bill?.summary?.current ?? bill?.currentBalance ?? bill?.availableBalance ?? 0),
+        },
+        report: bill.report || null,
+        transactions: [bill],
+        items: bill.items || [],
+        gst: bill.gst || null,
+        estimate: bill.estimate || null,
+        printAgain: true,
+      });
+      return;
+    }
     navigation.navigate("BillPreview", {
       customer: {
         name: bill.customerName || customer?.customerName || "Unknown",
@@ -877,21 +1061,21 @@ export default function BillHistory({ navigation, route }) {
           (bill.createdAt
             ? new Date(bill.createdAt).toLocaleDateString()
             : new Date().toLocaleDateString()),
-        oldBalance: bal.ob,
-        advanceBalance: bal.ab,
-        balance: bal.current,
+        oldBalance: bill?.summary?.ob ?? bill?.oldBalance ?? bill?.ob,
+        advanceBalance: bill?.summary?.ab ?? bill?.advanceBalance ?? bill?.advBal,
+        balance: bill?.summary?.current ?? bill?.currentBalance ?? bill?.availableBalance,
         id: customer?.id || customer?._id || customer?.customerId || "",
         customerId: customer?.id || customer?._id || customer?.customerId || "",
-        billNo: resolveBillNoForDisplay(bill, customer),
-        invoiceNo: resolveBillNoForDisplay(bill, customer),
+        billNo: bill.billNo || bill.invoiceNo || "",
+        invoiceNo: bill.billNo || bill.invoiceNo || "",
       },
       issueItems: bill.issueItems || [],
-      receiptItems: b2cReceiptItems,
+      receiptItems: bill.receiptItems || [],
       cashTable: bill.cashTable || [],
-      summary: resolvedSummary,
-      report: resolvedReport,
+      summary: bill.summary || null,
+      report: bill.report || null,
       transactions: [bill],
-      items: b2cItems,
+      items: bill.items || [],
       gst: bill.gst || null,
       estimate: bill.estimate || null,
       printAgain: true,
@@ -929,12 +1113,13 @@ export default function BillHistory({ navigation, route }) {
     setSharingBillId(bill._id);
     try {
       const billType = resolveDisplayTypeFromContext(bill, customer);
+      const snapshot = bill?.previewSnapshot || null;
       const custName = bill.customerName || customer?.customerName || "Customer";
-      const billNo = formatMainBillNo(bill.billNo || bill.invoiceNo) || "N/A";
-      const date = bill.date || (bill.createdAt ? new Date(bill.createdAt).toLocaleDateString() : "N/A");
+      const billNo = snapshot?.header?.billNo || bill.billNo || bill.invoiceNo || "N/A";
+      const date = snapshot?.header?.date || bill.date || (bill.createdAt ? new Date(bill.createdAt).toLocaleDateString() : "N/A");
       const bal = getBalanceFromBill(bill);
-      const issue = num(bill.issuePure ?? bill.totalIssueWeight);
-      const receipt = num(bill.receiptPure ?? bill.totalReceiptWeight);
+      const issue = num(snapshot?.issue?.totals?.pure ?? bill.issuePure ?? bill.totalIssueWeight);
+      const receipt = num(snapshot?.receipt?.totals?.pure ?? bill.receiptPure ?? bill.totalReceiptWeight);
 
       const balanceLine =
         bal.label === "OB"
@@ -998,18 +1183,32 @@ export default function BillHistory({ navigation, route }) {
   };
 
   // ── BALANCE DISPLAY HELPER ─────────────────────────────────────────
-  const getBalanceDisplay = (item) => {
-    const bal = getBalanceFromBill(item);
-    return bal.label ? { label: bal.label, value: bal.value } : null;
+  const getBalanceDisplay = (item, isLatest = false) => {
+    const isDealerLike = String(item?.dealerType || item?.customerType || item?.type || "").toUpperCase();
+    const balanceType = String(item?.balanceType || item?.summary?.balanceType || "").toLowerCase();
+    if (isDealerLike === "DEALER" || isDealerLike === "SUPPLIER") {
+      const finalBalance = Number(item?.finalBalance ?? item?.summary?.current ?? item?.availableBalance);
+      const label = balanceType.includes("advance") ? "AB" : "OB";
+      return { label, value: Math.abs(Number.isFinite(finalBalance) ? finalBalance : 0) };
+    }
+    if (isLatest) {
+      const finalBalance = Number(item?.finalBalance ?? item?.summary?.current ?? item?.availableBalance);
+      return { label: "OB", value: Math.abs(Number.isFinite(finalBalance) ? finalBalance : 0) };
+    }
+    const prevOB = Number(item?.previousOldBalance);
+    const prevAB = Number(item?.previousAdvanceBalance);
+    if (Number.isFinite(prevOB) && prevOB !== 0) return { label: "OB", value: Math.abs(prevOB) };
+    if (Number.isFinite(prevAB) && prevAB !== 0) return { label: "AB", value: Math.abs(prevAB) };
+    return null;
   };
 
   // ── RENDER CARD ─────────────────────────────────────────────────────
   const renderBillItem = ({ item }) => {
+    const snapshot = item?.previewSnapshot || null;
     const activityDate = item.updatedAt || item.createdAt || null;
     const activityDateObj = activityDate ? new Date(activityDate) : null;
-    const createdDate = activityDateObj
-      ? activityDateObj.toLocaleDateString()
-      : item.date || "N/A";
+    const createdDate = snapshot?.header?.date ||
+      (activityDateObj ? activityDateObj.toLocaleDateString() : item.date || "N/A");
     const createdTime = activityDateObj
       ? activityDateObj.toLocaleTimeString([], {
           hour: "2-digit",
@@ -1018,14 +1217,16 @@ export default function BillHistory({ navigation, route }) {
         })
       : "N/A";
     const gstBill = isGstBill(item);
-    const itemType = gstBill ? "GST" : resolveDisplayTypeFromContext(item, customer);
-    const billNumber = item.billNo || item.invoiceNo || "00000";
-    const balanceDisplay = getBalanceDisplay(item);
+    const itemType = gstBill ? "GST" : (snapshot?.header?.type || resolveDisplayTypeFromContext(item, customer));
+    const billNumber = snapshot?.header?.billNo || item.billNo || item.invoiceNo || "00000";
+    const latestBill = getLatestBillFromList(filteredBills);
+    const isLatest = latestBill && item?._id && latestBill?._id === item._id;
+    const balanceDisplay = getBalanceDisplay(item, isLatest);
     const isSharing = sharingBillId === item._id;
-    const displayCustomerName = item.customerName || customer?.customerName || customer?.name || "N/A";
-    const displayPhone = item.phoneNumber || item.phone || customer?.phoneNumber || customer?.phone || "N/A";
-    const displayGstin = item.gstin || customer?.gstin || "N/A";
-    const displayTotalAmount = resolveBillTotalAmount(item);
+    const displayCustomerName = snapshot?.header?.customerName || item.customerName || customer?.customerName || customer?.name || "N/A";
+    const displayPhone = snapshot?.header?.phoneNumber || item.phoneNumber || item.phone || customer?.phoneNumber || customer?.phone || "N/A";
+    const displayGstin = snapshot?.header?.gstin || item.gstin || customer?.gstin || "N/A";
+    const displayTotalAmount = getSavedTotalAmount(item);
 
     return (
       <View style={styles.billCard}>
@@ -1173,12 +1374,23 @@ export default function BillHistory({ navigation, route }) {
         </View>
         <View style={styles.balanceBadgeContainer}>
           {(() => {
-            const headerBalance = resolveHeaderBalance(customer);
-            const isAB = headerBalance.label === "AB";
+            const latestBill = getLatestBillFromList(filteredBills);
+            const latestFinal = Number(
+              latestBill?.finalBalance ??
+              latestBill?.summary?.current ??
+              latestBill?.availableBalance
+            );
+            const isDealerLike = String(latestBill?.dealerType || latestBill?.customerType || latestBill?.type || "").toUpperCase();
+            const balanceType = String(latestBill?.balanceType || latestBill?.summary?.balanceType || "").toLowerCase();
+            const label =
+              (isDealerLike === "DEALER" || isDealerLike === "SUPPLIER")
+                ? (balanceType.includes("advance") ? "AB" : "OB")
+                : "OB";
+            const value = Number.isFinite(latestFinal) ? Math.abs(latestFinal) : 0;
             return (
-              <View style={[styles.balanceBadge, isAB ? styles.abBadge : styles.obBadge]}>
-                <Text style={styles.badgeLabel}>{headerBalance.label}</Text>
-                <Text style={styles.badgeValue}>{Number(headerBalance.value || 0).toFixed(3)}g</Text>
+              <View style={[styles.balanceBadge, label === "AB" ? styles.abBadge : styles.obBadge]}>
+                <Text style={styles.badgeLabel}>{label}</Text>
+                <Text style={styles.badgeValue}>{Number(value || 0).toFixed(3)}g</Text>
               </View>
             );
           })()}
