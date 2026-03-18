@@ -137,6 +137,7 @@ const serializeBillForClient = (bill) => {
 };
 
 const buildBillPayload = (body = {}) => {
+    const hasSnapshot = body?.previewSnapshot && typeof body.previewSnapshot === 'object';
     const billType = normalizeBillType(body.billType || body.customerType || body.type);
     const issueItems = toArray(body.issueItems);
     const receiptItems = toArray(body.receiptItems);
@@ -156,9 +157,14 @@ const buildBillPayload = (body = {}) => {
         cashTable.reduce((sum, row) => sum + toNumber(row.rupees), 0),
     );
     const kadaiAmount = toNumber(body.kadaiAmount);
-    const openingOldBalance = toNumber(body.ob ?? body.summary?.ob ?? body.oldBalance);
-    const openingAdvanceBalance = toNumber(body.advBal ?? body.summary?.ab ?? body.advanceBalance);
+    const openingOldBalance = toNumber(
+        body.previousOldBalance ?? body.ob ?? body.summary?.ob ?? body.oldBalance,
+    );
+    const openingAdvanceBalance = toNumber(
+        body.previousAdvanceBalance ?? body.advBal ?? body.summary?.ab ?? body.advanceBalance,
+    );
     const availableBalance = toNumber(
+        body.finalBalance ??
         body.availableBalance ??
         body.currentBalance ??
         body.summary?.current ??
@@ -168,9 +174,9 @@ const buildBillPayload = (body = {}) => {
             totalReceiptWeight -
             cashAmount,
     );
-    let oldBalance = openingOldBalance;
-    let advanceBalance = openingAdvanceBalance;
-    if (billType === "B2B" && Number.isFinite(availableBalance)) {
+    let oldBalance = toNumber(body.oldBalance ?? openingOldBalance);
+    let advanceBalance = toNumber(body.advanceBalance ?? openingAdvanceBalance);
+    if (!hasSnapshot && billType === "B2B" && Number.isFinite(availableBalance)) {
         const isDealerLike = String(body.dealerType || body.customerType || body.type || "").toUpperCase();
         if (isDealerLike === "DEALER" || isDealerLike === "SUPPLIER") {
             // Dealer/Supplier uses receipt - (issue + cash)
@@ -228,6 +234,12 @@ const buildBillPayload = (body = {}) => {
                 ? body.image
                 : (typeof body.receiptImage === 'string' ? body.receiptImage : null),
         gst: body.gst || null,
+        previewSnapshot: body.previewSnapshot || null,
+        previousOldBalance: toNumber(body.previousOldBalance ?? openingOldBalance),
+        previousAdvanceBalance: toNumber(body.previousAdvanceBalance ?? openingAdvanceBalance),
+        finalBalance: toNumber(body.finalBalance ?? availableBalance),
+        balanceType: String(body.balanceType || '').trim(),
+        totals: body.totals || null,
     };
 };
 
@@ -246,7 +258,7 @@ const findCustomerAndUpdateOverview = async (billDoc) => {
     const customerId = toIdString(billDoc.customerId);
     if (!customerId) return null;
 
-    const netBalance = toNumber(billDoc.availableBalance ?? billDoc.currentBalance);
+    const netBalance = toNumber(billDoc.finalBalance ?? billDoc.availableBalance ?? billDoc.currentBalance);
     const lastAmount = toNumber(billDoc.gst?.finalAmount || billDoc.gst?.amount || billDoc.totalAmount || billDoc.cashAmount || 0);
     const lastWeight = toNumber(billDoc.totalIssueWeight || billDoc.issuePure || 0);
     const lastPure = toNumber(billDoc.issuePure || billDoc.totalIssueWeight || 0);
@@ -366,22 +378,18 @@ const createBillSummary = async (req, res) => {
         const BillSummary = getBillSummaryModel(payload.billType);
         const requestedBillNo = pickBillNo(req.body);
         const existingForRequestedNo = requestedBillNo
-            ? await BillSummary.findOne({ customerId: payload.customerId, billNo: requestedBillNo })
+            ? await BillSummary.findOne({ billNo: requestedBillNo })
             : null;
 
-        // New bill creation must always be auto-numbered by backend.
-        // Only preserve requested billNo when it refers to an existing bill for this customer (idempotent re-save).
-        if (existingForRequestedNo) {
+        // Always create a new bill number for each save.
+        // If the client already reserved a billNo (via /nextBillNo) and it's unused, keep it.
+        if (requestedBillNo && !existingForRequestedNo) {
             payload.billNo = requestedBillNo;
         } else {
             payload.billNo = await getUniqueNextBillNo(payload.billType);
         }
         payload.invoiceNo = payload.billNo;
-        const saved = await BillSummary.findOneAndUpdate(
-            { customerId: payload.customerId, billNo: payload.billNo },
-            { $set: payload },
-            { new: true, upsert: true, setDefaultsOnInsert: true },
-        );
+        const saved = await BillSummary.create(payload);
 
         await findCustomerAndUpdateOverview(saved);
         try {
