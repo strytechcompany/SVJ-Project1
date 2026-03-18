@@ -80,6 +80,12 @@ const billSummarySchema = new mongoose.Schema(
     receiptImageShowInBill: { type: Boolean, default: true },
     isConvertedToGold: { type: Boolean, default: false },
     gst: { type: mongoose.Schema.Types.Mixed, default: null },
+    previewSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+    previousOldBalance: { type: Number, default: 0 },
+    previousAdvanceBalance: { type: Number, default: 0 },
+    finalBalance: { type: Number, default: 0 },
+    balanceType: { type: String, default: '' },
+    totals: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: true, strict: true },
 );
