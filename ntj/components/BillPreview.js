@@ -1168,6 +1168,64 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                 <img src="${dealerProofImageUri}" style="width:100%; max-height:160px; object-fit:cover; border:1px solid #ddd; border-radius:6px;" />
               </div>
             ` : ""}
+            ${isDealerPreview ? `
+            <h2>RECEIPT:</h2>
+            <table>
+              <tr>
+                <th>Name</th>
+                <th>Weight</th>
+                <th>Result</th>
+                <th>Calc</th>
+                <th>Pure</th>
+              </tr>
+                ${receiptItems && receiptItems.length > 0 ? receiptItems.map(row => `
+                  <tr>
+                    <td>${row.name}</td>
+                    <td>${row.weight}</td>
+                    <td>${row.result}</td>
+                    <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+                    <td>${row.pure}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="5">No receipt items</td></tr>'}
+                ${receiptItems && receiptItems.length > 0 ? `
+                <tr class="total-row">
+                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
+                  <td>TW: ${totalReceiptTW}</td>
+                  <td>N.W: ${totalReceiptNW}</td>
+                  <td>-</td>
+                  <td><Strong>Pure: ${totalReceiptPure}</Strong></td>
+                </tr>` : ''}
+              </table>
+            <h2>ISSUE:</h2>
+            <table>
+              <tr>
+                <th>Name</th>
+                <th>G.Weight</th>
+                ${showIssueMColumn ? '<th>M</th>' : ''}
+                ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
+                <th>Calc</th>
+                <th>Pure</th>
+              </tr>
+                ${issueItems.map(row => `
+                  <tr>
+                    <td>${row.name}</td>
+                    <td>${row.gross}</td>
+                    ${showIssueMColumn ? `<td>${row.m}</td>` : ''}
+                    ${showIssueNetWeightColumn ? `<td>${row.net}</td>` : ''}
+                    <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+                    <td><strong>${row.pure}</strong></td>
+                  </tr>
+                `).join('')}
+                <tr class="total-row">
+                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
+                  <td>TW: ${totalIssueTW}</td>
+                  ${showIssueMColumn ? '<td>-</td>' : ''}
+                  ${showIssueNetWeightColumn ? `<td>N.W: ${totalIssueNW}</td>` : ''}
+                  <td>-</td>
+                  <td><strong>Pure: ${totalIssuePure}</strong></td>
+                </tr>
+              </table>
+            ` : `
             <h2>ISSUE:</h2>
             <table>
               <tr>
@@ -1224,6 +1282,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                   <td><Strong>Pure: ${totalReceiptPure}</Strong></td>
                 </tr>` : ''}
               </table>
+            `}
             <h2>CASH:</h2>
             ${cashTable && cashTable.length > 0 ? `
               <table>
@@ -1404,18 +1463,39 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     return "";
   };
 
-  const currentBillNo = resolveBillNoForDisplay(
+  const [generatedBillNo, setGeneratedBillNo] = useState("");
+  const billNoRequestRef = useRef(false);
+  const baseBillNo = resolveBillNoForDisplay(
     customer?.billNo ||
     transactions?.[0]?.billNo ||
     customer?.invoiceNo ||
     transactions?.[0]?.invoiceNo,
     customer?.type || customer?.customerType || previewType
   );
+  const currentBillNo = generatedBillNo || baseBillNo;
   const previewTx = transactions?.[0] || {};
   const previewType = String(
     customer?.type || customer?.customerType || previewTx?.dealerType || previewTx?.customerType || ""
   ).toUpperCase();
   const isDealerPreview = previewType === "DEALER" || previewType === "SUPPLIER";
+  const isB2CPreview = previewType === "B2C";
+
+  useEffect(() => {
+    if (isFromHistory) return;
+    if (order || estimate || suspense) return;
+    if (isB2CPreview) return;
+    if (billNoRequestRef.current) return;
+    billNoRequestRef.current = true;
+    const controller = new AbortController();
+    fetch(`${base_url}/billSummary/nextBillNo?billType=B2B`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const nextNo = data?.billNo ? String(data.billNo) : "";
+        if (nextNo) setGeneratedBillNo(nextNo);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [isFromHistory, order, estimate, suspense, isB2CPreview]);
   const resolveFirstValidImageUri = (candidates = []) => {
     for (const candidate of candidates) {
       const uri = normalizeImageUri(candidate, base_url);
@@ -1851,6 +1931,40 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     ${displayConvertedGoldValue > 0 ? `<div class="summary-row"><span class="summary-label">Converted Gold</span><span class="summary-value">${displayConvertedGoldValue.toFixed(3)} g</span></div>` : ''}
   </div>
   ` : `
+  ${isDealerPreview ? `
+  <!-- Dealer Receipt -->
+  <div class="section-title">RECEIPT</div>
+  <table>
+    <thead><tr><th>#</th><th>Name</th><th>Weight</th><th>Result</th><th>Calc</th><th>Pure (g)</th></tr></thead>
+    <tbody>${receiptRowsHtml}</tbody>
+    ${safeReceiptItems.length > 0 ? `<tfoot><tr class="total-row">
+      <td colspan="2">Totals</td>
+      <td>TW: ${totalReceiptTW}</td>
+      <td>NW: ${totalReceiptNW}</td>
+      <td>-</td>
+      <td>Pure: ${totalReceiptPure}</td>
+    </tr></tfoot>` : ''}
+  </table>
+
+  <!-- Dealer Issue -->
+  <div class="section-title">ISSUE</div>
+  <table>
+    <thead><tr>
+      <th>#</th><th>Name</th><th>G.Weight</th>
+      ${showIssueMColumn ? '<th>M</th>' : ''}
+      ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
+      <th>Calc</th><th>Pure (g)</th>
+    </tr></thead>
+    <tbody>${issueRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="2">Totals</td>
+      <td>TW: ${totalIssueTW}</td>
+      ${showIssueMColumn ? '<td>-</td>' : ''}
+      ${showIssueNetWeightColumn ? `<td>NW: ${totalIssueNW}</td>` : ''}
+      <td>-</td><td>Pure: ${totalIssuePure}</td>
+    </tr></tfoot>
+  </table>
+  ` : `
   <!-- B2B Issue -->
   <div class="section-title">ISSUE</div>
   <table>
@@ -1883,6 +1997,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       <td>Pure: ${totalReceiptPure}</td>
     </tr></tfoot>` : ''}
   </table>
+  `}
 
   <!-- Cash Table -->
   <div class="section-title">CASH</div>
@@ -2174,7 +2289,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		          const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
 		          if (cloudRes?.ok) {
 		            sentViaCloud = true;
-		            Alert.alert("Success", `Bill PDF sent directly to ${waPhone}`);
+		            console.log("Success", `Bill PDF sent directly to ${waPhone}`);
 		            await openWhatsAppChat(waPhone); // Open chat to show the sent document
 		            return;
 		          }
@@ -2585,14 +2700,13 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
     Alert.alert(
       "Nullify Balance",
-      "Are you sure you want to set the customer balance to zero? This will take effect when the bill is saved.",
+      "Are you sure you want to set the customer balance to zero? This will save the bill with a zero balance.",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Yes, Nullify",
           onPress: async () => {
-             // We update local state so the preview shows 0 and handleSaveBill uses 0.
-             // We also optionally update DB immediately like handleConvertToGold does.
+            // Update local state so the preview shows 0 and save a zero-balance snapshot.
             try {
               const customerId = customer?.id || customer?._id || customer?.customerId || transactions?.[0]?.customerId || "";
               if (customerId) {
@@ -2617,6 +2731,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
               updatedOB: 0,
               updatedAB: 0,
             });
+            setB2cCashReceived(toNum(b2cFinalPayableAmount, 0).toFixed(2));
+            await handleSaveBill({ b2cForceZero: true });
             Alert.alert("Success", "Balance set to zero for this transaction.");
           }
         }
@@ -2624,11 +2740,23 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     );
   };
 
-  const handleSaveBill = async () => {
+  const handleSaveBalanceB2C = async () => {
+    if (!isB2C) return;
+    const cashVal = String(b2cCashReceived || "").trim();
+    if (!cashVal) {
+      Alert.alert("Missing Cash Received", "Please enter Cash Received before saving balance.");
+      return;
+    }
+    await handleSaveBill({ b2cSaveBalance: true });
+  };
+
+  const handleSaveBill = async (options = {}) => {
     try {
+      const { b2cSaveBalance = false, b2cForceZero = false } = options || {};
       const billType = String(customer?.type || customer?.customerType || "B2B").toUpperCase() === "B2C" ? "B2C" : "B2B";
       const isB2BBill = billType === "B2B";
       const isB2CBill = billType === "B2C";
+      const forceZeroBalance = isB2CBill && b2cForceZero;
       const customerId = getCustomerIdForSave();
 
       if (!customerId) {
@@ -2636,14 +2764,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         return;
       }
 
-      const billNo = resolveBillNoForDisplay(
-        customer?.billNo ||
-        transactions?.[0]?.billNo ||
-        customer?.invoiceNo ||
-        transactions?.[0]?.invoiceNo,
-        billType
-      );
-      const allowBillNoForSave = !isDealerPreview && Boolean(billNo);
+      const billNo = currentBillNo;
+      const allowBillNoForSave = Boolean(billNo);
 
       const b2cItems = normalizedB2CItems;
       const b2cIssueRows = b2cItems.map((it) => {
@@ -2698,16 +2820,19 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       const totalReceiptWeightToSave = isB2BBill
         ? displayedReceipt
         : b2cReceiptRows.reduce((sum, row) => sum + toNum(row?.netWeight, 0), 0);
+      const b2cFinalBalanceGrams = toNum(b2cDisplayBalanceAfterCashGrams, 0);
+      const b2cOldBalanceForSave = Math.max(0, b2cFinalBalanceGrams);
+      const b2cAdvanceBalanceForSave = Math.max(0, -b2cFinalBalanceGrams);
       const oldBalanceForSave = isB2CBill
-        ? b2cNextOldBalance
+        ? (forceZeroBalance ? 0 : (b2cSaveBalance ? b2cOldBalanceForSave : b2cNextOldBalance))
         : toNum(customer?.oldBalance, summaryOB);
       const advanceBalanceForSave = isB2CBill
-        ? b2cNextAdvanceBalance
+        ? (forceZeroBalance ? 0 : (b2cSaveBalance ? b2cAdvanceBalanceForSave : b2cNextAdvanceBalance))
         : toNum(customer?.advanceBalance, summaryAB);
       const b2bFinalNetBalance = summaryFinal;
       const dealerFinalNetBalance = dealerFinalBalanceRaw;
       const finalNetBalanceForSave = isB2CBill
-        ? toNum(oldBalanceForSave, 0) - toNum(advanceBalanceForSave, 0)
+        ? (forceZeroBalance ? 0 : (b2cSaveBalance ? b2cFinalBalanceGrams : (toNum(oldBalanceForSave, 0) - toNum(advanceBalanceForSave, 0))))
         : toNum(isDealerPreview ? dealerFinalNetBalance : b2bFinalNetBalance, 0);
       const availableBalanceForSave = finalNetBalanceForSave;
       const finalB2BOldBalance = isB2BBill
@@ -2723,10 +2848,14 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         ? (availableBalanceForSave < 0 ? Math.abs(availableBalanceForSave) : 0)
         : advanceBalanceForSave;
 
+      const previousOldBalance = isB2CBill && b2cSaveBalance && !forceZeroBalance ? b2cOldBalanceForSave : toNum(summaryOB, 0);
+      const previousAdvanceBalance = isB2CBill && b2cSaveBalance && !forceZeroBalance ? b2cAdvanceBalanceForSave : toNum(summaryAB, 0);
+      const balanceType = summaryStartLabel;
+      const finalBalance = isB2CBill && b2cSaveBalance && !forceZeroBalance ? b2cFinalBalanceGrams : (forceZeroBalance ? 0 : toNum(summaryFinalValue, 0));
       const saveSummary = {
         ...summary,
-        ob: toNum(summaryStartValue, 0),
-        ab: toNum(summaryAB, 0),
+        ob: previousOldBalance,
+        ab: previousAdvanceBalance,
         issue: displayedIssue,
         receipt: displayedReceipt,
         cash: displayedCash,
@@ -2734,16 +2863,98 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         current: finalNetBalanceForSave,
       };
 
+      const normalizedBillDate = (() => {
+        const d = customer?.date;
+        if (!d || typeof d !== 'string' || d.toLowerCase().includes('invalid')) return new Date().toISOString().split('T')[0];
+        if (d.includes('/')) return d.split("/").reverse().join("-");
+        if (d.includes('-')) {
+           const parts = d.split("-");
+           if (parts[0].length === 2) return parts.reverse().join("-");
+           return d;
+        }
+        return d;
+      })();
+
+      const previewSnapshot = JSON.parse(JSON.stringify({
+        header: {
+          billNo: allowBillNoForSave ? String(billNo) : "",
+          type: isDealerPreview
+            ? (customer?.type || customer?.customerType || previewTx?.dealerType || "Dealer")
+            : billType,
+          date: normalizedBillDate,
+          customerName: customer?.name || customer?.customerName || "Unknown",
+          phoneNumber:
+            customer?.phoneNumber ||
+            customer?.phone ||
+            customer?.customerNumber ||
+            "",
+          address: customer?.address || "",
+          gstin: customer?.gstin || customer?.gst || "",
+          oldBalance: previousOldBalance,
+          advanceBalance: previousAdvanceBalance,
+          startLabel: summaryStartLabel,
+          finalLabel: summaryFinalLabel,
+        },
+        issue: {
+          items: issueRowsToSave,
+          totals: {
+            tw: totalIssueTW,
+            nw: totalIssueNW,
+            pure: totalIssuePure,
+          },
+        },
+        receipt: {
+          items: receiptRowsToSave,
+          totals: {
+            tw: totalReceiptTW,
+            nw: totalReceiptNW,
+            pure: totalReceiptPure,
+          },
+        },
+        cash: {
+          rows: safeCashTable,
+          totalPure: toNum(displaySummary?.cash, toNum(summary?.cash, toNum(cashFromRows, 0))).toFixed(3),
+        },
+        totals: {
+          totalIssueWeight: totalIssueWeightToSave,
+          totalReceiptWeight: totalReceiptWeightToSave,
+          totalCashPure: toNum(cashFromRows, 0).toFixed(3),
+          issuePure: toNum(displayedIssue, 0).toFixed(3),
+          receiptPure: toNum(displayedReceipt, 0).toFixed(3),
+          cashPure: toNum(displayedCash, 0).toFixed(3),
+        },
+        summary: {
+          ...saveSummary,
+          previousOldBalance,
+          previousAdvanceBalance,
+          finalBalance,
+          finalLabel: summaryFinalLabel,
+          balanceType,
+        },
+        displaySummary: {
+          issue: displaySummary?.issue ?? displayedIssue,
+          receipt: displaySummary?.receipt ?? displayedReceipt,
+          cash: displaySummary?.cash ?? displayedCash,
+          gstPure: displaySummary?.gstPure ?? displayedGstPure,
+        },
+        dealerSummary: dealerSummaryValues,
+        isDealerPreview,
+        billType,
+        report: report || null,
+        items: isB2BBill ? [] : b2cItems,
+        gst,
+      }));
+
       const payload = {
         customerId: String(customerId),
         customerName: customer?.name || customer?.customerName || "Unknown",
-        ...(isDealerPreview
-          ? {
-            phoneNumber: customer?.phone || customer?.phoneNumber || customer?.customerNumber || "",
-            address: customer?.address || "",
-            gstin: customer?.gstin || customer?.gst || "",
-          }
-          : {}),
+        phoneNumber:
+          customer?.phoneNumber ||
+          customer?.phone ||
+          customer?.customerNumber ||
+          "",
+        address: customer?.address || "",
+        gstin: customer?.gstin || customer?.gst || "",
         ...(allowBillNoForSave ? { billNo: String(billNo) } : {}),
         billType,
         dealerType: isDealerPreview ? (customer?.type || customer?.customerType || previewTx?.dealerType || "Dealer") : "",
@@ -2775,19 +2986,20 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
           }
           : {}),
         summary: saveSummary,
+        previousOldBalance,
+        previousAdvanceBalance,
+        finalBalance,
+        balanceType,
+        totals: {
+          issuePure: toNum(displayedIssue, 0),
+          receiptPure: toNum(displayedReceipt, 0),
+          cashPure: toNum(displayedCash, 0),
+          totalCashPure: toNum(cashFromRows, 0),
+        },
+        previewSnapshot,
         gst,
         ...(!isB2BBill && billNo ? { invoiceNo: String(billNo) } : {}),
-        date: (() => {
-          const d = customer?.date;
-          if (!d || typeof d !== 'string' || d.toLowerCase().includes('invalid')) return new Date().toISOString().split('T')[0];
-          if (d.includes('/')) return d.split("/").reverse().join("-");
-          if (d.includes('-')) {
-             const parts = d.split("-");
-             if (parts[0].length === 2) return parts.reverse().join("-");
-             return d;
-          }
-          return d;
-        })(),
+        date: normalizedBillDate,
       };
 
       if (isB2CBill) {
@@ -2818,7 +3030,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         throw new Error(err || "Failed to save bill");
       }
 
-      Alert.alert("Success", "Bill saved successfully");
+      console.log("Success", "Bill saved successfully");
     } catch (error) {
       console.error("Save Bill error:", error);
       Alert.alert("Error", `Failed to save bill: ${error.message}`);
@@ -3465,16 +3677,26 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                 </View >
               )}
 
-              {/* Nil (Complete Settlement) */}
+              {/* Save Balance + Nil (Complete Settlement) */}
               <View style={{ alignItems: 'center', marginTop: 10 }}>
-                <TouchableOpacity
-                  style={[styles.saveButton, { backgroundColor: '#d32f2f' }]}
-                  onPress={handleNullifyBalance}
-                  activeOpacity={0.8}
-                >
-                  <Icon name="close-circle-outline" size={22} color="#fff" />
-                  <Text style={styles.homeButtonText}>Nil</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.saveButton, { backgroundColor: '#2E7D32' }]}
+                    onPress={handleSaveBalanceB2C}
+                    activeOpacity={0.8}
+                  >
+                    <Icon name="content-save-outline" size={22} color="#fff" />
+                    <Text style={styles.homeButtonText}>Save Balance</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.saveButton, { backgroundColor: '#d32f2f' }]}
+                    onPress={handleNullifyBalance}
+                    activeOpacity={0.8}
+                  >
+                    <Icon name="close-circle-outline" size={22} color="#fff" />
+                    <Text style={styles.homeButtonText}>Nil</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {/* Thirukkural Quote for B2C */}
@@ -3485,73 +3707,147 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             </>
           ) : (
             <>
-              {/* ISSUE */}
-              <View style={styles.sectionBox}>
-                <Text style={styles.sectionTitle}>ISSUE :</Text>
+              {isDealerPreview ? (
+                <>
+                  {/* RECEIPT */}
+                  <View style={styles.sectionBox}>
+                    <Text style={styles.sectionTitle}>RECEIPT :</Text>
 
-                <View style={styles.tableHeader}>
-                  <Text style={styles.cell}>Name</Text>
-                  <Text style={styles.cell}>G.Weight</Text>
-                  {showIssueMColumn && <Text style={styles.cell}>M</Text>}
-                  {showIssueNetWeightColumn && <Text style={styles.cell}>N.Weight</Text>}
-                  <Text style={styles.cell}>Calc</Text>
-                  <Text style={styles.cell}>Pure</Text>
-                </View>
-
-                {safeIssueItems.map((row, i) => (
-                  <View key={i} style={styles.tableRow}>
-                    <Text style={styles.cell}>{row.name}</Text>
-                    <Text style={styles.cell}>{row.gross}</Text>
-                    {showIssueMColumn && <Text style={styles.cell}>{row.m}</Text>}
-                    {showIssueNetWeightColumn && <Text style={styles.cell}>{row.net}</Text>}
-                    <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
-                    <Text style={styles.cell}>{row.pure}</Text>
-                  </View>
-                ))}
-
-                {/* ISSUE TOTAL */}
-                <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
-                  <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalIssueTW}</Text>
-                  {showIssueNetWeightColumn && (
-                    <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalIssueNW}</Text>
-                  )}
-                  <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalIssuePure}</Text>
-                </View>
-              </View>
-
-              {/* RECEIPT */}
-              <View style={styles.sectionBox}>
-                <Text style={styles.sectionTitle}>RECEIPT :</Text>
-
-                <View style={styles.tableHeader}>
-                  <Text style={styles.cell}>Name</Text>
-                  <Text style={styles.cell}>Weight</Text>
-                  <Text style={styles.cell}>Result</Text>
-                  <Text style={styles.cell}>Calc</Text>
-                  <Text style={styles.cell}>Pure</Text>
-                </View>
-
-                {safeReceiptItems.length > 0 ? (
-                  safeReceiptItems.map((row, i) => (
-                    <View key={i} style={styles.tableRow}>
-                      <Text style={styles.cell}>{row.name}</Text>
-                      <Text style={styles.cell}>{row.weight}</Text>
-                      <Text style={styles.cell}>{row.result}</Text>
-                      <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
-                      <Text style={styles.cell}>{row.pure}</Text>
+                    <View style={styles.tableHeader}>
+                      <Text style={styles.cell}>Name</Text>
+                      <Text style={styles.cell}>Weight</Text>
+                      <Text style={styles.cell}>Result</Text>
+                      <Text style={styles.cell}>Calc</Text>
+                      <Text style={styles.cell}>Pure</Text>
                     </View>
-                  ))
-                ) : (
-                  <Text style={styles.noData}>No receipt items</Text>
-                )}
 
-                {/* RECEIPT TOTAL */}
-                <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
-                  <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalReceiptTW}</Text>
-                  <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalReceiptNW}</Text>
-                  <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalReceiptPure}</Text>
-                </View>
-              </View>
+                    {safeReceiptItems.length > 0 ? (
+                      safeReceiptItems.map((row, i) => (
+                        <View key={i} style={styles.tableRow}>
+                          <Text style={styles.cell}>{row.name}</Text>
+                          <Text style={styles.cell}>{row.weight}</Text>
+                          <Text style={styles.cell}>{row.result}</Text>
+                          <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
+                          <Text style={styles.cell}>{row.pure}</Text>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={styles.noData}>No receipt items</Text>
+                    )}
+
+                    {/* RECEIPT TOTAL */}
+                    <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalReceiptTW}</Text>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalReceiptNW}</Text>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalReceiptPure}</Text>
+                    </View>
+                  </View>
+
+                  {/* ISSUE */}
+                  <View style={styles.sectionBox}>
+                    <Text style={styles.sectionTitle}>ISSUE :</Text>
+
+                    <View style={styles.tableHeader}>
+                      <Text style={styles.cell}>Name</Text>
+                      <Text style={styles.cell}>G.Weight</Text>
+                      {showIssueMColumn && <Text style={styles.cell}>M</Text>}
+                      {showIssueNetWeightColumn && <Text style={styles.cell}>N.Weight</Text>}
+                      <Text style={styles.cell}>Calc</Text>
+                      <Text style={styles.cell}>Pure</Text>
+                    </View>
+
+                    {safeIssueItems.map((row, i) => (
+                      <View key={i} style={styles.tableRow}>
+                        <Text style={styles.cell}>{row.name}</Text>
+                        <Text style={styles.cell}>{row.gross}</Text>
+                        {showIssueMColumn && <Text style={styles.cell}>{row.m}</Text>}
+                        {showIssueNetWeightColumn && <Text style={styles.cell}>{row.net}</Text>}
+                        <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
+                        <Text style={styles.cell}>{row.pure}</Text>
+                      </View>
+                    ))}
+
+                    {/* ISSUE TOTAL */}
+                    <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalIssueTW}</Text>
+                      {showIssueNetWeightColumn && (
+                        <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalIssueNW}</Text>
+                      )}
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalIssuePure}</Text>
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <>
+                  {/* ISSUE */}
+                  <View style={styles.sectionBox}>
+                    <Text style={styles.sectionTitle}>ISSUE :</Text>
+
+                    <View style={styles.tableHeader}>
+                      <Text style={styles.cell}>Name</Text>
+                      <Text style={styles.cell}>G.Weight</Text>
+                      {showIssueMColumn && <Text style={styles.cell}>M</Text>}
+                      {showIssueNetWeightColumn && <Text style={styles.cell}>N.Weight</Text>}
+                      <Text style={styles.cell}>Calc</Text>
+                      <Text style={styles.cell}>Pure</Text>
+                    </View>
+
+                    {safeIssueItems.map((row, i) => (
+                      <View key={i} style={styles.tableRow}>
+                        <Text style={styles.cell}>{row.name}</Text>
+                        <Text style={styles.cell}>{row.gross}</Text>
+                        {showIssueMColumn && <Text style={styles.cell}>{row.m}</Text>}
+                        {showIssueNetWeightColumn && <Text style={styles.cell}>{row.net}</Text>}
+                        <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
+                        <Text style={styles.cell}>{row.pure}</Text>
+                      </View>
+                    ))}
+
+                    {/* ISSUE TOTAL */}
+                    <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalIssueTW}</Text>
+                      {showIssueNetWeightColumn && (
+                        <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalIssueNW}</Text>
+                      )}
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalIssuePure}</Text>
+                    </View>
+                  </View>
+
+                  {/* RECEIPT */}
+                  <View style={styles.sectionBox}>
+                    <Text style={styles.sectionTitle}>RECEIPT :</Text>
+
+                    <View style={styles.tableHeader}>
+                      <Text style={styles.cell}>Name</Text>
+                      <Text style={styles.cell}>Weight</Text>
+                      <Text style={styles.cell}>Result</Text>
+                      <Text style={styles.cell}>Calc</Text>
+                      <Text style={styles.cell}>Pure</Text>
+                    </View>
+
+                    {safeReceiptItems.length > 0 ? (
+                      safeReceiptItems.map((row, i) => (
+                        <View key={i} style={styles.tableRow}>
+                          <Text style={styles.cell}>{row.name}</Text>
+                          <Text style={styles.cell}>{row.weight}</Text>
+                          <Text style={styles.cell}>{row.result}</Text>
+                          <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
+                          <Text style={styles.cell}>{row.pure}</Text>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={styles.noData}>No receipt items</Text>
+                    )}
+
+                    {/* RECEIPT TOTAL */}
+                    <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalReceiptTW}</Text>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalReceiptNW}</Text>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalReceiptPure}</Text>
+                    </View>
+                  </View>
+                </>
+              )}
 
               {/* CASH */}
               <View style={styles.cashBox}>
