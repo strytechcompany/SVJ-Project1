@@ -95,6 +95,13 @@ export default function HomeScreen({ route }) {
     loadSession();
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+      loadRates();
+    }, [fetchData]),
+  );
+
   const loadSession = async () => {
     try {
       const session = await AsyncStorage.getItem("userSession");
@@ -215,12 +222,14 @@ export default function HomeScreen({ route }) {
       });
 
       dealers.forEach((d) => {
-        setBal(d._id, d.oldBalance, d.advanceBalance);
-        setBal(d.customerId, d.oldBalance, d.advanceBalance);
-        setBal(d.id, d.oldBalance, d.advanceBalance);
-        setBal(d.customerName, d.oldBalance, d.advanceBalance);
-        setBal(d.phoneNumber, d.oldBalance, d.advanceBalance);
-        setBal(d.customerNumber, d.oldBalance, d.advanceBalance);
+        const dOb = Number(d.oldBalance ?? d.ob ?? 0);
+        const dAb = Number(d.advanceBalance ?? d.advBal ?? 0);
+        setBal(d._id, dOb, dAb);
+        setBal(d.customerId, dOb, dAb);
+        setBal(d.id, dOb, dAb);
+        setBal(d.customerName, dOb, dAb);
+        setBal(d.phoneNumber, dOb, dAb);
+        setBal(d.customerNumber, dOb, dAb);
       });
       setBalanceLookup(lookup);
 
@@ -770,20 +779,15 @@ export default function HomeScreen({ route }) {
       .filter(Boolean)
       .map((k) => String(k).toLowerCase());
 
-    // Priority 1: For B2C, always show the latest live customer balance from lookup
-    // so Convert to Gold updates reflect immediately on homescreen.
-    const isB2C = item.type === "B2C" || item.customerType === "B2C" || item.isB2C;
-    if (isB2C) {
-      for (const k of keys) {
-        if (balanceLookup[k]) return balanceLookup[k];
-      }
+    // Priority 1: Always show the latest live customer balance from lookup
+    for (const k of keys) {
+      if (balanceLookup[k]) return balanceLookup[k];
     }
 
-    // Priority 2: Use bill's embedded static snapshot balance
+    // Priority 2: Fallback to embedded balance only when lookup is missing
     const itemCurrent = Number(item.currentBalance ?? item.availableBalance ?? item.balance);
     const itemOb = Number(item.oldBalance ?? item.ob);
     const itemAb = Number(item.advBal ?? item.advanceBalance);
-    
     if (Number.isFinite(itemCurrent)) {
       return {
         ob: itemCurrent > 0 ? itemCurrent : 0,
@@ -795,11 +799,6 @@ export default function HomeScreen({ route }) {
         ob: Number.isFinite(itemOb) ? itemOb : 0,
         ab: Number.isFinite(itemAb) ? itemAb : 0,
       };
-    }
-
-    // Priority 3: Fallback to lookup for non-B2C missing embedded balance
-    for (const k of keys) {
-      if (balanceLookup[k]) return balanceLookup[k];
     }
 
     return { ob: 0, ab: 0 };
