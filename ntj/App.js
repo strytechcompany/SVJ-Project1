@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Text } from "react-native";
+import { Platform, Text, TextInput } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
@@ -67,13 +67,26 @@ import DailyExpense from "./components/dailyExpense";
 
 const Stack = createNativeStackNavigator();
 
-if (Text.defaultProps == null) {
-  Text.defaultProps = {};
+if (Platform.OS === "android" && !__DEV__) {
+  if (Text.defaultProps == null) {
+    Text.defaultProps = {};
+  }
+
+  if (TextInput.defaultProps == null) {
+    TextInput.defaultProps = {};
+  }
+
+  const existingTextStyle = Text.defaultProps.style;
+  const existingTextInputStyle = TextInput.defaultProps.style;
+
+  Text.defaultProps.style = Array.isArray(existingTextStyle)
+    ? [{ color: "#000" }, ...existingTextStyle]
+    : [{ color: "#000" }, existingTextStyle].filter(Boolean);
+
+  TextInput.defaultProps.style = Array.isArray(existingTextInputStyle)
+    ? [{ color: "#000" }, ...existingTextInputStyle]
+    : [{ color: "#000" }, existingTextInputStyle].filter(Boolean);
 }
-const existingTextStyle = Text.defaultProps.style;
-Text.defaultProps.style = Array.isArray(existingTextStyle)
-  ? [{ color: "#000" }, ...existingTextStyle]
-  : [{ color: "#000" }, existingTextStyle].filter(Boolean);
 
 export default function App() {
   const [isChecking, setIsChecking] = useState(true);
