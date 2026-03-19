@@ -65,13 +65,24 @@ export default function HomeScreen({ route }) {
   const reminderOpacity = useRef(new Animated.Value(0)).current;
   const reminderDragX = useRef(new Animated.Value(0)).current;
 
+  const getSafeCustomerName = (value) => {
+    if (value === null || value === undefined) return "";
+    const name = String(value).trim();
+    return name ? name : "";
+  };
+
   const extractCustomerName = (row = {}) => {
-    const direct = row?.displayName || row?.customerName || row?.name;
+    const direct =
+      getSafeCustomerName(row?.displayName) ||
+      getSafeCustomerName(row?.customerName) ||
+      getSafeCustomerName(row?.partyName) ||
+      getSafeCustomerName(row?.userName) ||
+      getSafeCustomerName(row?.name);
     if (direct) return direct;
     const nested =
-      row?.customer?.name ||
-      row?.customer?.customerName ||
-      row?.customer?.fullName;
+      getSafeCustomerName(row?.customer?.name) ||
+      getSafeCustomerName(row?.customer?.customerName) ||
+      getSafeCustomerName(row?.customer?.fullName);
     return nested || "";
   };
 
