@@ -10,6 +10,7 @@ import {
   ScrollView,
   Alert,
   Switch,
+  ActivityIndicator,
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -42,6 +43,7 @@ export default function StockMaster({ navigation }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   const [stocks, setStocks] = useState([]);
+  const [loadingStocks, setLoadingStocks] = useState(true);
 
   // Search suggestions for main search box
   const [searchSuggestions, setSearchSuggestions] = useState([]);
@@ -66,6 +68,7 @@ export default function StockMaster({ navigation }) {
   );
 
   const loadStocks = async () => {
+    setLoadingStocks(true);
     try {
       const response = await fetch(`${base_url}/stockMaster`);
       if (response.ok) {
@@ -91,6 +94,8 @@ export default function StockMaster({ navigation }) {
       if (data) {
         setStocks(JSON.parse(data));
       }
+    } finally {
+      setLoadingStocks(false);
     }
   };
 
@@ -882,6 +887,17 @@ export default function StockMaster({ navigation }) {
             </View>
           </View>
         )}
+        ListEmptyComponent={
+          loadingStocks ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="large" color="#2E7D32" />
+            </View>
+          ) : (
+            <View style={styles.emptyWrap}>
+              <Text style={styles.emptyText}>No items found</Text>
+            </View>
+          )
+        }
       />
 
       {/* FLOATING ADD BUTTON */}
@@ -1105,6 +1121,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   searchInput: { flex: 1, padding: 10 },
+  loadingWrap: {
+    paddingVertical: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyWrap: {
+    paddingVertical: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyText: {
+    color: "#888",
+    fontSize: 14,
+  },
 
   searchSuggestionsContainer: {
     backgroundColor: "#fff",
