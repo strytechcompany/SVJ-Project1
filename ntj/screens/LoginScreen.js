@@ -55,8 +55,12 @@ export default function LoginScreen({ navigation }) {
           // Non-critical — proceed with partial user data
         }
 
-        // --- NEW: PERSIST SESSION ---
-        await AsyncStorage.setItem("userSession", JSON.stringify(fullUser));
+        // Persist admin login across app restarts.
+        await AsyncStorage.multiSet([
+          ["adminLoggedIn", "true"],
+          ["adminData", JSON.stringify(fullUser)],
+          ["userSession", JSON.stringify(fullUser)],
+        ]);
 
         navigation.replace("Home", { user: fullUser });
       } else {
