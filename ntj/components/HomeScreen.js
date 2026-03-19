@@ -13,6 +13,7 @@ import {
   Alert,
   Linking,
   PanResponder,
+  ActivityIndicator,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
@@ -32,6 +33,7 @@ const REMINDER_AUTO_HIDE_MS = 5000; // 5 seconds
 export default function HomeScreen({ route }) {
   const navigation = useNavigation();
   const user = route?.params?.user || null;
+  const [isLoading, setIsLoading] = useState(true);
 
   const getCurrentDate = () => {
     const d = new Date();
@@ -69,6 +71,13 @@ export default function HomeScreen({ route }) {
       setCurrentDateTime(new Date());
     }, 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const delay = setTimeout(() => {
+      setIsLoading(false);
+    }, 2500);
+    return () => clearTimeout(delay);
   }, []);
 
   const formatDateTime = (date) => {
@@ -823,6 +832,14 @@ export default function HomeScreen({ route }) {
     };
   };
 
+  if (isLoading) {
+    return (
+      <View style={styles.loaderContainer}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: "#fff" }}>
       {menuOpen && (
@@ -1309,6 +1326,11 @@ export default function HomeScreen({ route }) {
 }
 
 const styles = StyleSheet.create({
+  loaderContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   overlay: {
     position: "absolute",
     width: "100%",
