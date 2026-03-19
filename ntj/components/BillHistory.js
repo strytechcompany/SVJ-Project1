@@ -20,11 +20,14 @@ import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { base_url } from "./config";
 import CommonHeader from "./CommonHeader";
+import {
+  buildBalanceSummary,
+  deriveBalanceStateFromNet,
+  normalizeBalanceState,
+  toBalanceNumber,
+} from "./balanceUtils";
 
-const num = (value, fallback = 0) => {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-};
+const num = (value, fallback = 0) => toBalanceNumber(value, fallback);
 const readImageField = (value) => {
   const isInvalidImageToken = (raw) => {
     const token = String(raw || "").trim().toLowerCase();
@@ -170,17 +173,19 @@ const getBillTimestamp = (bill = {}) => {
   };
 
   const resolveHeaderBalance = (cust = {}) => {
-    const rawCurrent = Number(cust?.balance ?? cust?.currentBalance ?? cust?.availableBalance);
-    const rawOB = Number(cust?.ob ?? cust?.oldBalance);
-    const rawAB = Number(cust?.ab ?? cust?.advanceBalance);
+    const rawCurrent = num(cust?.balance ?? cust?.currentBalance ?? cust?.availableBalance, NaN);
+    const rawOB = num(cust?.ob ?? cust?.oldBalance, 0);
+    const rawAB = num(cust?.ab ?? cust?.advanceBalance, 0);
     if (Number.isFinite(rawCurrent)) {
+      const derived = deriveBalanceStateFromNet(rawCurrent);
       return {
-        label: rawCurrent < 0 ? "AB" : "OB",
-        value: Math.abs(rawCurrent),
+        label: derived.advanceBalance > 0 ? "AB" : "OB",
+        value: derived.advanceBalance > 0 ? derived.advanceBalance : derived.oldBalance,
       };
     }
-    if (Number.isFinite(rawAB) && rawAB > 0) return { label: "AB", value: rawAB };
-    if (Number.isFinite(rawOB) && rawOB > 0) return { label: "OB", value: rawOB };
+    const normalized = normalizeBalanceState({ oldBalance: rawOB, advanceBalance: rawAB });
+    if (normalized.advanceBalance > 0) return { label: "AB", value: normalized.advanceBalance };
+    if (normalized.oldBalance > 0) return { label: "OB", value: normalized.oldBalance };
     return { label: "OB", value: 0 };
   };
 
@@ -192,13 +197,18 @@ const getBillTimestamp = (bill = {}) => {
   const resolveHeaderBalanceFromLatestBill = (billList = [], cust = {}) => {
     const latest = getLatestBillFromList(billList);
     if (!latest) return resolveHeaderBalance(cust);
-    const isDealerLike = String(latest?.dealerType || latest?.customerType || latest?.type || "").toUpperCase();
-    const finalBalance = Number(latest?.finalBalance ?? latest?.summary?.current ?? latest?.availableBalance);
-    const balanceType = String(latest?.balanceType || latest?.summary?.balanceType || "").toLowerCase();
-    const label = (isDealerLike === "DEALER" || isDealerLike === "SUPPLIER")
-      ? (balanceType.includes("advance") ? "AB" : "OB")
-      : "OB";
-    return { label, value: Math.abs(Number.isFinite(finalBalance) ? finalBalance : 0) };
+    const finalBalance = num(
+      latest?.finalBalance ?? latest?.summary?.current ?? latest?.availableBalance,
+      NaN,
+    );
+    if (Number.isFinite(finalBalance)) {
+      const derived = deriveBalanceStateFromNet(finalBalance);
+      return {
+        label: derived.advanceBalance > 0 ? "AB" : "OB",
+        value: derived.advanceBalance > 0 ? derived.advanceBalance : derived.oldBalance,
+      };
+    }
+    return resolveHeaderBalance(cust);
   };
 
 const resolveDisplayTypeFromContext = (bill = {}, customer = {}) => {
@@ -267,19 +277,41 @@ const getSavedTotalAmount = (bill = {}) => {
 };
 
 const getBalanceFromBill = (bill = {}, fallbackBalance = null) => {
+  const savedBalanceType = String(
+    bill?.balanceType ?? bill?.summary?.balanceType ?? bill?.previewSnapshot?.summary?.balanceType ?? "",
+  ).toUpperCase();
+  const savedBalanceValue = num(
+    bill?.balanceValue ?? bill?.summary?.balanceValue ?? bill?.previewSnapshot?.summary?.balanceValue ?? bill?.finalBalance,
+    NaN,
+  );
+  if (Number.isFinite(savedBalanceValue) && savedBalanceType) {
+    return {
+      label: savedBalanceType,
+      value: savedBalanceValue,
+      current: num(bill?.summary?.current ?? bill?.currentBalance ?? bill?.availableBalance, 0),
+      ob: savedBalanceType === "OB" ? savedBalanceValue : 0,
+      ab: savedBalanceType === "AB" ? savedBalanceValue : 0,
+    };
+  }
   const snapshot = bill?.previewSnapshot || null;
   if (snapshot) {
-    const ob = Number(snapshot?.summary?.ob);
-    const ab = Number(snapshot?.summary?.ab);
-    const current = Number(snapshot?.summary?.current);
-    if (Number.isFinite(ob) && ob !== 0) return { label: "OB", value: Math.abs(ob), current, ob, ab };
-    if (Number.isFinite(ab) && ab !== 0) return { label: "AB", value: Math.abs(ab), current, ob, ab };
+    const ob = num(snapshot?.summary?.ob, 0);
+    const ab = num(snapshot?.summary?.ab, 0);
+    const current = num(snapshot?.summary?.current, NaN);
+    const state = Number.isFinite(current)
+      ? deriveBalanceStateFromNet(current)
+      : normalizeBalanceState({ oldBalance: ob, advanceBalance: ab });
+    if (state.advanceBalance > 0) return { label: "AB", value: state.advanceBalance, current, ob, ab };
+    if (state.oldBalance > 0) return { label: "OB", value: state.oldBalance, current, ob, ab };
   }
-  const summaryOb = Number(bill?.summary?.ob);
-  const summaryAb = Number(bill?.summary?.ab);
-  const summaryCurrent = Number(bill?.summary?.current);
-  if (Number.isFinite(summaryOb) && summaryOb !== 0) return { label: "OB", value: Math.abs(summaryOb), current: summaryCurrent, ob: summaryOb, ab: summaryAb };
-  if (Number.isFinite(summaryAb) && summaryAb !== 0) return { label: "AB", value: Math.abs(summaryAb), current: summaryCurrent, ob: summaryOb, ab: summaryAb };
+  const summaryOb = num(bill?.summary?.ob, 0);
+  const summaryAb = num(bill?.summary?.ab, 0);
+  const summaryCurrent = num(bill?.summary?.current, NaN);
+  const state = Number.isFinite(summaryCurrent)
+    ? deriveBalanceStateFromNet(summaryCurrent)
+    : normalizeBalanceState({ oldBalance: summaryOb, advanceBalance: summaryAb });
+  if (state.advanceBalance > 0) return { label: "AB", value: state.advanceBalance, current: summaryCurrent, ob: summaryOb, ab: summaryAb };
+  if (state.oldBalance > 0) return { label: "OB", value: state.oldBalance, current: summaryCurrent, ob: summaryOb, ab: summaryAb };
   if (fallbackBalance) return fallbackBalance;
   return { label: null, value: 0, current: 0, ob: 0, ab: 0 };
 };
@@ -392,6 +424,13 @@ const buildSummaryForPreview = (bill = {}, bal = { ob: 0, ab: 0, current: 0 }) =
 
   const openingOb = num(bill?.summary?.ob, num(bill?.ob, num(bill?.oldBalance, num(bal?.ob, 0))));
   const openingAb = num(bill?.summary?.ab, num(bill?.advBal, num(bill?.advanceBalance, num(bal?.ab, 0))));
+  const computedSummary = buildBalanceSummary({
+    oldBalance: openingOb,
+    advanceBalance: openingAb,
+    issue,
+    receipt,
+    cash,
+  });
 
   return {
     ob: openingOb.toFixed(3),
@@ -401,7 +440,10 @@ const buildSummaryForPreview = (bill = {}, bal = { ob: 0, ab: 0, current: 0 }) =
     cash: cash.toFixed(3),
     gstPure: gstPure.toFixed(3),
     receiptPlusCash: (receipt + cash).toFixed(3),
-    current: num(bal?.current, num(bill?.currentBalance, num(bill?.availableBalance, 0))).toFixed(3),
+    current: num(
+      bal?.current,
+      num(bill?.currentBalance, num(bill?.availableBalance, computedSummary.netBalance)),
+    ).toFixed(3),
   };
 };
 
@@ -1184,21 +1226,30 @@ export default function BillHistory({ navigation, route }) {
 
   // ── BALANCE DISPLAY HELPER ─────────────────────────────────────────
   const getBalanceDisplay = (item, isLatest = false) => {
-    const isDealerLike = String(item?.dealerType || item?.customerType || item?.type || "").toUpperCase();
-    const balanceType = String(item?.balanceType || item?.summary?.balanceType || "").toLowerCase();
-    if (isDealerLike === "DEALER" || isDealerLike === "SUPPLIER") {
-      const finalBalance = Number(item?.finalBalance ?? item?.summary?.current ?? item?.availableBalance);
-      const label = balanceType.includes("advance") ? "AB" : "OB";
-      return { label, value: Math.abs(Number.isFinite(finalBalance) ? finalBalance : 0) };
+    const savedBalanceType = String(item?.balanceType ?? item?.summary?.balanceType ?? "").toUpperCase();
+    const savedBalanceValue = num(item?.balanceValue ?? item?.summary?.balanceValue ?? item?.finalBalance, NaN);
+    if (Number.isFinite(savedBalanceValue) && savedBalanceType) {
+      return { label: savedBalanceType, value: savedBalanceValue };
+    }
+    const finalBalance = num(item?.finalBalance ?? item?.summary?.current ?? item?.availableBalance, NaN);
+    if (Number.isFinite(finalBalance)) {
+      const derived = deriveBalanceStateFromNet(finalBalance);
+      return {
+        label: derived.advanceBalance > 0 ? "AB" : "OB",
+        value: derived.advanceBalance > 0 ? derived.advanceBalance : derived.oldBalance,
+      };
     }
     if (isLatest) {
-      const finalBalance = Number(item?.finalBalance ?? item?.summary?.current ?? item?.availableBalance);
-      return { label: "OB", value: Math.abs(Number.isFinite(finalBalance) ? finalBalance : 0) };
+      return resolveHeaderBalanceFromLatestBill([item], customer);
     }
-    const prevOB = Number(item?.previousOldBalance);
-    const prevAB = Number(item?.previousAdvanceBalance);
-    if (Number.isFinite(prevOB) && prevOB !== 0) return { label: "OB", value: Math.abs(prevOB) };
-    if (Number.isFinite(prevAB) && prevAB !== 0) return { label: "AB", value: Math.abs(prevAB) };
+    const prevOB = num(item?.previousOldBalance, NaN);
+    const prevAB = num(item?.previousAdvanceBalance, NaN);
+    const previousState = normalizeBalanceState({
+      oldBalance: Number.isFinite(prevOB) ? prevOB : 0,
+      advanceBalance: Number.isFinite(prevAB) ? prevAB : 0,
+    });
+    if (previousState.advanceBalance > 0) return { label: "AB", value: previousState.advanceBalance };
+    if (previousState.oldBalance > 0) return { label: "OB", value: previousState.oldBalance };
     return null;
   };
 
@@ -1375,18 +1426,20 @@ export default function BillHistory({ navigation, route }) {
         <View style={styles.balanceBadgeContainer}>
           {(() => {
             const latestBill = getLatestBillFromList(filteredBills);
-            const latestFinal = Number(
+            const latestFinal = num(
               latestBill?.finalBalance ??
               latestBill?.summary?.current ??
-              latestBill?.availableBalance
+              latestBill?.availableBalance,
+              NaN,
             );
-            const isDealerLike = String(latestBill?.dealerType || latestBill?.customerType || latestBill?.type || "").toUpperCase();
-            const balanceType = String(latestBill?.balanceType || latestBill?.summary?.balanceType || "").toLowerCase();
-            const label =
-              (isDealerLike === "DEALER" || isDealerLike === "SUPPLIER")
-                ? (balanceType.includes("advance") ? "AB" : "OB")
-                : "OB";
-            const value = Number.isFinite(latestFinal) ? Math.abs(latestFinal) : 0;
+            const derived = Number.isFinite(latestFinal)
+              ? deriveBalanceStateFromNet(latestFinal)
+              : normalizeBalanceState({
+                  oldBalance: customer?.oldBalance ?? customer?.ob,
+                  advanceBalance: customer?.advanceBalance ?? customer?.ab,
+                });
+            const label = derived.advanceBalance > 0 ? "AB" : "OB";
+            const value = derived.advanceBalance > 0 ? derived.advanceBalance : derived.oldBalance;
             return (
               <View style={[styles.balanceBadge, label === "AB" ? styles.abBadge : styles.obBadge]}>
                 <Text style={styles.badgeLabel}>{label}</Text>
