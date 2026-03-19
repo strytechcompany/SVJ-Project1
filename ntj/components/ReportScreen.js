@@ -11,6 +11,7 @@ import {
   Alert,
   Linking,
   StatusBar,
+  ActivityIndicator,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as Print from "expo-print";
@@ -1302,6 +1303,12 @@ export default function ReportScreen({ navigation }) {
         contentContainerStyle={{ paddingBottom: 150 }}
         showsVerticalScrollIndicator={true}
       >
+        {loading && (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator size="large" color="#2E7D32" />
+            <Text style={styles.loadingText}>Loading reports...</Text>
+          </View>
+        )}
 
         {/* DATE PICKER UI */}
         <View style={styles.dateCard}>
@@ -1449,7 +1456,11 @@ export default function ReportScreen({ navigation }) {
                   if (rows.length === 0) {
                     return (
                       <View style={styles.tableRow}>
-                        <Text style={[styles.tCell, styles.noDataText]}>No Data Found</Text>
+                        {loading ? (
+                          <ActivityIndicator size="small" color="#2E7D32" />
+                        ) : (
+                          <Text style={[styles.tCell, styles.noDataText]}>No Data Found</Text>
+                        )}
                       </View>
                     );
                   }
@@ -1542,7 +1553,11 @@ export default function ReportScreen({ navigation }) {
                   if (rows.length === 0) {
                     return (
                       <View style={styles.tableRow}>
-                        <Text style={[styles.tCell, styles.noDataText]}>No Data Found</Text>
+                        {loading ? (
+                          <ActivityIndicator size="small" color="#2E7D32" />
+                        ) : (
+                          <Text style={[styles.tCell, styles.noDataText]}>No Data Found</Text>
+                        )}
                       </View>
                     );
                   }
@@ -1605,7 +1620,11 @@ export default function ReportScreen({ navigation }) {
                   if (rows.length === 0) {
                     return (
                       <View style={styles.tableRow}>
-                        <Text style={[styles.tCell, styles.noDataText]}>No Data Found</Text>
+                        {loading ? (
+                          <ActivityIndicator size="small" color="#2E7D32" />
+                        ) : (
+                          <Text style={[styles.tCell, styles.noDataText]}>No Data Found</Text>
+                        )}
                       </View>
                     );
                   }
@@ -1653,7 +1672,11 @@ export default function ReportScreen({ navigation }) {
                   if (rows.length === 0) {
                     return (
                       <View style={styles.tableRow}>
-                        <Text style={[styles.tCell, styles.noDataText]}>No Data Found</Text>
+                        {loading ? (
+                          <ActivityIndicator size="small" color="#2E7D32" />
+                        ) : (
+                          <Text style={[styles.tCell, styles.noDataText]}>No Data Found</Text>
+                        )}
                       </View>
                     );
                   }
@@ -2007,7 +2030,11 @@ export default function ReportScreen({ navigation }) {
                   if (rows.length === 0) {
                     return (
                       <View style={styles.tableRow}>
-                        <Text style={[styles.tCell, styles.noDataText]}>No Data Found</Text>
+                        {loading ? (
+                          <ActivityIndicator size="small" color="#2E7D32" />
+                        ) : (
+                          <Text style={[styles.tCell, styles.noDataText]}>No Data Found</Text>
+                        )}
                       </View>
                     );
                   }
@@ -2183,6 +2210,17 @@ const styles = StyleSheet.create({
   },
 
   container: { padding: 16, backgroundColor: "#f4f6f8" },
+  loadingWrap: {
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadingText: {
+    marginTop: 6,
+    color: "#2E7D32",
+    fontSize: 12,
+    fontWeight: "600",
+  },
 
   dateCard: {
     flexDirection: "row",
