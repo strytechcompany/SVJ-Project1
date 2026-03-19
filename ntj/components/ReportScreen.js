@@ -877,7 +877,12 @@ export default function ReportScreen({ navigation }) {
     if (!available.has(selectedStockItem)) setSelectedStockItem("");
   }, [stocks, selectedStockItem]);
 
-  const sumBy = (arr, key) => arr.reduce((s, x) => s + parseFloat(x?.[key] || 0), 0);
+  const sumBy = (arr, key) => arr.reduce((s, x) => s + parseNum(x?.[key]), 0);
+  const getB2BTotalValue = (rows = []) => sumBy(rows, "issuePure");
+  const getDealerTotalValue = (rows = []) =>
+    rows.reduce((sum, row) => sum + parseNum(row?.issuePure ?? row?.issueTotal), 0);
+  const getB2CTotalValue = (rows = []) => sumBy(rows, "totalAmount");
+  const getCashTotalValue = (rows = []) => sumBy(rows, "cashAmount");
 
   const buildSelectedReportHtml = () => {
     const showAll = activeTab === "All";
@@ -892,9 +897,14 @@ export default function ReportScreen({ navigation }) {
     const filteredCash = getFilteredCash();
     const filteredExpense = getFilteredExpense();
     const filteredStock = getFilteredStock(includeStockAllCategories);
+    const b2bTotalValue = getB2BTotalValue(filteredB2b);
+    const b2cTotalValue = getB2CTotalValue(filteredB2c);
+    const dealerTotalValue = getDealerTotalValue(filteredDealer);
+    const cashTotalValue = getCashTotalValue(filteredCash);
+    const allTotalValue = b2bTotalValue + b2cTotalValue + dealerTotalValue + cashTotalValue;
 
     const b2bSummary = {
-      issueTotal: sumBy(filteredB2b, "issueTotal").toFixed(3),
+      totalValue: b2bTotalValue.toFixed(3),
       issuePure: sumBy(filteredB2b, "issuePure").toFixed(3),
       receiptPure: sumBy(filteredB2b, "receiptPure").toFixed(3),
       cashPure: sumBy(filteredB2b, "cashPure").toFixed(3),
@@ -902,6 +912,7 @@ export default function ReportScreen({ navigation }) {
       availableBalance: sumBy(filteredB2b, "balance").toFixed(3),
     };
     const b2cSummary = {
+      totalValue: b2cTotalValue.toFixed(2),
       issueTotal: filteredB2c
         .reduce((s, r) => {
           if ((r.items || []).length > 0) {
@@ -920,12 +931,15 @@ export default function ReportScreen({ navigation }) {
       total: sumBy(filteredExpense, "amount").toFixed(2),
     };
     const dealerSummary = {
-      issueTotal: sumBy(filteredDealer, "issueTotal").toFixed(3),
+      totalValue: dealerTotalValue.toFixed(3),
       issuePure: sumBy(filteredDealer, "issuePure").toFixed(3),
       receiptPure: sumBy(filteredDealer, "receiptPure").toFixed(3),
       cashPure: sumBy(filteredDealer, "cashPure").toFixed(3),
       oldBalance: sumBy(filteredDealer, "oldBalance").toFixed(3),
       availableBalance: sumBy(filteredDealer, "balance").toFixed(3),
+    };
+    const cashSummary = {
+      totalValue: cashTotalValue.toFixed(2),
     };
 
     let b2bRows = "";
@@ -944,7 +958,7 @@ export default function ReportScreen({ navigation }) {
         const ob = tBal.ob;
         const ab = tBal.ab;
         const bal = ab > 0 ? `Adv: ${ab.toFixed(3)}` : ob > 0 ? `OB: ${ob.toFixed(3)}` : "-";
-        return `<tr><td>${r.customerName || ""}<br/><span style="font-size:10px;color:#555;">${getB2BPhone(r)}</span></td><td>${parseFloat(r.issueTotal || 0).toFixed(3)}</td><td>${parseFloat(r.issuePure || 0).toFixed(3)}</td><td>${parseFloat(r.receiptPure || 0).toFixed(3)}</td><td>${parseFloat(r.cashPure || 0).toFixed(3)}</td><td>${parseFloat(r.oldBalance || 0).toFixed(3)}</td><td>${parseFloat(r.balance || 0).toFixed(3)}</td><td>${bal}</td><td>${getReportBillNo(r)}</td><td>${formatDateTime(new Date(r.createdAt || r.date))}</td></tr>`;
+        return `<tr><td>${r.customerName || ""}<br/><span style="font-size:10px;color:#555;">${getB2BPhone(r)}</span></td><td>${parseFloat(r.issuePure || 0).toFixed(3)}</td><td>${parseFloat(r.receiptPure || 0).toFixed(3)}</td><td>${parseFloat(r.cashPure || 0).toFixed(3)}</td><td>${parseFloat(r.oldBalance || 0).toFixed(3)}</td><td>${parseFloat(r.balance || 0).toFixed(3)}</td><td>${bal}</td><td>${getReportBillNo(r)}</td><td>${formatDateTime(new Date(r.createdAt || r.date))}</td></tr>`;
       }).join("");
     }
 
@@ -1048,18 +1062,19 @@ export default function ReportScreen({ navigation }) {
       <body>
         <h2>REPORT SUMMARY</h2>
         <h3>Filter: ${filterLabel} | ${dateLabel}</h3>
+        ${showAll ? `<p><b>All Total:</b> ${allTotalValue.toFixed(2)}</p>` : ""}
 
         ${b2bRows ? `
           <p class="section-title">B2B Transactions</p>
-          <p><b>Totals:</b> Issue=${b2bSummary.issueTotal}, Issue Pure=${b2bSummary.issuePure}, Receipt Pure=${b2bSummary.receiptPure}, Cash=${b2bSummary.cashPure}, OB=${b2bSummary.oldBalance}, Available=${b2bSummary.availableBalance}</p>
+          <p><b>Totals:</b> Total=${b2bSummary.totalValue}, Issue Pure=${b2bSummary.issuePure}, Receipt Pure=${b2bSummary.receiptPure}, Cash=${b2bSummary.cashPure}, OB=${b2bSummary.oldBalance}, Available=${b2bSummary.availableBalance}</p>
           <table>
-            <tr><th>Customer</th><th>Issue Total</th><th>Issue Pure</th><th>Receipt Pure</th><th>Cash</th><th>Old Balance</th><th>Available</th><th>Current Balance</th><th>Bill No</th><th>Date & Time</th></tr>
+            <tr><th>Customer</th><th>Issue Pure</th><th>Receipt Pure</th><th>Cash</th><th>Old Balance</th><th>Available</th><th>Current Balance</th><th>Bill No</th><th>Date & Time</th></tr>
             ${b2bRows}
           </table>` : ""}
 
         ${b2cRows ? `
           <p class="section-title">B2C Transactions</p>
-          <p><b>Totals:</b> Issue=${b2cSummary.issueTotal}, Issue Pure=${b2cSummary.issuePure}, Receipt Pure=${b2cSummary.receiptPure}, Cash=${b2cSummary.cashPure}, OB=${b2cSummary.oldBalance}, Available=${b2cSummary.availableBalance}</p>
+          <p><b>Totals:</b> Total=${b2cSummary.totalValue}, Issue=${b2cSummary.issueTotal}, Issue Pure=${b2cSummary.issuePure}, Receipt Pure=${b2cSummary.receiptPure}, Cash=${b2cSummary.cashPure}, OB=${b2cSummary.oldBalance}, Available=${b2cSummary.availableBalance}</p>
           <table>
             <tr><th>Customer</th><th>Items</th><th>Total Wt(g)</th><th>Final Amount</th><th>Old Balance</th><th>Available</th><th>Current Balance</th><th>Bill No</th><th>Date & Time</th></tr>
             ${b2cRows}
@@ -1074,7 +1089,7 @@ export default function ReportScreen({ navigation }) {
 
         ${dealerRows ? `
           <p class="section-title">Dealer Transactions</p>
-          <p><b>Totals:</b> Issue=${dealerSummary.issueTotal}, Issue Pure=${dealerSummary.issuePure}, Receipt Pure=${dealerSummary.receiptPure}, Cash=${dealerSummary.cashPure}, OB=${dealerSummary.oldBalance}, Available=${dealerSummary.availableBalance}</p>
+          <p><b>Totals:</b> Total=${dealerSummary.totalValue}, Issue Pure=${dealerSummary.issuePure}, Receipt Pure=${dealerSummary.receiptPure}, Cash=${dealerSummary.cashPure}, OB=${dealerSummary.oldBalance}, Available=${dealerSummary.availableBalance}</p>
           <table>
             <tr><th>Dealer</th><th>Type</th><th>Issue Total</th><th>Issue Pure</th><th>Receipt Pure</th><th>Cash</th><th>Old Balance</th><th>Available</th><th>Current Balance</th><th>Bill No</th><th>Date & Time</th></tr>
             ${dealerRows}
@@ -1096,6 +1111,7 @@ export default function ReportScreen({ navigation }) {
 
         ${cashRows ? `
           <p class="section-title">Cash Entries</p>
+          <p><b>Total Amount:</b> ${cashSummary.totalValue}</p>
           <table>
             <tr><th>Cash Amount</th><th>Pure Value</th><th>Category</th><th>Date & Time</th></tr>
             ${cashRows}
@@ -1204,6 +1220,17 @@ export default function ReportScreen({ navigation }) {
       setIsRefreshing(false);
     }
   };
+
+  const filteredB2bRows = getFilteredB2B();
+  const filteredB2cRows = getFilteredB2C();
+  const filteredDealerRows = getFilteredDealer();
+  const filteredCashRows = getFilteredCash();
+  const b2bCategoryTotal = getB2BTotalValue(filteredB2bRows);
+  const b2cCategoryTotal = getB2CTotalValue(filteredB2cRows);
+  const dealerCategoryTotal = getDealerTotalValue(filteredDealerRows);
+  const cashCategoryTotal = getCashTotalValue(filteredCashRows);
+  const allCategoryTotal =
+    b2bCategoryTotal + b2cCategoryTotal + dealerCategoryTotal + cashCategoryTotal;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -1392,11 +1419,19 @@ export default function ReportScreen({ navigation }) {
           ))}
         </View>
 
+        {activeTab === "All" && (
+          <View style={styles.tableHeaderRow}>
+            <Text style={styles.tableTitle}>All Report</Text>
+            <Text style={styles.tableTotalText}>Total: {allCategoryTotal.toFixed(2)}</Text>
+          </View>
+        )}
+
         {/* ================= B2B TABLE ================= */}
         {(activeTab === "All" || activeTab === "B2B") && (
           <>
             <View style={styles.tableHeaderRow}>
               <Text style={styles.tableTitle}>B2B Report</Text>
+              <Text style={styles.tableTotalText}>Total: {b2bCategoryTotal.toFixed(3)}</Text>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <TextInput
                   style={styles.tableSearchInput}
@@ -1443,7 +1478,6 @@ export default function ReportScreen({ navigation }) {
                   <Text style={[styles.tCell, styles.headerCell]}>S.No</Text>
                   <Text style={[styles.tCell, styles.headerCell]}>Customer</Text>
                   <Text style={[styles.tCell, styles.headerCell]}>Balance</Text>
-                  <Text style={[styles.tCell, styles.headerCell]}>Issue Total</Text>
                   <Text style={[styles.tCell, styles.headerCell]}>Issue Pure</Text>
                   <Text style={[styles.tCell, styles.headerCell]}>Receipt Pure</Text>
                   <Text style={[styles.tCell, styles.headerCell]}>Cash Pure</Text>
@@ -1452,7 +1486,7 @@ export default function ReportScreen({ navigation }) {
                 </View>
 
                 {(() => {
-                  const rows = getFilteredB2B();
+                  const rows = filteredB2bRows;
                   if (rows.length === 0) {
                     return (
                       <View style={styles.tableRow}>
@@ -1478,7 +1512,6 @@ export default function ReportScreen({ navigation }) {
                         <Text style={[styles.tCell, { color: ab > 0 ? '#2E7D32' : ob > 0 ? '#D32F2F' : '#666', fontWeight: 'bold' }]}>
                           {ab > 0 ? `Adv: ${ab.toFixed(3)}` : ob > 0 ? `OB: ${ob.toFixed(3)}` : "-"}
                         </Text>
-                        <Text style={styles.tCell}>{r.issueTotal}</Text>
                         <Text style={styles.tCell}>{r.issuePure}</Text>
                         <Text style={styles.tCell}>{r.receiptPure}</Text>
                         <Text style={styles.tCell}>{r.cashPure}</Text>
@@ -1498,6 +1531,7 @@ export default function ReportScreen({ navigation }) {
           <>
             <View style={styles.tableHeaderRow}>
               <Text style={styles.tableTitle}>B2C Report</Text>
+              <Text style={styles.tableTotalText}>Total: {b2cCategoryTotal.toFixed(2)}</Text>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
                 <TextInput
                   style={styles.tableSearchInput}
@@ -1549,7 +1583,7 @@ export default function ReportScreen({ navigation }) {
                 </View>
 
                 {(() => {
-                  const rows = getFilteredB2C();
+                  const rows = filteredB2cRows;
                   if (rows.length === 0) {
                     return (
                       <View style={styles.tableRow}>
@@ -1650,6 +1684,7 @@ export default function ReportScreen({ navigation }) {
           <>
             <View style={styles.tableHeaderRow}>
               <Text style={styles.tableTitle}>Dealer Report</Text>
+              <Text style={styles.tableTotalText}>Total: {dealerCategoryTotal.toFixed(3)}</Text>
               <TextInput
                 style={styles.tableSearchInput}
                 placeholder="Search dealer / phone..."
@@ -1668,7 +1703,7 @@ export default function ReportScreen({ navigation }) {
                   <Text style={[styles.tCell, styles.headerCell]}>Date & Time</Text>
                 </View>
                 {(() => {
-                  const rows = getFilteredDealer();
+                  const rows = filteredDealerRows;
                   if (rows.length === 0) {
                     return (
                       <View style={styles.tableRow}>
@@ -1900,6 +1935,7 @@ export default function ReportScreen({ navigation }) {
           <>
             <View style={styles.tableHeaderRow}>
               <Text style={styles.tableTitle}>Cash Report</Text>
+              <Text style={styles.tableTotalText}>Total: {cashCategoryTotal.toFixed(2)}</Text>
               <TextInput
                 style={styles.tableSearchInput}
                 placeholder="Search category/name..."
@@ -2277,6 +2313,7 @@ const styles = StyleSheet.create({
   tabText: { color: "#fff", fontWeight: "bold" },
 
   tableTitle: { fontSize: 16, fontWeight: "bold", marginVertical: 10, color: "#1b5e20" },
+  tableTotalText: { fontSize: 14, fontWeight: "bold", color: "#1b5e20", marginHorizontal: 8 },
   tableHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginVertical: 10 },
   tableSearchInput: { backgroundColor: "#fff", padding: 8, borderRadius: 6, borderWidth: 1, borderColor: "#ccc", width: 150 },
   tableFilterBtn: { backgroundColor: "#1b5e20", padding: 8, borderRadius: 6, marginLeft: 10 },
