@@ -19,6 +19,10 @@ import { Ionicons } from "@expo/vector-icons";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { base_url } from "./config";
 import { buildReminderAlerts, loadReminderSettings } from "./reminderService";
+import {
+  deriveBalanceStateFromNet,
+  normalizeBalanceState,
+} from "./balanceUtils";
 
 import { useFocusEffect } from "@react-navigation/native";
 import CommonHeader from "./CommonHeader";
@@ -525,6 +529,20 @@ export default function CustomerMasterList({ navigation, route }) {
         const v = String(value || "").trim().toLowerCase();
         return !!v && v !== "n/a" && v !== "na" && v !== "null" && v !== "undefined";
       };
+      const parseMaybeNumber = (v) => {
+        if (v === null || v === undefined) return NaN;
+        const raw = String(v).trim();
+        if (!raw) return NaN;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : NaN;
+      };
+      const pickFirstNumber = (...vals) => {
+        for (const v of vals) {
+          const n = parseMaybeNumber(v);
+          if (Number.isFinite(n)) return n;
+        }
+        return NaN;
+      };
       const isDealerLikeRow = (row) => {
         const dealerType = String(row?.dealerType || "").toUpperCase();
         const customerType = String(row?.customerType || "").toUpperCase();
@@ -581,20 +599,6 @@ export default function CustomerMasterList({ navigation, route }) {
             toTs(b.updatedAt || b.createdAt || b.date || 0) -
             toTs(a.updatedAt || a.createdAt || a.date || 0),
         );
-        const parseMaybeNumber = (v) => {
-          if (v === null || v === undefined) return NaN;
-          const raw = String(v).trim();
-          if (!raw) return NaN;
-          const n = Number(raw);
-          return Number.isFinite(n) ? n : NaN;
-        };
-        const pickFirstNumber = (...vals) => {
-          for (const v of vals) {
-            const n = parseMaybeNumber(v);
-            if (Number.isFinite(n)) return n;
-          }
-          return NaN;
-        };
         const hasAnyBalance = (row) =>
           Number.isFinite(parseMaybeNumber(row?.oldBalance)) ||
           Number.isFinite(parseMaybeNumber(row?.ob)) ||
@@ -654,25 +658,48 @@ export default function CustomerMasterList({ navigation, route }) {
           balanceRows.find((row) => hasAnyBalance(row)) ||
           balanceRows[0] ||
           matchedRows[0];
-        const resolvedOB = pickFirstNumber(
-          latestBalanceRow.oldBalance,
-          latestBalanceRow.ob,
-          dealer.oldBalance,
-          0,
+        const savedBalanceType = String(
+          latestBalanceRow.balanceType || latestBalanceRow.summary?.balanceType || "",
+        ).toUpperCase();
+        const savedBalanceValue = pickFirstNumber(
+          latestBalanceRow.balanceValue,
+          latestBalanceRow.summary?.balanceValue,
+          latestBalanceRow.finalBalance,
         );
-        const resolvedAB = pickFirstNumber(
-          latestBalanceRow.advanceBalance,
-          latestBalanceRow.advBal,
-          dealer.advanceBalance,
-          0,
+        const currentFromRow = pickFirstNumber(
+          latestBalanceRow.currentBalance,
+          latestBalanceRow.availableBalance,
+          latestBalanceRow.balance,
         );
+        const resolvedState =
+          Number.isFinite(savedBalanceValue) && savedBalanceType
+            ? {
+                oldBalance: savedBalanceType === "OB" ? savedBalanceValue : 0,
+                advanceBalance: savedBalanceType === "AB" ? savedBalanceValue : 0,
+              }
+            : Number.isFinite(currentFromRow)
+          ? deriveBalanceStateFromNet(currentFromRow)
+          : normalizeBalanceState({
+              oldBalance: pickFirstNumber(
+                latestBalanceRow.oldBalance,
+                latestBalanceRow.ob,
+                dealer.oldBalance,
+                0,
+              ),
+              advanceBalance: pickFirstNumber(
+                latestBalanceRow.advanceBalance,
+                latestBalanceRow.advBal,
+                dealer.advanceBalance,
+                0,
+              ),
+            });
         const latestImageRow = matchedRows.find(
           (row) => row.receiptImage || row.image || row.proofImage,
         );
 
         return {
-          oldBalance: Number.isFinite(resolvedOB) ? resolvedOB : 0,
-          advanceBalance: Number.isFinite(resolvedAB) ? resolvedAB : 0,
+          oldBalance: resolvedState.oldBalance,
+          advanceBalance: resolvedState.advanceBalance,
           latestTransactionImage: latestImageRow
             ? latestImageRow.receiptImage || latestImageRow.image || latestImageRow.proofImage
             : "",
@@ -701,12 +728,54 @@ export default function CustomerMasterList({ navigation, route }) {
 
         if (!latestBill) return customer;
 
+        const latestBillBalanceType = String(
+          latestBill.balanceType || latestBill.summary?.balanceType || "",
+        ).toUpperCase();
+        const latestBillBalanceValue = pickFirstNumber(
+          latestBill.balanceValue,
+          latestBill.summary?.balanceValue,
+          latestBill.finalBalance,
+        );
+        const latestBalanceState =
+          Number.isFinite(latestBillBalanceValue) && latestBillBalanceType
+            ? {
+                oldBalance: latestBillBalanceType === "OB" ? latestBillBalanceValue : 0,
+                advanceBalance: latestBillBalanceType === "AB" ? latestBillBalanceValue : 0,
+              }
+            : (() => {
+                const currentFromBill = pickFirstNumber(
+                  latestBill.currentBalance,
+                  latestBill.availableBalance,
+                  latestBill.summary?.current,
+                );
+                return Number.isFinite(currentFromBill)
+                  ? deriveBalanceStateFromNet(currentFromBill)
+                  : normalizeBalanceState({
+                      oldBalance: pickFirstNumber(
+                        latestBill.oldBalance,
+                        latestBill.ob,
+                        latestBill.summary?.ob,
+                        customer.oldBalance,
+                        0,
+                      ),
+                      advanceBalance: pickFirstNumber(
+                        latestBill.advanceBalance,
+                        latestBill.advBal,
+                        latestBill.summary?.ab,
+                        customer.advanceBalance,
+                        0,
+                      ),
+                    });
+              })();
+
         const billNo = latestBill.billNo || latestBill.invoiceNo || "";
         const billAmount = latestBill.gst?.finalAmount || latestBill.gst?.amount || latestBill.totalAmount || latestBill.cashAmount || 0;
         const billWeight = latestBill.totalIssueWeight || latestBill.issuePure || 0;
 
         return {
           ...customer,
+          oldBalance: latestBalanceState.oldBalance,
+          advanceBalance: latestBalanceState.advanceBalance,
           lastBillNo: billNo || customer.lastBillNo,
           lastBillAmount: Number.isFinite(billAmount) && billAmount > 0 ? billAmount : customer.lastBillAmount,
           lastBillWeight: Number.isFinite(billWeight) && billWeight > 0 ? billWeight : customer.lastBillWeight,
