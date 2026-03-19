@@ -1,2511 +1,4863 @@
-import React, { useState, useCallback, useEffect } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
-  Alert,
-  Modal,
-} from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+// ntj/components/BillPreview.js
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, TextInput, Image, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, Linking } from "react-native";
+import { useFocusEffect } from '@react-navigation/native';
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
-import { Feather } from "@expo/vector-icons";
-import { useRoute, useFocusEffect } from "@react-navigation/native";
+import QRCode from 'react-native-qrcode-svg';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from "axios";
 import { base_url } from "./config";
-import * as Print from "expo-print";
-import * as FileSystem from "expo-file-system";
-import { styles } from "./B2BCalculationPageStyles";
-import CommonHeader from "./CommonHeader";
 import {
   buildBalanceSummary,
   deriveBalanceStateFromNet,
+  toBalanceNumber,
 } from "./balanceUtils";
 
-/**
- * CreateTransaction (Full)
- * - Customer select
- * - Issue / Receipt / Cash entries
- * - Product list table (showing both issue & receipt items)
- * - Transaction summary (horizontal scroll)
- *
- * Option C: includes product table & summary
- */
+// `react-native-share` requires a native module ("RNShare"). In Expo Go (and any build
+// where that native module isn't included), importing it crashes at startup.
+// Load it lazily so we can fall back to `expo-sharing` when unavailable.
+let _rnShare;
+let _rnShareTried = false;
+const getRNShare = () => {
+  if (_rnShareTried) return _rnShare;
+  _rnShareTried = true;
+  try {
+    const mod = require('react-native-share');
+    _rnShare = mod?.default ?? mod;
+  } catch (_) {
+    _rnShare = null;
+  }
+  return _rnShare;
+};
 
-export default function CreateTransaction({ navigation }) {
-  const route = useRoute();
+// Format numbers in Indian comma style: 1,230 / 12,035 / 1,23,456
+const formatIndianNumber = (value) => {
+  const num = parseFloat(value);
+  if (isNaN(num)) return value;
+  // Use Math.round for whole rupees display
+  const rounded = Math.round(num);
+  const str = rounded.toString();
+  // Indian number system: last 3 digits, then groups of 2
+  const lastThree = str.slice(-3);
+  const rest = str.slice(0, str.length - 3);
+  const formatted = rest.length > 0
+    ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + lastThree
+    : lastThree;
+  return formatted;
+};
 
-  // ── ALL useState FIRST ──────────────────────────────────────
-  const [weight, setWeight] = useState("");
-  const [stone, setStone] = useState("0");
-  const [touch, setTouch] = useState("");
-  const [receiptWeight, setReceiptWeight] = useState("");
-  const [receiptStone, setReceiptStone] = useState("0");
-  const [receiptTouch, setReceiptTouch] = useState("");
-  const [date, setDate] = useState(new Date().toLocaleDateString("en-GB"));
-  const [itemsStock, setItemsStock] = useState({});
+const formatB2CInvoiceNo = (value) => {
+  if (!value) return "";
+  const str = String(value).trim();
+  if (/^A2026\d+$/.test(str)) return str;
+  const digits = str.replace(/\D/g, "");
+  if (!digits) return "";
+  return `A2026${digits.slice(-2).padStart(2, "0")}`;
+};
 
-  const [issueItems, setIssueItems] = useState([]);
-  const [receiptItems, setReceiptItems] = useState([]);
-  const [cashTable, setCashTable] = useState([]);
+const formatMainBillNo = (value) => {
+  if (!value) return "";
+  const str = String(value).trim();
+  if (str.toUpperCase().startsWith("A")) return str;
+  const digits = str.replace(/\D/g, "");
+  if (!digits) return "";
+  const n = Number.parseInt(digits, 10);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return String(n).padStart(5, "0");
+};
 
-  const [rupees, setRupees] = useState("");
-  const [goldRate, setGoldRate] = useState("");
-  const [cashPureInput, setCashPureInput] = useState("0.000");
+const resolveBillNoForDisplay = (val, type) => {
+  const isB2C = String(type || "").toUpperCase() === "B2C";
+  return isB2C ? formatB2CInvoiceNo(val) : formatMainBillNo(val);
+};
 
-  const [gstEnabled, setGstEnabled] = useState(false);
-  const [sgst, setSgst] = useState("");
-  const [cgst, setCgst] = useState("");
-  const [igst, setIgst] = useState("");
-  const [gstPercentage, setGstPercentage] = useState("");
-  const [gstAmount, setGstAmount] = useState("");
-  const [showGstInBill, setShowGstInBill] = useState(true);
-  const [isSgstEnabled, setIsSgstEnabled] = useState(false);
-  const [isCgstEnabled, setIsCgstEnabled] = useState(false);
-  const [isIgstEnabled, setIsIgstEnabled] = useState(false);
-  const [savedGstList, setSavedGstList] = useState([]);
-  const [showSavedGstModal, setShowSavedGstModal] = useState(false);
+const DEFAULT_THIRUKKURAL = "அகர முதல எழுத்தெல்லாம் ஆதி பகவன் முதற்றே உலகு.";
+const TAMIL_FONT_STACK = '"Noto Sans Tamil", "Nirmala UI", "Latha", "Tamil Sangam MN", "Arial Unicode MS", sans-serif';
+const tamilFontFamily = Platform.select({
+  ios: "Tamil Sangam MN",
+  android: "Noto Sans Tamil",
+  default: "Noto Sans Tamil",
+});
 
-  const [itemsList, setItemsList] = useState([]);
-  const [loadingItems, setLoadingItems] = useState(true);
-  const [selectedIssueItem, setSelectedIssueItem] = useState(null);
-  const [issueItemDropdownOpen, setIssueItemDropdownOpen] = useState(false);
-  const [customIssueItem, setCustomIssueItem] = useState("");
-  const [selectedReceiptItem, setSelectedReceiptItem] = useState(null);
-  const [receiptItemDropdownOpen, setReceiptItemDropdownOpen] = useState(false);
-  const [customReceiptItem, setCustomReceiptItem] = useState("");
-  const [issueItemSearch, setIssueItemSearch] = useState("");
-  const [receiptItemSearch, setReceiptItemSearch] = useState("");
-  const [issueDetails, setIssueDetails] = useState("");
-  const [previousReceiptWeight, setPreviousReceiptWeight] = useState(0);
+export default function BillPreview({ route, navigation }) {
+  const routeParams = route.params || {};
+  const {
+    issueItems,
+    receiptItems,
+    cashTable,
+    summary: rawSummary,
+    report,
+    transactions,
+    items,
+    gst,
+    estimate,
+    suspense,
+    order,
+    printAgain,
+  } = routeParams;
+  const summary = rawSummary || {};
+  const customer = route.params?.customer || {};
+  const isFromHistory = Boolean(route.params?.fromHistory);
+const toNum = (value, fallback = 0) => toBalanceNumber(value, fallback);
 
-  const [search, setSearch] = useState("");
-  const [cartSearch, setCartSearch] = useState("");
-  const [filteredCustomers, setFilteredCustomers] = useState([]);
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [recentNames, setRecentNames] = useState([]);
-
-  const [customers, setCustomers] = useState([]);
-  const [loadingCustomers, setLoadingCustomers] = useState(true);
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [billTypeLabel, setBillTypeLabel] = useState("");
-  const [phone, setPhone] = useState("");
-
-  const normalizeCustomerType = (value, fallback = "B2B") => {
-    const raw = String(value || fallback || "").toUpperCase();
-    if (raw === "B2C") return "B2C";
-    if (raw === "DEALER") return "DEALER";
-    return "B2B";
+const normalizeImageUri = (rawValue, baseUrl = "") => {
+  const isInvalidImageToken = (raw) => {
+    const token = String(raw || "").trim().toLowerCase();
+    return (
+      !token ||
+      token === "null" ||
+      token === "undefined" ||
+      token === "n/a" ||
+      token === "[object object]"
+    );
   };
-
-  const resolveCustomerRecordId = (customer) =>
-    customer?.id || customer?._id || customer?.customerId || "";
-
-  // ── TOTALS (after useState, before useEffect) ───────────────
-  const totalIssuePure = issueItems.reduce(
-    (acc, it) => acc + Number(it.purity || 0),
-    0,
-  );
-  const totalIssueWeight = issueItems.reduce(
-    (acc, it) => acc + Number(it.weight || 0),
-    0,
-  );
-  const totalIssueStone = issueItems.reduce(
-    (acc, it) => acc + Number(it.stone || 0),
-    0,
-  );
-  const totalIssueTouch = issueItems.reduce(
-    (acc, it) => acc + Number(it.touch || 0),
-    0,
-  );
-  const totalReceiptPure = receiptItems.reduce(
-    (acc, it) => acc + Number(it.purity || 0),
-    0,
-  );
-  const totalReceiptWeight = receiptItems.reduce(
-    (acc, it) => acc + Number(it.weight || 0),
-    0,
-  );
-  const totalReceiptStone = receiptItems.reduce(
-    (acc, it) => acc + Number(it.stone || 0),
-    0,
-  );
-  const totalReceiptTouch = receiptItems.reduce(
-    (acc, it) => acc + Number(it.touch || 0),
-    0,
-  );
-  const ftRateNum = Number(goldRate);
-  const ftRateValue = Number.isFinite(ftRateNum) ? ftRateNum : 0;
-  const issueFtAmount = totalIssuePure * ftRateValue;
-  const receiptFtAmount = totalReceiptPure * ftRateValue;
-  const totalCartItems = issueItems.length + receiptItems.length;
-  const totalCartPure = totalIssuePure + totalReceiptPure;
-  const totalCashPure = cashTable.reduce(
-    (acc, it) => acc + Number(it.pure || 0),
-    0,
-  );
-  const netBillPure = Math.max(0, totalIssuePure - totalReceiptPure - totalCashPure);
-  const taxableBillAmount = netBillPure * ftRateValue;
-  const sgstPercentValue = gstEnabled && isSgstEnabled ? (Number(sgst) || 0) : 0;
-  const cgstPercentValue = gstEnabled && isCgstEnabled ? (Number(cgst) || 0) : 0;
-  const sgstAmountValue = (taxableBillAmount * sgstPercentValue) / 100;
-  const cgstAmountValue = (taxableBillAmount * cgstPercentValue) / 100;
-  const totalGstValue = sgstAmountValue + cgstAmountValue;
-  const finalBillAmountWithGst = taxableBillAmount + totalGstValue;
-
-  // ── useEffects AFTER totals ──────────────────────────────────
-  useEffect(() => {
-    saveStock();
-  }, [itemsStock]);
-
-  // Handle customer name change for searchable dropdown
-  const handleCustomerNameChange = (text) => {
-    setSearch(text);
-    if (text) {
-      const filtered = customers.filter(
-        (customer) =>
-          customer.name &&
-          customer.name.toLowerCase().includes(text.toLowerCase()),
-      );
-      setFilteredCustomers(filtered);
-      setShowDropdown(true);
-    } else {
-      setFilteredCustomers([]);
-      setShowDropdown(false);
-    }
-  };
-
-  const selectCustomer = (customer) => {
-    setSelectedCustomer(customer);
-    setSearch(customer.name);
-    setPhone(customer.phone || "");
-    setShowDropdown(false);
-  };
-
-  const fetchLatestB2BGstSettings = useCallback(async ({ applyEnabled = false } = {}) => {
-    try {
-      const response = await fetch(`${base_url}/gst`);
-      const data = await response.json();
-      const latestB2B = Array.isArray(data)
-        ? data.find((item) => item.type === "B2B")
-        : null;
-
-      if (!latestB2B) return false;
-
-      const nextSgst = String(latestB2B.sgst ?? "0");
-      const nextCgst = String(latestB2B.cgst ?? "0");
-
-      setSgst(nextSgst);
-      setCgst(nextCgst);
-      setIgst("0");
-      setIsSgstEnabled((Number(nextSgst) || 0) > 0);
-      setIsCgstEnabled((Number(nextCgst) || 0) > 0);
-      setIsIgstEnabled(false);
-
-      if (applyEnabled) {
-        setGstEnabled(Boolean(latestB2B.enabled));
+  const readImageField = (value) => {
+    if (!value) return "";
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (isInvalidImageToken(trimmed)) return "";
+      if (
+        (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+        (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+        (trimmed.startsWith("\"") && trimmed.endsWith("\""))
+      ) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          const nested = readImageField(parsed);
+          if (nested) return nested;
+        } catch (_) {}
       }
-      return true;
-    } catch (error) {
-      console.error("Failed to fetch GST settings in B2B", error);
-      return false;
+      return isInvalidImageToken(trimmed) ? "" : trimmed;
     }
-  }, []);
-  // Load latest B2B GST settings from DB on mount
-  useEffect(() => {
-    fetchLatestB2BGstSettings();
-  }, [fetchLatestB2BGstSettings]);
+    if (Array.isArray(value)) {
+      for (const row of value) {
+        const nested = readImageField(row);
+        if (nested) return nested;
+      }
+      return "";
+    }
+    if (typeof value !== "object") return "";
+    const candidates = [
+      value.uri,
+      value.url,
+      value.path,
+      value.src,
+      value.fileUri,
+      value.sourceURL,
+      value.receiptImage,
+      value.proofImage,
+      value.image,
+      value.base64,
+      value.data,
+      value.assets,
+      value.images,
+      value.files,
+    ];
+    for (const candidate of candidates) {
+      const nested = readImageField(candidate);
+      if (nested) return nested;
+    }
+    return "";
+  };
 
+  if (rawValue === null || rawValue === undefined) return "";
+  let uri = readImageField(rawValue);
+  if (!uri) return "";
 
-  // ✅ Load latest B2B GST settings from DB whenever page is focused
+  try {
+    if (uri.includes("%2F") || uri.includes("%3A") || uri.includes("%2B")) {
+      uri = decodeURIComponent(uri);
+    }
+  } catch (_) {
+    // keep original
+  }
+
+  const compact = uri.replace(/\s+/g, "");
+  if (compact.startsWith("data:image/")) return compact;
+  if (compact.startsWith("data:") && compact.includes(";base64,")) {
+    const base64Part = compact.split(";base64,")[1] || "";
+    return base64Part ? `data:image/jpeg;base64,${base64Part}` : "";
+  }
+  if (
+    uri.startsWith("http://") ||
+    uri.startsWith("https://") ||
+    uri.startsWith("file://") ||
+    uri.startsWith("content://") ||
+    uri.startsWith("ph://")
+  ) {
+    return uri;
+  }
+  if (/^[A-Za-z0-9+/_=\r\n-]+$/.test(compact) && compact.length > 100) {
+    return `data:image/jpeg;base64,${compact}`;
+  }
+
+  const cleanBaseUrl = String(baseUrl || "").replace(/\/+$/, "");
+  const cleanPath = uri.replace(/^\/+/, "");
+  return cleanBaseUrl ? `${cleanBaseUrl}/${cleanPath}` : uri;
+};
+  const safeIssueItems = Array.isArray(issueItems) ? issueItems : [];
+  const safeReceiptItems = Array.isArray(receiptItems) ? receiptItems : [];
+  const safeCashTable = Array.isArray(cashTable) ? cashTable : [];
+
+  const isB2C = customer?.type === 'B2C';
+  console.log("DEBUG: Customer in Preview ðŸ‘‰", customer);
+
+  const [cashAmount, setCashAmount] = useState('');
+  const [upiAmount, setUpiAmount] = useState('');
+  const [showUpi, setShowUpi] = useState(false);
+  const [b2cCashReceived, setB2cCashReceived] = useState(() => {
+    const raw = transactions?.[0]?.manualCashAmount;
+    if (raw === null || raw === undefined) return "";
+    const txt = String(raw).trim();
+    return txt && txt !== "0" && txt !== "0.0" && txt !== "0.00" ? txt : "";
+  });
+  const [b2cConversion, setB2cConversion] = useState({
+    applied: false,
+    goldWeight: 0,
+    updatedOB: 0,
+    updatedAB: 0,
+  });
+  const [customPayment, setCustomPayment] = useState("");
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const isSharingRef = useRef(false);
+  const hasAutoPrintedRef = useRef(false);
+  const hasAutoSharedRef = useRef(false);
+  const hasAutoSavedRef = useRef(false);
+  const lastAutoSaveKeyRef = useRef("");
+  const preparedPdfUriRef = useRef("");
+  const savedBillIdRef = useRef(
+    route.params?.savedBillId ||
+    route.params?.billId ||
+    transactions?.[0]?._id ||
+    transactions?.[0]?.id ||
+    ""
+  );
+  const lastSavedSignatureRef = useRef("");
+  const isSavingBillRef = useRef(false);
+  const savePromiseRef = useRef(null);
+  const allowNextBeforeRemoveRef = useRef(false);
+
+  const [upiId, setUpiId] = useState("kaliyamoorthirengaraj@okaxis");
+  const [additionalPhone, setAdditionalPhone] = useState('');
+  const [additionalCash, setAdditionalCash] = useState('');
+  const [kadaiAmount, setKadaiAmount] = useState(() => {
+    const existing = transactions?.[0]?.kadaiAmount ?? customer?.kadaiAmount ?? "";
+    return existing === null || existing === undefined || String(existing).trim() === ""
+      ? ""
+      : String(existing);
+  });
+  const [thirukkural, setThirukkural] = useState(DEFAULT_THIRUKKURAL);
+  const [homeGoldRate, setHomeGoldRate] = useState("");
+
   useFocusEffect(
     useCallback(() => {
-      fetchLatestB2BGstSettings({ applyEnabled: true });
-      fetchItems(); // ✅ Refresh items from database when page is focused
-    }, [fetchLatestB2BGstSettings])
+      const loadSelectedUpiId = async () => {
+        try {
+          const stored = await AsyncStorage.getItem('selectedUpiId');
+          if (stored) {
+            setUpiId(stored);
+          }
+        } catch (error) {
+          console.error('Error loading selected UPI ID:', error);
+        }
+      };
+      const loadThirukkural = async () => {
+        try {
+          const response = await axios.get(`${base_url}/thirukkural`);
+          const latestKural = response?.data?.kural || "";
+          if (String(latestKural).trim()) {
+            setThirukkural(latestKural);
+            await AsyncStorage.setItem('thirukkural_quote', latestKural);
+            return;
+          }
+          const storedKural = await AsyncStorage.getItem('thirukkural_quote');
+          if (storedKural && String(storedKural).trim()) {
+            setThirukkural(storedKural);
+            return;
+          }
+          setThirukkural(DEFAULT_THIRUKKURAL);
+        } catch (error) {
+          console.error('Error loading Thirukkural:', error);
+          const storedKural = await AsyncStorage.getItem('thirukkural_quote');
+          if (storedKural && String(storedKural).trim()) {
+            setThirukkural(storedKural);
+            return;
+          }
+          setThirukkural(DEFAULT_THIRUKKURAL);
+        }
+      };
+      const loadHomeGoldRate = async () => {
+        try {
+          const storedGoldRate = await AsyncStorage.getItem("goldRate");
+          setHomeGoldRate(storedGoldRate ? String(storedGoldRate) : "");
+        } catch (error) {
+          console.error("Error loading goldRate from HomeScreen:", error);
+        }
+      };
+      loadSelectedUpiId();
+      loadThirukkural();
+      loadHomeGoldRate();
+    }, [])
   );
+  const [qrDataURL, setQrDataURL] = useState('');
+  const [qrReady, setQrReady] = useState(false);
+
+  const qrRef = useRef(null);
+
+  const totalAmount = report ? parseFloat(report.cash) : 0;
 
   useEffect(() => {
-    if (gstEnabled) {
-      // 1. Calculate Total Percentage from GST page values (B2B SGST+CGST only)
-      const s = isSgstEnabled ? parseNum(sgst) : 0;
-      const c = isCgstEnabled ? parseNum(cgst) : 0;
-      const totalPct = s + c;
-      const pctString = totalPct.toFixed(2);
+    if (!printAgain || hasAutoPrintedRef.current) return;
+    hasAutoPrintedRef.current = true;
+    const timer = setTimeout(() => {
+      handlePrint();
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [printAgain]);
 
-      if (gstPercentage !== pctString) {
-        setGstPercentage(pctString);
-      }
+  const finalBalance = toNum(summary?.current, 0);
+  const summaryOB = toNum(summary?.ob, toNum(customer?.oldBalance, 0));
+  const summaryAB = toNum(summary?.ab, toNum(customer?.advanceBalance, 0));
+  const summaryCurrent = toNum(summary?.current, NaN);
+  const hasSummaryCurrent = Number.isFinite(summaryCurrent);
 
-      // 2. Calculate Rupee Amount from live bill amount (net pure * FT rate)
-      const rate = parseNum(goldRate);
-      const netPure = Math.max(
-        0,
-        Number(totalIssuePure || 0) -
-          Number(totalReceiptPure || 0) -
-          Number(totalCashPure || 0),
-      );
-      const billAmount = netPure * rate;
-      const calculatedAmount = (billAmount * totalPct) / 100;
 
-      // Update amount state if different
-      const amountString = calculatedAmount.toFixed(2);
-      if (gstAmount !== amountString) {
-        setGstAmount(amountString);
-      }
+  // Calculate separate totals for issue and receipt
+  const totalIssuePure = safeIssueItems.reduce((sum, item) => sum + toNum(item?.pure, 0), 0).toFixed(3);
+  const totalReceiptPure = safeReceiptItems.reduce((sum, item) => sum + toNum(item?.pure, 0), 0).toFixed(3);
 
-      console.log(
-        `📊 B2B GST Sync: NetPure=${netPure.toFixed(3)}, Rate=${rate}, Bill=₹${billAmount.toFixed(2)}, Pct=${totalPct}% -> GST=₹${amountString}`,
-      );
-    } else {
-      if (gstPercentage !== "0.00") setGstPercentage("0.00");
-      if (gstAmount !== "0.00") setGstAmount("0.00");
+  // Calculate TW (Total Weight) and NW (Net Weight) totals for Issue and Receipt
+  const totalIssueTW = safeIssueItems.reduce((sum, item) => sum + toNum(item?.gross, 0), 0).toFixed(3);
+  const totalIssueNW = safeIssueItems.reduce((sum, item) => sum + toNum(item?.net, 0), 0).toFixed(3);
+  const totalReceiptTW = safeReceiptItems.reduce((sum, item) => sum + toNum(item?.weight, 0), 0).toFixed(3);
+  const totalReceiptNW = safeReceiptItems.reduce((sum, item) => sum + toNum(item?.result, 0), 0).toFixed(3);
+  const showIssueMColumn = safeIssueItems.some((item) => toNum(item?.m, 0) !== 0);
+  const showIssueNetWeightColumn = safeIssueItems.some((item) => toNum(item?.net, 0) !== 0);
+  const issueFromRows = safeIssueItems.reduce((sum, row) => sum + toNum(row?.pure, 0), 0);
+  const receiptFromRows = safeReceiptItems.reduce(
+    (sum, row) => sum + toNum(row?.pure, toNum(row?.result, toNum(row?.netWeight, 0))),
+    0,
+  );
+  const cashFromRows = safeCashTable.reduce((sum, row) => sum + toNum(row?.pure, 0), 0);
+  const summaryIssueRaw = toNum(summary?.issue, 0);
+  const summaryReceiptRaw = toNum(summary?.receipt, 0);
+  const summaryCashRaw = toNum(summary?.cash, 0);
+  const summaryGstPureRaw = toNum(summary?.gstPure, 0);
+  const summaryIssue = Math.abs(summaryIssueRaw) < 0.0001 && Math.abs(issueFromRows) > 0.0001 ? issueFromRows : summaryIssueRaw;
+  const summaryReceipt = Math.abs(summaryReceiptRaw) < 0.0001 && Math.abs(receiptFromRows) > 0.0001 ? receiptFromRows : summaryReceiptRaw;
+  const summaryCash = Math.abs(summaryCashRaw) < 0.0001 && Math.abs(cashFromRows) > 0.0001 ? cashFromRows : summaryCashRaw;
+  const summaryGstPure = summaryGstPureRaw;
+  const calculatedSummary = buildBalanceSummary({
+    oldBalance: summaryOB,
+    advanceBalance: summaryAB,
+    issue: summaryIssue,
+    receipt: summaryReceipt,
+    cash: summaryCash,
+  });
+  const computedCurrent = calculatedSummary.netBalance;
+  const displaySummary = {
+    issue: summaryIssue.toFixed(3),
+    receipt: summaryReceipt.toFixed(3),
+    cash: summaryCash.toFixed(3),
+    gstPure: summaryGstPure.toFixed(3),
+    receiptPlusCash: (summaryReceipt + summaryCash).toFixed(3),
+    ob: summaryOB.toFixed(3),
+    ab: summaryAB.toFixed(3),
+    current: toNum(summary?.current, computedCurrent).toFixed(3),
+  };
+  const summaryStartLabel = calculatedSummary.startLabel;
+  const summaryStartValue = calculatedSummary.startValue;
+  const summaryLeftSum = calculatedSummary.leftSum;
+  const summaryRightSum = calculatedSummary.rightSum;
+  const summaryFinal = (isFromHistory && hasSummaryCurrent)
+    ? summaryCurrent
+    : calculatedSummary.netBalance;
+  const summaryFinalState = deriveBalanceStateFromNet(summaryFinal);
+  const summaryFinalLabel = summaryFinalState.oldBalance > 0 ? "Old Balance" : "Advance Balance";
+  const summaryFinalValue = Math.abs(summaryFinal);
+  const dealerOpeningOldBalance = toNum(summaryOB, 0);
+  const dealerOpeningAdvanceBalance = toNum(summaryAB, 0);
+  const dealerIssueTotal = toNum(displaySummary.issue, 0);
+  const dealerReceiptTotal = toNum(displaySummary.receipt, 0);
+  const dealerCashTotal = toNum(displaySummary.cash, 0);
+  const dealerStartsWithOldBalance = dealerOpeningOldBalance > 0;
+  const dealerStartsWithAdvance = !dealerStartsWithOldBalance && dealerOpeningAdvanceBalance > 0;
+  const dealerStartValue = dealerStartsWithOldBalance
+    ? dealerOpeningOldBalance
+    : dealerStartsWithAdvance
+      ? dealerOpeningAdvanceBalance
+      : 0;
+  const dealerFinalBalanceRaw = dealerStartsWithAdvance
+    ? dealerIssueTotal - (dealerStartValue + dealerReceiptTotal + dealerCashTotal)
+    : (dealerStartValue + dealerReceiptTotal) - (dealerIssueTotal + dealerCashTotal);
+  const dealerFinalBalanceState = deriveBalanceStateFromNet(dealerFinalBalanceRaw);
+  const dealerBalanceSummary = {
+    startValue: dealerStartValue,
+    receipt: dealerReceiptTotal,
+    issue: dealerIssueTotal,
+    cash: dealerCashTotal,
+    netBalance: dealerFinalBalanceRaw,
+    oldBalance: dealerFinalBalanceState.oldBalance,
+    advanceBalance: dealerFinalBalanceState.advanceBalance,
+    finalValue: Math.abs(dealerFinalBalanceRaw),
+    startLabel: dealerStartsWithAdvance ? "Advance Balance" : "Old Balance",
+    startsWithAdvance: dealerStartsWithAdvance,
+  };
+  const dealerOldBalanceValue = dealerBalanceSummary.startValue;
+  const dealerReceiptValue = dealerBalanceSummary.receipt;
+  const dealerIssueValue = dealerBalanceSummary.issue;
+  const dealerCashValue = dealerBalanceSummary.cash;
+  const dealerFinalIsOldBalance = dealerBalanceSummary.oldBalance > 0;
+  const dealerFinalBalanceValue = dealerBalanceSummary.finalValue;
+  const dealerFinalBalanceLabel = dealerFinalIsOldBalance ? "Old Balance" : "Advance Balance";
+  const dealerActiveBalanceLabel = dealerBalanceSummary.startLabel;
+  const formatB2BSummaryValue = (value) => toNum(value, 0).toFixed(3);
+  const hasB2BAdvanceBalance = customer?.type === "B2B" && toNum(summaryAB, 0) > 0;
+  const b2bAdvanceBalance = toNum(summaryAB, 0);
+  const b2bTotalIssuePure = toNum(totalIssuePure, 0);
+  const b2bTotalReceiptPure = toNum(totalReceiptPure, 0);
+  const b2bTotalCashPure = toNum(cashFromRows, 0);
+  const b2bAdvanceOnlySummary = buildBalanceSummary({
+    oldBalance: 0,
+    advanceBalance: b2bAdvanceBalance,
+    issue: b2bTotalIssuePure,
+    receipt: b2bTotalReceiptPure,
+    cash: b2bTotalCashPure,
+  });
+  const b2bFinalAdvanceBalance = b2bAdvanceOnlySummary.finalValue;
+  const b2bSummaryValues = {
+    oldBalance: formatB2BSummaryValue(summaryStartValue),
+    issue: formatB2BSummaryValue(displaySummary.issue),
+    receipt: formatB2BSummaryValue(displaySummary.receipt),
+    cash: formatB2BSummaryValue(displaySummary.cash),
+    finalBalance: formatB2BSummaryValue(summaryFinalValue),
+    leftSum: formatB2BSummaryValue(summaryLeftSum),
+    rightSum: formatB2BSummaryValue(summaryRightSum),
+  };
+  const dealerSummaryValues = {
+    oldBalance: formatB2BSummaryValue(dealerOldBalanceValue),
+    receipt: formatB2BSummaryValue(dealerReceiptValue),
+    issue: formatB2BSummaryValue(dealerIssueValue),
+    cash: formatB2BSummaryValue(dealerCashValue),
+    finalBalance: formatB2BSummaryValue(dealerFinalBalanceValue),
+    finalLabel: dealerFinalBalanceLabel,
+    activeLabel: dealerActiveBalanceLabel,
+    finalIsOldBalance: dealerFinalIsOldBalance,
+    startsWithAdvance: dealerBalanceSummary.startsWithAdvance,
+    expression: dealerBalanceSummary.startsWithAdvance
+      ? `${formatB2BSummaryValue(dealerIssueValue)} - (${formatB2BSummaryValue(dealerOldBalanceValue)} + ${formatB2BSummaryValue(dealerReceiptValue)} + ${formatB2BSummaryValue(dealerCashValue)})`
+      : `(${formatB2BSummaryValue(dealerOldBalanceValue)} + ${formatB2BSummaryValue(dealerReceiptValue)}) - (${formatB2BSummaryValue(dealerIssueValue)} + ${formatB2BSummaryValue(dealerCashValue)})`,
+  };
+
+  const shouldAutoSavePreview =
+    !isFromHistory && !order && !estimate && !suspense && !isB2CPreview;
+  const b2bAdvanceSummaryValues = {
+    issue: formatB2BSummaryValue(b2bTotalIssuePure),
+    advanceBalance: formatB2BSummaryValue(b2bAdvanceBalance),
+    receipt: formatB2BSummaryValue(b2bTotalReceiptPure),
+    cash: formatB2BSummaryValue(b2bTotalCashPure),
+    finalAdvanceBalance: formatB2BSummaryValue(b2bFinalAdvanceBalance),
+    finalLabel: summaryFinalLabel,
+    expression: `${formatB2BSummaryValue(b2bAdvanceBalance)} + ${formatB2BSummaryValue(b2bTotalReceiptPure)} + ${formatB2BSummaryValue(b2bTotalCashPure)} - ${formatB2BSummaryValue(b2bTotalIssuePure)}`,
+  };
+  const b2cRateFallback =
+    toNum(safeCashTable?.[0]?.goldRate, 0) ||
+    toNum(safeReceiptItems?.[0]?.rate, 0) ||
+    toNum(summary?.goldRate, 0);
+  const normalizedB2CItems = (Array.isArray(items) ? items : []).map((row) => {
+    const weight = toNum(row?.weight, toNum(row?.gross, 0));
+    const touch = toNum(row?.touch, toNum(row?.calc, 0));
+    const wastage = toNum(row?.wastage, toNum(row?.m, 0));
+    const rate = toNum(row?.rate, toNum(row?.goldRate, toNum(row?.goldrate, b2cRateFallback)));
+    const computedTotal = (weight + wastage) * rate;
+    const total = toNum(row?.total, toNum(row?.netAmount, toNum(row?.amount, computedTotal)));
+    const gstValue = toNum(row?.gst, toNum(row?.gstAmount, 0));
+    const final = toNum(row?.final, toNum(row?.totalAmount, total + gstValue));
+    return {
+      ...row,
+      itemName: row?.itemName || row?.name || "",
+      displayItemName: row?.displayItemName || row?.itemName || row?.name || "",
+      weight,
+      touch,
+      wastage,
+      rate,
+      total,
+      gst: gstValue,
+      final,
+      pure: toNum(row?.pure, (weight * touch) / 100),
+    };
+  });
+  const normalizedB2CReceiptItems = safeReceiptItems.map((row) => {
+    const weight = toNum(row?.weight, 0);
+    const sub = toNum(row?.sub, 0);
+    const netWeight = toNum(row?.netWeight, toNum(row?.netWt, toNum(row?.result, toNum(row?.pure, weight - sub))));
+    const rate = toNum(row?.rate, toNum(row?.ftRate, toNum(row?.goldRate, toNum(row?.goldrate, b2cRateFallback))));
+    const amount = toNum(row?.amount, toNum(row?.amt, toNum(row?.total, netWeight * rate)));
+    return {
+      ...row,
+      name: row?.name || "",
+      weight: weight.toFixed(3),
+      sub: sub.toFixed(3),
+      netWeight: netWeight.toFixed(3),
+      rate: rate.toFixed(2),
+      amount: amount.toFixed(2),
+      result: netWeight.toFixed(3),
+      pure: netWeight.toFixed(3),
+    };
+  });
+  const totalB2CItemFinal = normalizedB2CItems.reduce((sum, item) => sum + toNum(item?.final, 0), 0);
+  const totalB2CItemsTotal = normalizedB2CItems.reduce((sum, item) => sum + toNum(item?.total, 0), 0);
+  const totalB2COldGoldAmount = normalizedB2CReceiptItems.reduce((sum, item) => sum + toNum(item?.amount, 0), 0);
+  const b2cTotalCashAmount = normalizedB2CReceiptItems.length > 0
+    ? toNum(totalB2CItemFinal, 0) - toNum(totalB2COldGoldAmount, 0)
+    : toNum(totalB2CItemFinal, 0);
+  const computedB2CTotalAmount = totalB2CItemFinal - totalB2COldGoldAmount;
+  const reportCash = toNum(report?.cash, NaN);
+  const displayB2CTotalAmount =
+    Number.isFinite(reportCash) && !(Math.abs(reportCash) < 0.0001 && Math.abs(computedB2CTotalAmount) > 0.0001)
+      ? reportCash
+      : computedB2CTotalAmount;
+  const displayB2COldBalance = toNum(summary?.ob, toNum(customer?.oldBalance, 0));
+  const displayB2CAdvanceBalance = toNum(summary?.ab, toNum(customer?.advanceBalance, 0));
+  const homeGoldRateNum = toNum(homeGoldRate, 0);
+  const currentB2CGoldRate =
+    (homeGoldRateNum > 0 ? homeGoldRateNum : 0) ||
+    toNum(customer?.goldRate, 0) ||
+    toNum(normalizedB2CItems?.[0]?.rate, 0) ||
+    b2cRateFallback;
+  const b2cGoldRateAtPurchase =
+    toNum(normalizedB2CItems?.[0]?.rate, 0) ||
+    toNum(summary?.goldRate, 0) ||
+    b2cRateFallback ||
+    currentB2CGoldRate;
+  const hasManualCashForB2C = isB2C && String(cashAmount || "").trim() !== "";
+  const parsedCashAmount = hasManualCashForB2C ? Math.max(0, toNum(cashAmount, 0)) : 0;
+  const parsedUpiAmount = hasManualCashForB2C ? Math.max(0, toNum(upiAmount, 0)) : 0;
+  const savedB2CConvertedGold = toNum(transactions?.[0]?.b2cUpiGoldValue, 0);
+  const b2cUpiGoldValue = b2cConversion.applied ? b2cConversion.goldWeight : 0;
+  const displayConvertedGoldValue = b2cConversion.applied ? b2cUpiGoldValue : savedB2CConvertedGold;
+  const effectiveB2COldBalance = b2cConversion.applied
+    ? b2cConversion.updatedOB
+    : displayB2COldBalance;
+  const effectiveB2CAdvanceBalance = b2cConversion.applied
+    ? b2cConversion.updatedAB
+    : displayB2CAdvanceBalance;
+  const b2cHasOldBalance = Math.abs(toNum(customer?.oldBalance, summaryOB)) > 0.0001 || Math.abs(toNum(summaryOB, 0)) > 0.0001;
+  const b2cHasAdvanceBalance = !b2cHasOldBalance && (Math.abs(toNum(customer?.advanceBalance, summaryAB)) > 0.0001 || Math.abs(toNum(summaryAB, 0)) > 0.0001);
+  const b2cBalanceLabel = b2cHasOldBalance ? "Old Balance" : b2cHasAdvanceBalance ? "Advance Balance" : "Balance";
+  const b2cBalanceWeight = b2cHasOldBalance
+    ? toNum(effectiveB2COldBalance, 0)
+    : b2cHasAdvanceBalance
+      ? toNum(effectiveB2CAdvanceBalance, 0)
+      : 0;
+  const b2cBalanceRupees = toNum(b2cBalanceWeight, 0) * toNum(currentB2CGoldRate, 0);
+  const b2cFinalPayableAmount = toNum(b2cTotalCashAmount, 0) + (b2cHasOldBalance ? b2cBalanceRupees : (b2cHasAdvanceBalance ? -b2cBalanceRupees : 0));
+  const b2cCashReceivedNum = Math.max(0, toNum(b2cCashReceived, 0));
+  const b2cBalanceAfterCash = toNum(b2cFinalPayableAmount, 0) - b2cCashReceivedNum;
+  const b2cBalanceAfterCashGrams =
+    toNum(currentB2CGoldRate, 0) > 0 ? (toNum(b2cBalanceAfterCash, 0) / toNum(currentB2CGoldRate, 0)) : 0;
+
+  // When opening a saved bill from BillHistory, prefer the stored balances instead of re-calculating.
+  const savedTx = transactions?.[0] || {};
+  const savedCurrentBal = toNum(savedTx?.currentBalance, toNum(savedTx?.availableBalance, NaN));
+  const savedOB = toNum(savedTx?.oldBalance, NaN);
+  const savedAB = toNum(savedTx?.advanceBalance, NaN);
+  const savedCurrentFromOBAB =
+    (Number.isFinite(savedOB) ? savedOB : 0) - (Number.isFinite(savedAB) ? savedAB : 0);
+  const savedCurrentGrams = Number.isFinite(savedCurrentBal) ? savedCurrentBal : savedCurrentFromOBAB;
+
+  const b2cDisplayBalanceAfterCash = isFromHistory
+    ? toNum(savedCurrentGrams, 0) * toNum(currentB2CGoldRate, 0)
+    : b2cBalanceAfterCash;
+  const b2cDisplayBalanceAfterCashGrams = isFromHistory ? savedCurrentGrams : b2cBalanceAfterCashGrams;
+
+  const b2cNextOldBalance = Math.max(0, b2cBalanceAfterCashGrams);
+  const b2cNextAdvanceBalance = Math.max(0, -b2cBalanceAfterCashGrams);
+  const estimateItems = Array.isArray(estimate?.items) ? estimate.items : [];
+  const estimateGSTEnabled = Boolean(estimate?.enableGST);
+  const estimateSubTotal = estimateItems.length > 0
+    ? estimateItems.reduce((sum, it) => sum + toNum(it?.netAmount, 0), 0)
+    : toNum(estimate?.netAmount, 0);
+  const estimateFinalTotal = estimateItems.length > 0
+    ? estimateItems.reduce((sum, it) => sum + toNum(it?.totalAmount, 0), 0)
+    : toNum(estimate?.totalAmount, 0);
+  const estimateGstFromItems = estimateItems.reduce((sum, it) => sum + toNum(it?.gst, 0), 0);
+  const estimateGstAmount = estimateGSTEnabled
+    ? toNum(
+      estimate?.gst,
+      estimateGstFromItems > 0 ? estimateGstFromItems : Math.max(0, estimateFinalTotal - estimateSubTotal),
+    )
+    : 0;
+  const estimateGstPercent = estimateGSTEnabled && estimateSubTotal > 0
+    ? (estimateGstAmount / estimateSubTotal) * 100
+    : 0;
+
+  useEffect(() => {
+    if (!isB2C) return;
+    const rawCash = String(cashAmount || "").trim();
+    if (!rawCash) {
+      if (upiAmount !== "") setUpiAmount("");
+      if (b2cConversion.applied) setB2cConversion((prev) => ({ ...prev, applied: false, goldWeight: 0 }));
+      setShowUpi(false);
+      return;
     }
-  }, [
-    gstEnabled,
-    isSgstEnabled,
-    isCgstEnabled,
-    isIgstEnabled,
-    sgst,
-    cgst,
-    igst,
-    goldRate,
-    totalIssuePure,
-    totalReceiptPure,
-    totalCashPure,
+
+    const cash = Math.max(0, toNum(rawCash, 0));
+    const remaining = Math.max(0, displayB2CTotalAmount - cash);
+    const nextUpi = remaining.toFixed(2);
+    if (nextUpi !== upiAmount) {
+      setUpiAmount(nextUpi);
+      setB2cConversion((prev) => ({ ...prev, applied: false, goldWeight: 0 }));
+    }
+  }, [b2cConversion.applied, cashAmount, displayB2CTotalAmount, isB2C, upiAmount]);
+
+  useEffect(() => {
+    if (!isB2C || !b2cConversion.applied) return;
+    setB2cConversion((prev) => ({ ...prev, applied: false, goldWeight: 0 }));
+  }, [isB2C, upiAmount]);
+
+  function generateHTML() {
+    if (estimate) {
+      const enableGST = estimate.enableGST !== false && estimate.enableGST !== undefined ? estimate.enableGST : false;
+      const estimateItems = estimate.items && estimate.items.length > 0 ? estimate.items : null;
+      const subTotal = estimateItems
+        ? estimateItems.reduce((sum, i) => sum + toNum(i?.netAmount, 0), 0)
+        : toNum(estimate?.netAmount, 0);
+      const grandTotal = estimateItems
+        ? estimateItems.reduce((sum, i) => sum + i.totalAmount, 0)
+        : parseFloat(estimate.totalAmount || 0);
+      const gstAmount = enableGST
+        ? (estimateItems
+          ? estimateItems.reduce((sum, i) => sum + toNum(i?.gst, 0), 0)
+          : toNum(estimate?.gst, Math.max(0, grandTotal - subTotal)))
+        : 0;
+      const gstPercent = enableGST && subTotal > 0 ? (gstAmount / subTotal) * 100 : 0;
+      return `
+        <html>
+          <head>
+            <style>
+              @page { margin: 0; }
+              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 10px; }
+              h1 { text-align: center; font-size: 16px; margin-bottom: 5px; }
+              h2 { margin-top: 5px; font-size: 11px; margin-bottom: 5px; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+              th, td { border: 1px solid black; padding: 2px 1px; text-align: center; font-size: 8px; word-wrap: break-word; overflow: hidden; }
+              th { background-color: #f2f2f2; }
+              p { margin: 2px 0; font-size: 9px; }
+              .tamil-text { font-family: ${TAMIL_FONT_STACK}; }
+              .total-row { font-weight: bold; background-color: #e8f5e9; }
+            </style>
+          </head>
+          <body>
+            <h1>ESTIMATE BILL</h1>
+            <div>
+              <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
+              <p><strong>GST No:</strong> ${estimate.gstin || 'N/A'}</p>
+            </div>
+            <h2>ESTIMATE DETAILS:</h2>
+            <table>
+              <tr>
+                <th>Item Name</th>
+                <th>Wt (g)</th>
+                <th>W%</th>
+                <th>Gross Wt</th>
+                <th>Rate</th>
+                <th>Net Amt</th>
+                ${enableGST ? '<th>GST</th>' : ''}
+                <th>Total</th>
+              </tr>
+              ${estimateItems
+          ? estimateItems.map(item => `
+                  <tr>
+                    <td>${item.itemName}</td>
+                    <td>${item.weight}</td>
+                    <td>${item.wastagePercent}</td>
+                    <td>${item.grossWeight}</td>
+                    <td>${item.goldRate}</td>
+                    <td>\u20b9${item.netAmount}</td>
+                    ${enableGST ? `<td>\u20b9${item.gst}</td>` : ''}
+                    <td>\u20b9${Math.round(item.totalAmount)}</td>
+                  </tr>
+                `).join('')
+          : `
+                  <tr>
+                    <td>${estimate.itemName}</td>
+                    <td>${estimate.weight}</td>
+                    <td>${estimate.wastagePercent || 0}</td>
+                    <td>${estimate.grossWeight}</td>
+                    <td>${estimate.goldRate}</td>
+                    <td>\u20b9${estimate.netAmount}</td>
+                    ${enableGST ? `<td>\u20b9${parseFloat(estimate.gst || 0).toFixed(2)}</td>` : ''}
+                    <td>\u20b9${Math.round(parseFloat(estimate.totalAmount))}</td>
+                  </tr>
+                `
+        }
+              <tr class="total-row">
+                <td colspan="${enableGST ? 7 : 6}" style="text-align:right;">TOTAL ESTIMATE AMOUNT:</td>
+                <td>\u20b9${Math.round(grandTotal)}</td>
+              </tr>
+            </table>
+
+            ${enableGST ? `
+              <h2 style="margin-bottom: 5px;">GST SUMMARY:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                <tr>
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Subtotal</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">\u20b9${subTotal.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">${gstPercent.toFixed(2)}%</td>
+                </tr>
+                <tr>
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">\u20b9${gstAmount.toFixed(2)}</td>
+                </tr>
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Final Total (Incl. GST)</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">\u20b9${grandTotal.toFixed(2)}</td>
+                </tr>
+              </table>
+            ` : ''}
+
+            ${!estimate && gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+          </body>
+        </html>
+      `;
+    } else if (order) {
+      return `
+        <html>
+          <head>
+            <style>
+              @page { margin: 0; }
+              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 10px; }
+              h1 { text-align: center; color: #1B4D1B; margin-bottom: 10px; font-size: 14px; }
+              .order-details { margin-bottom: 10px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; }
+              .order-details p { margin: 2px 0; font-size: 9px; }
+              .photo-container { text-align: center; margin: 5px 0; }
+              .order-photo { max-width: 100%; height: auto; border-radius: 4px; border: 1px solid #ddd; }
+              table { width: 100%; border-collapse: collapse; margin-top: 5px; table-layout: fixed; }
+              th, td { border: 1px solid black; padding: 2px 1px; text-align: center; font-size: 8px; word-wrap: break-word; overflow: hidden; }
+              th { background-color: #f2f2f2; }
+              .footer { text-align: center; margin-top: 15px; font-style: italic; color: #666; font-size: 9px; }
+            </style>
+          </head>
+          <body>
+            <h1>ORDER RECEIPT</h1>
+            <div class="order-details" style="display: flex; justify-content: space-between; border: 1px solid #000; padding: 10px;">
+              <div style="flex: 1;">
+                <p><strong>Order No:</strong> ${order.orderNo}</p>
+                <p><strong>Name:</strong> ${order.customer}</p>
+                <p><strong>Phone:</strong> ${order.phone}</p>
+                <p><strong>Address:</strong> ${order.address || 'N/A'}</p>
+                <p><strong>GST No:</strong> ${order.gstin || 'N/A'}</p>
+              </div>
+              <div style="text-align: right; width: 100px;">
+                <p><strong>Type:</strong> Order</p>
+                <p><strong>Date:</strong> ${order.date || '-'}</p>
+              </div>
+            </div>
+            <div style="border: 1px solid #000; margin-top: 10px; padding: 10px;">
+               <p><strong>ORDER DETAILS :</strong></p>
+               <div style="margin-top: 5px;">
+                  <p><strong>Order No:</strong> ${order.orderNo}</p>
+                  <p><strong>Item:</strong> ${order.type}</p>
+                  <p><strong>Weight:</strong> ${order.weight} GMS</p>
+                  <p><strong>Payment:</strong> ${order.payment}</p>
+                  <p><strong>Pending Balance:</strong> ₹${order.balance}</p>
+               </div>
+            </div>
+
+            ${(() => {
+              const orderImg = normalizeImageUri(order.image, base_url);
+              return orderImg ? `
+                <div class="photo-container">
+                  <p><strong>Item Photo:</strong></p>
+                  <img src="${orderImg}" style="width: 100%; border-radius: 5px;" />
+                </div>
+              ` : '';
+            })()}
+
+            ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+
+            <div class="footer" style="text-align: center; margin-top: 20px;">
+              <p class="tamil-text">${thirukkural}</p>
+              <p>Thank you for choosing NJT Jewellery!</p>
+            </div>
+          </body>
+        </html>
+      `;
+    } else if (suspense) {
+      return `
+        <html>
+          <head>
+            <style>
+              @page { margin: 0; }
+              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 10px; }
+              h1 { text-align: center; font-size: 16px; margin-bottom: 5px; }
+              h2 { margin-top: 8px; font-size: 11px; margin-bottom: 5px; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+              th, td { border: 1px solid black; padding: 2px 1px; text-align: center; font-size: 8px; word-wrap: break-word; overflow: hidden; }
+              th { background-color: #f2f2f2; }
+              p { margin: 2px 0; font-size: 9px; }
+              .total-row { font-weight: bold; background-color: #e0e0e0; }
+            </style>
+          </head>
+          <body>
+            <h1>SUSPENSE BILL</h1>
+            <div>
+              <p><strong>Name:</strong> ${customer.name}</p>
+              <p><strong>Phone:</strong> ${customer.phone}</p>
+              <p><strong>Address:</strong> ${customer.address || 'N/A'}</p>
+              <p><strong>GST No:</strong> ${customer.gstin || 'N/A'}</p>
+              <p><strong>Date:</strong> ${customer.date}</p>
+              <p><strong>Gold Rate:</strong> â‚¹${suspense.goldRate}</p>
+            </div>
+
+            <h2>ISSUE ITEMS:</h2>
+            <table>
+              <tr>
+                <th>Item Name</th>
+                <th>Weight (g)</th>
+                <th>Qty</th>
+                <th>Rate</th>
+                <th>Pure (g)</th>
+                <th>Amount</th>
+              </tr>
+              ${suspense.issueItems.map(item => `
+                <tr>
+                  <td>${item.name}</td>
+                  <td>${item.weight.toFixed(3)}</td>
+                  <td>${item.count}</td>
+                  <td>${item.rate}</td>
+                  <td>${item.pure.toFixed(3)}</td>
+                  <td>${item.amount.toFixed(2)}</td>
+                </tr>
+              `).join('')}
+              <tr class="total-row">
+                <td colspan="4">Total Issue</td>
+                <td>${suspense.totalIssuePure.toFixed(3)}</td>
+                <td>â‚¹${suspense.totalIssueAmount.toFixed(2)}</td>
+              </tr>
+            </table>
+
+            <h2>RECEIPT ITEMS:</h2>
+            <table>
+              <tr>
+                <th>Item Name</th>
+                <th>Weight (g)</th>
+                <th>Qty</th>
+                <th>Rate</th>
+                <th>Pure (g)</th>
+                <th>Amount</th>
+              </tr>
+              ${suspense.receiptItems.map(item => `
+                <tr>
+                  <td>${item.name}</td>
+                  <td>${item.weight.toFixed(3)}</td>
+                  <td>${item.count}</td>
+                  <td>${item.rate}</td>
+                  <td>${item.pure.toFixed(3)}</td>
+                  <td>${item.amount.toFixed(2)}</td>
+                </tr>
+              `).join('')}
+              <tr class="total-row">
+                <td colspan="4">Total Receipt</td>
+                <td>${suspense.totalReceiptPure.toFixed(3)}</td>
+                <td>â‚¹${suspense.totalReceiptAmount.toFixed(2)}</td>
+              </tr>
+            </table>
+
+            <h2>SUMMARY:</h2>
+            <table>
+              <tr>
+                 <th>Description</th>
+                 <th>Pure Gold (g)</th>
+                 <th>Amount (â‚¹)</th>
+              </tr>
+              <tr>
+                <td>Net Balance</td>
+                <td style="color: ${suspense.netPure >= 0 ? 'red' : 'green'}">${suspense.netPure.toFixed(3)}</td>
+                <td>â‚¹${suspense.netAmount.toFixed(2)}</td>
+              </tr>
+            </table>
+
+            ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+          </body>
+        </html >
+    `;
+    } else if (isB2C) {
+      return `
+    <html>
+          <head>
+            <style>
+              @page { margin: 0; }
+              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 10px; }
+              h1 { text-align: center; font-size: 16px; margin-bottom: 5px; }
+              h2 { margin-top: 8px; font-size: 11px; margin-bottom: 5px; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+              th, td { border: 1px solid black; padding: 2px 1px; text-align: center; font-size: 7px; word-wrap: break-word; overflow: hidden; }
+              th { background-color: #f2f2f2; }
+              p { margin: 2px 0; font-size: 9px; }
+            </style>
+          </head>
+          <body>
+            <h1>BILL</h1>
+            <div>
+              <p><strong>Bill No:</strong> ${currentBillNo || 'N/A'}</p>
+              <p><strong>Name:</strong> ${customer.name}</p>
+              <p><strong>Phone:</strong> ${customer.phone}</p>
+              <p><strong>Address:</strong> ${customer.address || 'N/A'}</p>
+              <p><strong>GST No:</strong> ${customer.gstin || 'N/A'}</p>
+              <p><strong>Type:</strong> ${customer.type}</p>
+              <p><strong>Date:</strong> ${customer.date}</p>
+              <p><strong>Balance:</strong> ${customer.balance}</p>
+              <p><strong>Advance:</strong> ${customer.advanceBalance || 0}</p>
+            </div>
+            <h2>ITEMS:</h2>
+            <table>
+              <tr>
+                <th>Item</th>
+                <th>Weight</th>
+                <th>Touch</th>
+                <th>W/M</th>
+                <th>Rate</th>
+                <th>Total</th>
+                <th>GST</th>
+                <th>Final</th>
+              </tr>
+              ${normalizedB2CItems.length > 0 ? normalizedB2CItems.map(item => `
+                <tr>
+                  <td>${item.displayItemName || item.itemName}</td>
+                  <td>${item.weight}</td>
+                  <td>${item.touch}</td>
+                  <td>${item.wastage}</td>
+                  <td>${item.rate}</td>
+                  <td>${item.total}</td>
+                  <td>${item.gst}</td>
+                  <td>${item.final}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="8">No items</td></tr>'}
+            </table>
+
+    ${normalizedB2CReceiptItems.length > 0 ? `
+              <h2>RECEIPT / OLD GOLD:</h2>
+              <table>
+                <tr>
+                  <th>Item</th>
+                  <th>Weight</th>
+                  <th>Sub</th>
+                  <th>Net Wt</th>
+                  <th>Rate</th>
+                  <th>Amount</th>
+                </tr>
+                ${normalizedB2CReceiptItems.map(item => `
+                  <tr>
+                    <td>${item.name}</td>
+                    <td>${item.weight}</td>
+                    <td>${item.sub}</td>
+                    <td>${item.netWeight}</td>
+                    <td>${item.rate}</td>
+                    <td>${item.amount}</td>
+                  </tr>
+                `).join('')}
+                <tr>
+                  <td colspan="5" style="text-align: right; font-weight: bold;">Total Old Gold Amount:</td>
+                  <td style="font-weight: bold;">â‚¹${totalB2COldGoldAmount.toFixed(2)}</td>
+                </tr>
+              </table>
+            ` : ''
+        }
+            <h2>CASH RECEIVED:</h2>
+            <table>
+              <tr>
+                <th>Rupees</th>
+                <th>FT Rate</th>
+                <th>Pure</th>
+              </tr>
+              ${safeCashTable && safeCashTable.length > 0
+          ? safeCashTable.map(c => `
+                  <tr>
+                    <td>${c.rupees}</td>
+                    <td>${c.goldRate}</td>
+                    <td>${c.pure}</td>
+                  </tr>
+                `).join('')
+          : '<tr><td colspan="3">No cash entries</td></tr>'
+        }
+              <tr>
+                <td colspan="2" style="text-align: right; font-weight: bold;">Total Cash Pure:</td>
+                <td style="font-weight: bold;">${safeCashTable.reduce((sum, c) => sum + toNum(c?.pure, 0), 0).toFixed(3)}</td>
+              </tr>
+            </table>
+            <h2>TOTAL:</h2>
+            <p><strong>Total Amount:</strong> ${displayB2CTotalAmount.toFixed(2)}</p>
+            <p><strong>Old Balance:</strong> ${effectiveB2COldBalance.toFixed(3)}</p>
+            <p><strong>Advance Balance:</strong> ${effectiveB2CAdvanceBalance.toFixed(3)}</p>
+            ${displayConvertedGoldValue > 0 ? `<p><strong>Converted Gold:</strong> ${displayConvertedGoldValue.toFixed(3)} g</p>` : ''}
+            ${gst && (gst.enabled || parseFloat(gst.amount || 0) > 0) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+
+            ${cashAmount ? `<p><strong>Cash Amount:</strong> â‚¹${cashAmount}</p>` : ''}
+            ${upiAmount && parseFloat(upiAmount) > 0 ? `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+                <div>
+                  <h2>UPI Payment</h2>
+                  <p>Amount: â‚¹${upiAmount}</p>
+                  <p>Please scan the QR code for payment.</p>
+                </div>
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent("NTJ Jewellery")}&am=${upiAmount}&cu=INR`)}" style="width:200px;height:200px;" />
+              </div>
+            ` : ''
+        }
+  <div style="text-align: center; margin-top: 20px;">
+  <p class="tamil-text" style="font-weight: bold; font-style: italic; margin-top: 10px;">${thirukkural}</p>
+    <p>Thank you for your visit. Please visit again.</p>
+  </div>
+          </body>
+        </html>
+    `;
+    } else {
+      return `
+    <html>
+          <head>
+            <style>
+              @page { margin: 0; }
+              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 10px; }
+              h1 { text-align: center; font-size: 16px; margin-bottom: 5px; }
+              h2 { margin-top: 8px; font-size: 11px; margin-bottom: 5px; }
+              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+              th, td { border: 1px solid black; padding: 2px 1px; text-align: center; font-size: 8px; word-wrap: break-word; overflow: hidden; }
+              th { background-color: #f2f2f2; }
+              p { margin: 2px 0; font-size: 9px; }
+            </style>
+          </head>
+          <body>
+            <h1>BILL</h1>
+            <div>
+              <p><strong>Bill No:</strong> ${currentBillNo || 'N/A'}</p>
+              <p><strong>Name:</strong> ${customer.name}</p>
+              <p><strong>Phone:</strong> ${customer.phone}</p>
+              <p><strong>Address:</strong> ${customer.address || 'N/A'}</p>
+              <p><strong>GST No:</strong> ${customer.gstin || 'N/A'}</p>
+              <p><strong>Type:</strong> ${customer.type}</p>
+              <p><strong>Date:</strong> ${customer.date}</p>
+              <p><strong>Old Balance:</strong> ${customer.oldBalance}</p>
+              <p><strong>Advance Balance:</strong> ${customer.advanceBalance || 0}</p>
+            </div>
+            ${isDealerPreview && dealerProofImageShowInBill && dealerProofImageUri ? `
+              <div style="text-align:center; margin: 8px 0;">
+                <p><strong>Receipt Proof:</strong></p>
+                <img src="${dealerProofImageUri}" style="width:100%; max-height:160px; object-fit:cover; border:1px solid #ddd; border-radius:6px;" />
+              </div>
+            ` : ""}
+            ${isDealerPreview ? `
+            <h2>RECEIPT:</h2>
+            <table>
+              <tr>
+                <th>Name</th>
+                <th>Weight</th>
+                <th>Result</th>
+                <th>Calc</th>
+                <th>Pure</th>
+              </tr>
+                ${receiptItems && receiptItems.length > 0 ? receiptItems.map(row => `
+                  <tr>
+                    <td>${row.name}</td>
+                    <td>${row.weight}</td>
+                    <td>${row.result}</td>
+                    <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+                    <td>${row.pure}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="5">No receipt items</td></tr>'}
+                ${receiptItems && receiptItems.length > 0 ? `
+                <tr class="total-row">
+                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
+                  <td>TW: ${totalReceiptTW}</td>
+                  <td>N.W: ${totalReceiptNW}</td>
+                  <td>-</td>
+                  <td><Strong>Pure: ${totalReceiptPure}</Strong></td>
+                </tr>` : ''}
+              </table>
+            <h2>ISSUE:</h2>
+            <table>
+              <tr>
+                <th>Name</th>
+                <th>G.Weight</th>
+                ${showIssueMColumn ? '<th>M</th>' : ''}
+                ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
+                <th>Calc</th>
+                <th>Pure</th>
+              </tr>
+                ${issueItems.map(row => `
+                  <tr>
+                    <td>${row.name}</td>
+                    <td>${row.gross}</td>
+                    ${showIssueMColumn ? `<td>${row.m}</td>` : ''}
+                    ${showIssueNetWeightColumn ? `<td>${row.net}</td>` : ''}
+                    <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+                    <td><strong>${row.pure}</strong></td>
+                  </tr>
+                `).join('')}
+                <tr class="total-row">
+                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
+                  <td>TW: ${totalIssueTW}</td>
+                  ${showIssueMColumn ? '<td>-</td>' : ''}
+                  ${showIssueNetWeightColumn ? `<td>N.W: ${totalIssueNW}</td>` : ''}
+                  <td>-</td>
+                  <td><strong>Pure: ${totalIssuePure}</strong></td>
+                </tr>
+              </table>
+            ` : `
+            <h2>ISSUE:</h2>
+            <table>
+              <tr>
+                <th>Name</th>
+                <th>G.Weight</th>
+                ${showIssueMColumn ? '<th>M</th>' : ''}
+                ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
+                <th>Calc</th>
+                <th>Pure</th>
+              </tr>
+                ${issueItems.map(row => `
+                  <tr>
+                    <td>${row.name}</td>
+                    <td>${row.gross}</td>
+                    ${showIssueMColumn ? `<td>${row.m}</td>` : ''}
+                    ${showIssueNetWeightColumn ? `<td>${row.net}</td>` : ''}
+                    <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+                    <td><strong>${row.pure}</strong></td>
+                  </tr>
+                `).join('')}
+                <tr class="total-row">
+                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
+                  <td>TW: ${totalIssueTW}</td>
+                  ${showIssueMColumn ? '<td>-</td>' : ''}
+                  ${showIssueNetWeightColumn ? `<td>N.W: ${totalIssueNW}</td>` : ''}
+                  <td>-</td>
+                  <td><strong>Pure: ${totalIssuePure}</strong></td>
+                </tr>
+              </table>
+            <h2>RECEIPT:</h2>
+            <table>
+              <tr>
+                <th>Name</th>
+                <th>Weight</th>
+                <th>Result</th>
+                <th>Calc</th>
+                <th>Pure</th>
+              </tr>
+                ${receiptItems && receiptItems.length > 0 ? receiptItems.map(row => `
+                  <tr>
+                    <td>${row.name}</td>
+                    <td>${row.weight}</td>
+                    <td>${row.result}</td>
+                    <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+                    <td>${row.pure}</td>
+                  </tr>
+                `).join('') : '<tr><td colspan="5">No receipt items</td></tr>'}
+                ${receiptItems && receiptItems.length > 0 ? `
+                <tr class="total-row">
+                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
+                  <td>TW: ${totalReceiptTW}</td>
+                  <td>N.W: ${totalReceiptNW}</td>
+                  <td>-</td>
+                  <td><Strong>Pure: ${totalReceiptPure}</Strong></td>
+                </tr>` : ''}
+              </table>
+            `}
+            <h2>CASH:</h2>
+            ${cashTable && cashTable.length > 0 ? `
+              <table>
+                <tr>
+                  <th>Amount</th>
+                  <th>Rate</th>
+                  <th style="text-align:right;">Pure</th>
+                </tr>
+                ${cashTable.map(c => `
+                  <tr>
+                    <td>${c.rupees}</td>
+                    <td>${c.goldRate}</td>
+                    <td style="text-align:right;">${c.pure}</td>
+                  </tr>
+                `).join('')}
+              </table>
+            ` : '<p>N/A</p>'}
+            ${gst && (gst.enabled || (parseFloat(gst.amount) > 0)) ? `
+              <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+                ${parseFloat(gst.igst || 0) > 0 ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount}</td>
+                  </tr>
+                ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount) / 2).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount) / 2).toFixed(2)}</td>
+                  </tr>
+                ` : `
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Percentage</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">${gst.percentage || 0}%</td>
+                  </tr>
+                  <tr>
+                    <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  </tr>
+                `}
+                <tr style="font-weight: bold; background-color: #f2f2f2;">
+                  <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                </tr>
+              </table>
+            ` : ''}
+
+            <h2>SUMMARY:</h2>
+            <table>
+	              ${isDealerPreview ? `
+	                <tr>
+	                  <th>${dealerSummaryValues.activeLabel}</th>
+	                  <th>RECEIPT</th>
+	                  <th>ISSUE</th>
+	                  <th>CASH</th>
+	                  <th>${dealerSummaryValues.finalLabel}</th>
+	                </tr>
+	                <tr>
+	                  <td>${dealerSummaryValues.oldBalance}</td>
+	                  <td>${dealerSummaryValues.receipt}</td>
+                  <td>${dealerSummaryValues.issue}</td>
+                  <td>${dealerSummaryValues.cash}</td>
+                  <td>${dealerSummaryValues.finalBalance}</td>
+	                </tr>
+	                <tr>
+	                  <td colspan="4">${dealerSummaryValues.expression}</td>
+	                  <td><strong>= ${dealerSummaryValues.finalBalance}</strong></td>
+	                </tr>
+	              ` : summaryOB !== 0 ? `
+	                <!-- OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | Old Balance -->
+	                <tr>
+	                  <th>Old Balance</th>
+	                  <th>ISSUE</th>
+	                  <th>RECEIPT</th>
+	                  <th>CASH</th>
+	                  <th>Old Balance</th>
+	                </tr>
+	                <tr>
+	                  <td>${summaryOB.toFixed(3)}</td>
+	                  <td>${displaySummary.issue}</td>
+	                  <td>${displaySummary.receipt}</td>
+	                  <td>${displaySummary.cash}</td>
+	                  <td>${displaySummary.current}</td>
+	                </tr>
+	                <tr>
+	                  <td colspan="4">${summaryOB.toFixed(3)} + ${displaySummary.issue} - (${displaySummary.receipt} + ${displaySummary.cash})</td>
+	                  <td>=</td>
+	                  <td><strong>${toNum(displaySummary.current).toFixed(3)}</strong></td>
+	                </tr>
+	              ` : `
+	                <!-- AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | Advance Balance -->
+	                <tr>
+	                  <th>ISSUE</th>
+	                  <th>Advance Balance</th>
+	                  <th>RECEIPT</th>
+	                  <th>CASH</th>
+	                  <th>${b2bAdvanceSummaryValues.finalLabel}</th>
+	                </tr>
+	                <tr>
+	                  <td>${displaySummary.issue}</td>
+	                  <td>${summaryAB.toFixed(3)}</td>
+	                  <td>${displaySummary.receipt}</td>
+	                  <td>${displaySummary.cash}</td>
+	                  <td>${summaryFinalValue.toFixed(3)}</td>
+	                </tr>
+	                <tr>
+	                  <td colspan="4" style="text-align: right; padding-right: 10px;">${summaryAB.toFixed(3)} + ${displaySummary.receipt} + ${displaySummary.cash} - ${displaySummary.issue}</td>
+	                  <td>=</td>
+	                  <td><strong>${summaryFinalValue.toFixed(3)}</strong></td>
+	                </tr>
+	              `}
+            </table>
+            ${cashAmount ? `<p><strong>Cash Amount:</strong> â‚¹${cashAmount}</p>` : ''}
+          </body>
+        </html>
+    `;
+    }
+  }
+
+
+  const getCustomerPhone = () => {
+    return (
+      order?.phone ||
+      customer?.phone ||
+      customer?.phoneNumber ||
+      customer?.mobileNumber ||
+      customer?.mobile ||
+      customer?.customerNumber ||
+      customer?.customerPhone ||
+      ""
+    );
+  };
+
+  const getCustomerIdForLookup = () =>
+    customer?.id ||
+    customer?._id ||
+    customer?.customerId ||
+    transactions?.[0]?.customerId ||
+    "";
+
+  const normalizeIdValue = (value) => {
+    if (value === undefined || value === null) return "";
+    const v = String(value).trim();
+    if (!v) return "";
+    const lower = v.toLowerCase();
+    if (lower === "null" || lower === "undefined" || lower === "n/a" || lower === "na" || lower === "-") return "";
+    return v;
+  };
+
+  const getCustomerIdForSave = () => {
+    const candidates = [
+      customer?._id,
+      customer?.id,
+      customer?.customerId,
+      transactions?.[0]?.customerId,
+      transactions?.[0]?.customer?._id,
+      transactions?.[0]?.customer?.id,
+      routeParams?.customerId,
+    ];
+    for (const candidate of candidates) {
+      const normalized = normalizeIdValue(candidate);
+      if (normalized) return normalized;
+    }
+    return "";
+  };
+
+  const [generatedBillNo, setGeneratedBillNo] = useState("");
+  const billNoRequestRef = useRef(false);
+  const baseBillNo = resolveBillNoForDisplay(
+    customer?.billNo ||
+    transactions?.[0]?.billNo ||
+    customer?.invoiceNo ||
+    transactions?.[0]?.invoiceNo,
+    customer?.type || customer?.customerType || previewType
+  );
+  const currentBillNo = generatedBillNo || baseBillNo;
+  const previewTx = transactions?.[0] || {};
+  const previewType = String(
+    customer?.type || customer?.customerType || previewTx?.dealerType || previewTx?.customerType || ""
+  ).toUpperCase();
+  const isDealerPreview = previewType === "DEALER" || previewType === "SUPPLIER";
+  const isB2CPreview = previewType === "B2C";
+
+  useEffect(() => {
+    if (isFromHistory) return;
+    if (order || estimate || suspense) return;
+    if (isB2CPreview) return;
+    if (billNoRequestRef.current) return;
+    billNoRequestRef.current = true;
+    const controller = new AbortController();
+    fetch(`${base_url}/billSummary/nextBillNo?billType=B2B`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        const nextNo = data?.billNo ? String(data.billNo) : "";
+        if (nextNo) setGeneratedBillNo(nextNo);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [isFromHistory, order, estimate, suspense, isB2CPreview]);
+  const resolveFirstValidImageUri = (candidates = []) => {
+    for (const candidate of candidates) {
+      const uri = normalizeImageUri(candidate, base_url);
+      if (uri) return uri;
+    }
+    return "";
+  };
+  const dealerProofImageShowInBill =
+    previewTx?.receiptImageShowInBill ??
+    customer?.receiptImageShowInBill ??
+    true;
+   const normalizePhoneWithCountryCode = (value) => {
+    let digits = String(value || "").replace(/\D/g, "");
+    if (!digits) return "";
+    
+    // Remove leading zeros
+    digits = digits.replace(/^0+/, "");
+
+    // If it's exactly 10 digits, assume it's an Indian number and add 91
+    if (digits.length === 10) {
+      return `91${digits}`;
+    }
+    
+    // If it's 12 digits and starts with 91, it's already correct for India
+    // If it's something else, we return as is (could be international)
+    return digits;
+  };
+  const dealerProofImageUri = resolveFirstValidImageUri([
+    previewTx?.receiptImage,
+    previewTx?.proofImage,
+    previewTx?.image,
+    customer?.receiptImage,
+    customer?.proofImage,
+    customer?.image,
   ]);
 
-  // Handler for stock update on receipt weight blur
-  const updateReceiptStock = async (newWeight) => {
-    if (!selectedReceiptItem || !itemsStock[selectedReceiptItem]?._id) return;
+  // ─── A4 HTML Generator ─────────────────────────────────────────────────────
+  const generateA4HTML = () => {
+    const shopName = 'NTJ JEWELLERY';
+    const shopAddress = 'Salem, Tamil Nadu';
+    const shopPhone = '';
+    const billDate = estimate
+      ? new Date().toLocaleDateString('en-IN')
+      : order
+        ? (order.date || new Date().toLocaleDateString('en-IN'))
+        : (customer?.date || new Date().toLocaleDateString('en-IN'));
 
-    const newW = parseNum(newWeight);
-    const delta = newW - parseNum(previousReceiptWeight);
+    const billTitle = estimate ? 'ESTIMATE BILL'
+      : suspense ? 'SUSPENSE BILL'
+      : order ? 'ORDER RECEIPT'
+      : 'TAX INVOICE';
 
-    if (delta !== 0) {
-      // Update local stock
-      setItemsStock((prev) => ({
-        ...prev,
-        [selectedReceiptItem]: {
-          ...prev[selectedReceiptItem],
-          weight: (
-            Number(prev[selectedReceiptItem]?.weight || 0) + delta
-          ).toFixed(3),
-        },
-      }));
+    const custName = estimate ? (estimate.itemName || 'Customer')
+      : order ? order.customer
+      : (customer?.name || '');
+    const custPhone = order ? order.phone : (customer?.phone || customer?.phoneNumber || customer?.customerNumber || '');
+    const custAddress = order ? (order.address || '') : (customer?.address || '');
+    const custGST = order ? (order.gstin || '') : (customer?.gstin || '');
+    const billNo = currentBillNo || order?.orderNo || '';
 
-      // Update stock in database
+    // ── Issue rows ──
+    const issueRowsHtml = safeIssueItems.length > 0 ? safeIssueItems.map((row, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${row.name || ''}</td>
+        <td>${row.gross || ''}</td>
+        <td>${row.m || ''}</td>
+        <td>${row.net || ''}</td>
+        <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+        <td><strong>${row.pure || ''}</strong></td>
+      </tr>`).join('') : '<tr><td colspan="7" style="text-align:center">No issue items</td></tr>';
+
+    const receiptRowsHtml = safeReceiptItems.length > 0 ? safeReceiptItems.map((row, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${row.name || ''}</td>
+        <td>${row.weight || ''}</td>
+        <td>${row.result || ''}</td>
+        <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
+        <td>${row.pure || ''}</td>
+      </tr>`).join('') : '<tr><td colspan="6" style="text-align:center">No receipt items</td></tr>';
+
+    const cashRowsHtml = safeCashTable.length > 0 ? safeCashTable.map((c, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>&#8377;${c.rupees || ''}</td>
+        <td>${c.goldRate || ''}</td>
+        <td>${c.pure || ''}</td>
+      </tr>`).join('') : '<tr><td colspan="4" style="text-align:center">No cash entries</td></tr>';
+
+    // B2C items
+    const b2cItemRowsHtml = normalizedB2CItems.length > 0 ? normalizedB2CItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.displayItemName || item.itemName || ''}</td>
+        <td>${item.weight}</td>
+        <td>${item.touch}</td>
+        <td>${item.wastage}</td>
+        <td>${item.rate}</td>
+        <td>&#8377;${item.total.toFixed(2)}</td>
+        <td>&#8377;${item.gst.toFixed(2)}</td>
+        <td>&#8377;${item.final.toFixed(2)}</td>
+      </tr>`).join('') : '<tr><td colspan="9" style="text-align:center">No items</td></tr>';
+
+    const b2cOldGoldRowsHtml = normalizedB2CReceiptItems.length > 0 ? normalizedB2CReceiptItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.name || ''}</td>
+        <td>${item.weight}</td>
+        <td>${item.sub}</td>
+        <td>${item.netWeight}</td>
+        <td>${item.rate}</td>
+        <td>&#8377;${item.amount}</td>
+      </tr>`).join('') : '';
+
+    // Estimate items
+    const estimateItems = Array.isArray(estimate?.items) && estimate.items.length > 0 ? estimate.items : null;
+    const estimateRowsHtml = estimateItems
+      ? estimateItems.map((item, i) => `
+        <tr>
+          <td>${i + 1}</td>
+          <td>${item.itemName || ''}</td>
+          <td>${item.weight || ''}</td>
+          <td>${item.wastagePercent || 0}%</td>
+          <td>${item.grossWeight || ''}</td>
+          <td>&#8377;${formatIndianNumber(item.goldRate)}</td>
+          <td>&#8377;${formatIndianNumber(item.netAmount)}</td>
+          ${estimate.enableGST ? `<td>&#8377;${formatIndianNumber(item.gst || 0)}</td>` : ''}
+          <td><strong>&#8377;${formatIndianNumber(item.totalAmount)}</strong></td>
+        </tr>`).join('')
+      : estimate ? `
+        <tr>
+          <td>1</td>
+          <td>${estimate.itemName || ''}</td>
+          <td>${estimate.weight || ''}</td>
+          <td>${estimate.wastagePercent || 0}%</td>
+          <td>${estimate.grossWeight || ''}</td>
+          <td>&#8377;${formatIndianNumber(estimate.goldRate)}</td>
+          <td>&#8377;${formatIndianNumber(estimate.netAmount)}</td>
+          ${estimate && estimate.enableGST ? `<td>&#8377;${formatIndianNumber(estimate.gst || 0)}</td>` : ''}
+          <td><strong>&#8377;${formatIndianNumber(estimate.totalAmount)}</strong></td>
+        </tr>` : '';
+
+    // Suspense items
+    const suspIssueRowsHtml = suspense ? suspense.issueItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.name}</td>
+        <td>${item.weight.toFixed(3)}</td>
+        <td>${item.count}</td>
+        <td>${item.rate}</td>
+        <td>${item.pure.toFixed(3)}</td>
+        <td>&#8377;${item.amount.toFixed(2)}</td>
+      </tr>`).join('') : '';
+    const suspReceiptRowsHtml = suspense ? suspense.receiptItems.map((item, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td>${item.name}</td>
+        <td>${item.weight.toFixed(3)}</td>
+        <td>${item.count}</td>
+        <td>${item.rate}</td>
+        <td>${item.pure.toFixed(3)}</td>
+        <td>&#8377;${item.amount.toFixed(2)}</td>
+      </tr>`).join('') : '';
+
+    const orderItemsHtml = order ? `
+      <tr><td>Item</td><td>${order.type || ''}</td></tr>
+      <tr><td>Weight</td><td>${order.weight || ''} GMS</td></tr>
+      <tr><td>Payment</td><td>${order.payment || ''}</td></tr>
+      <tr><td>Pending Balance</td><td>&#8377;${order.balance || ''}</td></tr>` : '';
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    @page { size: A4; margin: 15mm 12mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Arial', sans-serif;
+      font-size: 11px;
+      color: #111;
+      background: #fff;
+    }
+    .page { width: 100%; }
+
+    /* ── Shop Header ── */
+    .header {
+      text-align: center;
+      border-bottom: 3px double #222;
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+    }
+    .shop-name {
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: #1B4D1B;
+      text-transform: uppercase;
+    }
+    .shop-sub {
+      font-size: 12px;
+      color: #444;
+      margin-top: 2px;
+    }
+    .bill-badge {
+      display: inline-block;
+      background: #1B4D1B;
+      color: #fff;
+      font-size: 13px;
+      font-weight: bold;
+      padding: 4px 18px;
+      border-radius: 4px;
+      margin-top: 6px;
+      letter-spacing: 1px;
+    }
+
+    /* ── Customer / Bill Info ── */
+    .info-grid {
+      display: flex;
+      justify-content: space-between;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      padding: 8px 12px;
+      margin-bottom: 10px;
+      background: #FAFAFA;
+    }
+    .info-col { flex: 1; }
+    .info-col + .info-col { border-left: 1px dashed #ccc; padding-left: 12px; }
+    .info-row { margin-bottom: 3px; font-size: 11px; }
+    .info-label { font-weight: bold; color: #333; }
+
+    /* ── Tables ── */
+    .section-title {
+      font-size: 12px;
+      font-weight: bold;
+      background: #1B4D1B;
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 3px;
+      margin-bottom: 4px;
+      margin-top: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 6px;
+      font-size: 10px;
+    }
+    th {
+      background: #E8F5E9;
+      border: 1px solid #999;
+      padding: 4px 3px;
+      text-align: center;
+      font-weight: bold;
+      font-size: 10px;
+    }
+    td {
+      border: 1px solid #ccc;
+      padding: 4px 3px;
+      text-align: center;
+    }
+    .total-row td {
+      background: #F1F8E9;
+      font-weight: bold;
+    }
+
+    /* ── Summary Box ── */
+    .summary-box {
+      border: 2px solid #1B4D1B;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-top: 10px;
+      background: #F9FBF9;
+    }
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+      border-bottom: 1px dashed #ddd;
+      font-size: 11px;
+    }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-label { color: #444; font-weight: 600; }
+    .summary-value { font-weight: bold; color: #111; }
+    .summary-total {
+      background: #1B4D1B;
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+      font-size: 13px;
+      font-weight: bold;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      text-align: center;
+      margin-top: 18px;
+      padding-top: 10px;
+      border-top: 1px dashed #aaa;
+      font-size: 10px;
+      color: #555;
+    }
+    .kural {
+      font-style: italic;
+      font-size: 12px;
+      font-weight: bold;
+      color: #1B4D1B;
+      margin-bottom: 4px;
+    }
+    .sign-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 30px;
+      font-size: 10px;
+    }
+    .sign-col { text-align: center; border-top: 1px solid #999; padding-top: 4px; min-width: 120px; }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Shop Header -->
+  <div class="header">
+    <div class="shop-name">${shopName}</div>
+    <div class="shop-sub">${shopAddress}${shopPhone ? ' | ' + shopPhone : ''}</div>
+    <div class="bill-badge">${billTitle}</div>
+  </div>
+
+  <!-- Customer & Bill Info -->
+  <div class="info-grid">
+    <div class="info-col">
+      <div class="info-row"><span class="info-label">Name:</span> ${custName}</div>
+      <div class="info-row"><span class="info-label">Phone:</span> ${custPhone || 'N/A'}</div>
+      <div class="info-row"><span class="info-label">Address:</span> ${custAddress || 'N/A'}</div>
+      <div class="info-row"><span class="info-label">GST No:</span> ${custGST || 'N/A'}</div>
+    </div>
+    <div class="info-col">
+      ${billNo ? `<div class="info-row"><span class="info-label">Bill No:</span> ${billNo}</div>` : ''}
+      <div class="info-row"><span class="info-label">Date:</span> ${billDate}</div>
+      <div class="info-row"><span class="info-label">Type:</span> ${estimate ? 'Estimate' : order ? 'Order' : (customer?.type || '')}</div>
+      ${!estimate && !order && summaryOB ? `<div class="info-row"><span class="info-label">Old Balance:</span> ${summaryOB.toFixed(3)} g</div>` : ''}
+      ${!estimate && !order && summaryAB ? `<div class="info-row"><span class="info-label">Adv Balance:</span> ${summaryAB.toFixed(3)} g</div>` : ''}
+    </div>
+  </div>
+
+  ${estimate ? `
+  <!-- Estimate Items -->
+  <div class="section-title">ESTIMATE DETAILS</div>
+  <table>
+    <thead><tr>
+      <th>#</th><th>Item Name</th><th>Wt (g)</th><th>W%</th><th>Gross Wt</th><th>Rate</th><th>Net Amt</th>
+      ${estimate.enableGST ? '<th>GST</th>' : ''}<th>Total</th>
+    </tr></thead>
+    <tbody>${estimateRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="${estimate.enableGST ? 8 : 7}" style="text-align:right">TOTAL ESTIMATE AMOUNT:</td>
+      <td>&#8377;${formatIndianNumber(estimateFinalTotal)}</td>
+    </tr></tfoot>
+  </table>
+  ${estimateGSTEnabled ? `
+  <div class="section-title">GST SUMMARY</div>
+  <table><tbody>
+    <tr><td style="text-align:left">Subtotal</td><td>&#8377;${estimateSubTotal.toFixed(2)}</td></tr>
+    <tr><td style="text-align:left">GST %</td><td>${estimateGstPercent.toFixed(2)}%</td></tr>
+    <tr><td style="text-align:left">GST Amount</td><td>&#8377;${estimateGstAmount.toFixed(2)}</td></tr>
+    <tr class="total-row"><td style="text-align:left">Final Total (Incl. GST)</td><td>&#8377;${estimateFinalTotal.toFixed(2)}</td></tr>
+  </tbody></table>` : ''}
+  ` : order ? `
+  <!-- Order Details -->
+  <div class="section-title">ORDER DETAILS</div>
+  <table><tbody>${orderItemsHtml}</tbody></table>
+  ` : suspense ? `
+  <!-- Suspense Issue -->
+  <div class="section-title">ISSUE ITEMS</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Weight(g)</th><th>Qty</th><th>Rate</th><th>Pure(g)</th><th>Amount</th></tr></thead>
+    <tbody>${suspIssueRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="5">Total Issue</td>
+      <td>${suspense.totalIssuePure.toFixed(3)}</td>
+      <td>&#8377;${suspense.totalIssueAmount.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>
+  <!-- Suspense Receipt -->
+  <div class="section-title">RECEIPT ITEMS</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Weight(g)</th><th>Qty</th><th>Rate</th><th>Pure(g)</th><th>Amount</th></tr></thead>
+    <tbody>${suspReceiptRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="5">Total Receipt</td>
+      <td>${suspense.totalReceiptPure.toFixed(3)}</td>
+      <td>&#8377;${suspense.totalReceiptAmount.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>
+  <!-- Suspense Summary -->
+  <div class="summary-box">
+    <div class="summary-row"><span class="summary-label">Gold Rate</span><span class="summary-value">&#8377;${suspense.goldRate}/g</span></div>
+    <div class="summary-row"><span class="summary-label">Net Pure Gold</span><span class="summary-value" style="color:${suspense.netPure >= 0 ? '#c62828' : '#2e7d32'}">${suspense.netPure.toFixed(3)} g</span></div>
+    <div class="summary-row"><span class="summary-label">Net Amount</span><span class="summary-value">&#8377;${suspense.netAmount.toFixed(2)}</span></div>
+  </div>
+  ` : isB2C ? `
+  <!-- B2C Items -->
+  <div class="section-title">ITEMS ISSUED</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Wt</th><th>Touch</th><th>Wastage</th><th>Rate</th><th>Amount</th><th>GST</th><th>Final</th></tr></thead>
+    <tbody>${b2cItemRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="8" style="text-align:right">Total:</td>
+      <td>&#8377;${totalB2CItemFinal.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>
+  ${normalizedB2CReceiptItems.length > 0 ? `
+  <div class="section-title">OLD GOLD / RECEIPT</div>
+  <table>
+    <thead><tr><th>#</th><th>Item</th><th>Wt(g)</th><th>Sub(g)</th><th>Net Wt(g)</th><th>Rate</th><th>Amount</th></tr></thead>
+    <tbody>${b2cOldGoldRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="6" style="text-align:right">Total Old Gold:</td>
+      <td>&#8377;${totalB2COldGoldAmount.toFixed(2)}</td>
+    </tr></tfoot>
+  </table>` : ''}
+  <div class="summary-box">
+    <div class="summary-row"><span class="summary-label">Total Bill Amount</span><span class="summary-value">&#8377;${displayB2CTotalAmount.toFixed(2)}</span></div>
+    ${cashAmount ? `<div class="summary-row"><span class="summary-label">Cash Paid</span><span class="summary-value">&#8377;${cashAmount}</span></div>` : ''}
+    ${upiAmount && parseFloat(upiAmount) > 0 ? `<div class="summary-row"><span class="summary-label">UPI Amount</span><span class="summary-value">&#8377;${upiAmount}</span></div>` : ''}
+    <div class="summary-row"><span class="summary-label">Old Balance</span><span class="summary-value">${effectiveB2COldBalance.toFixed(3)} g</span></div>
+    <div class="summary-row"><span class="summary-label">Advance Balance</span><span class="summary-value">${effectiveB2CAdvanceBalance.toFixed(3)} g</span></div>
+    ${displayConvertedGoldValue > 0 ? `<div class="summary-row"><span class="summary-label">Converted Gold</span><span class="summary-value">${displayConvertedGoldValue.toFixed(3)} g</span></div>` : ''}
+  </div>
+  ` : `
+  ${isDealerPreview ? `
+  <!-- Dealer Receipt -->
+  <div class="section-title">RECEIPT</div>
+  <table>
+    <thead><tr><th>#</th><th>Name</th><th>Weight</th><th>Result</th><th>Calc</th><th>Pure (g)</th></tr></thead>
+    <tbody>${receiptRowsHtml}</tbody>
+    ${safeReceiptItems.length > 0 ? `<tfoot><tr class="total-row">
+      <td colspan="2">Totals</td>
+      <td>TW: ${totalReceiptTW}</td>
+      <td>NW: ${totalReceiptNW}</td>
+      <td>-</td>
+      <td>Pure: ${totalReceiptPure}</td>
+    </tr></tfoot>` : ''}
+  </table>
+
+  <!-- Dealer Issue -->
+  <div class="section-title">ISSUE</div>
+  <table>
+    <thead><tr>
+      <th>#</th><th>Name</th><th>G.Weight</th>
+      ${showIssueMColumn ? '<th>M</th>' : ''}
+      ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
+      <th>Calc</th><th>Pure (g)</th>
+    </tr></thead>
+    <tbody>${issueRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="2">Totals</td>
+      <td>TW: ${totalIssueTW}</td>
+      ${showIssueMColumn ? '<td>-</td>' : ''}
+      ${showIssueNetWeightColumn ? `<td>NW: ${totalIssueNW}</td>` : ''}
+      <td>-</td><td>Pure: ${totalIssuePure}</td>
+    </tr></tfoot>
+  </table>
+  ` : `
+  <!-- B2B Issue -->
+  <div class="section-title">ISSUE</div>
+  <table>
+    <thead><tr>
+      <th>#</th><th>Name</th><th>G.Weight</th>
+      ${showIssueMColumn ? '<th>M</th>' : ''}
+      ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
+      <th>Calc</th><th>Pure (g)</th>
+    </tr></thead>
+    <tbody>${issueRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="2">Totals</td>
+      <td>TW: ${totalIssueTW}</td>
+      ${showIssueMColumn ? '<td>-</td>' : ''}
+      ${showIssueNetWeightColumn ? `<td>NW: ${totalIssueNW}</td>` : ''}
+      <td>-</td><td>Pure: ${totalIssuePure}</td>
+    </tr></tfoot>
+  </table>
+
+  <!-- B2B Receipt -->
+  <div class="section-title">RECEIPT</div>
+  <table>
+    <thead><tr><th>#</th><th>Name</th><th>Weight</th><th>Result</th><th>Calc</th><th>Pure (g)</th></tr></thead>
+    <tbody>${receiptRowsHtml}</tbody>
+    ${safeReceiptItems.length > 0 ? `<tfoot><tr class="total-row">
+      <td colspan="2">Totals</td>
+      <td>TW: ${totalReceiptTW}</td>
+      <td>NW: ${totalReceiptNW}</td>
+      <td>-</td>
+      <td>Pure: ${totalReceiptPure}</td>
+    </tr></tfoot>` : ''}
+  </table>
+  `}
+
+  <!-- Cash Table -->
+  <div class="section-title">CASH</div>
+  <table>
+    <thead><tr><th>#</th><th>Rupees</th><th>FT Rate</th><th>Pure (g)</th></tr></thead>
+    <tbody>${cashRowsHtml}</tbody>
+    <tfoot><tr class="total-row">
+      <td colspan="3" style="text-align:right">Total Cash Pure:</td>
+      <td>${safeCashTable.reduce((s, c) => s + toNum(c?.pure, 0), 0).toFixed(3)} g</td>
+    </tr></tfoot>
+  </table>
+
+  <!-- Summary -->
+  <div class="section-title">SUMMARY</div>
+  <div class="summary-box">
+	    ${isDealerPreview ? `
+	      <div class="summary-row"><span class="summary-label">${dealerSummaryValues.activeLabel}</span><span class="summary-value">${dealerSummaryValues.oldBalance} g</span></div>
+	      <div class="summary-row"><span class="summary-label">Receipt</span><span class="summary-value">${dealerSummaryValues.receipt} g</span></div>
+	      <div class="summary-row"><span class="summary-label">Issue</span><span class="summary-value">${dealerSummaryValues.issue} g</span></div>
+	      <div class="summary-row"><span class="summary-label">Cash</span><span class="summary-value">${dealerSummaryValues.cash} g</span></div>
+	      <div class="summary-total">
+	        <span>${dealerSummaryValues.finalLabel}</span>
+	        <span>${dealerSummaryValues.finalBalance} g</span>
+	      </div>
+	    ` : `
+      ${summaryOB !== 0 ? `
+      <div class="summary-row"><span class="summary-label">Old Balance (OB)</span><span class="summary-value">${summaryOB.toFixed(3)} g</span></div>` : ''}
+      ${summaryAB !== 0 ? `
+      <div class="summary-row"><span class="summary-label">Advance Balance (AB)</span><span class="summary-value">${summaryAB.toFixed(3)} g</span></div>` : ''}
+      <div class="summary-row"><span class="summary-label">Issue</span><span class="summary-value">${displaySummary.issue} g</span></div>
+      <div class="summary-row"><span class="summary-label">Receipt</span><span class="summary-value">${displaySummary.receipt} g</span></div>
+      <div class="summary-row"><span class="summary-label">Cash</span><span class="summary-value">${displaySummary.cash} g</span></div>
+      ${parseFloat(displaySummary.gstPure) > 0 ? `<div class="summary-row"><span class="summary-label">GST Pure</span><span class="summary-value">${displaySummary.gstPure} g</span></div>` : ''}
+      <div class="summary-total">
+        <span>Current Balance</span>
+        <span>${displaySummary.current} g</span>
+      </div>
+    `}
+  </div>
+  `}
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="kural">${thirukkural}</div>
+    <div>Thank you for your visit. Please visit again!</div>
+    <div class="sign-row">
+      <div class="sign-col">Customer Signature</div>
+      <div class="sign-col">Authorised Signature</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>`;
+  };
+
+  // ─── Generate A4 PDF ───────────────────────────────────────────────────────
+  const generateA4BillPdf = async () => {
+    const html = generateA4HTML();
+    // A4 in points: 595 x 842
+    const tryPrint = async (payload, useFixed = true) => {
+      if (useFixed) {
+        return Print.printToFileAsync({ html: payload, width: 595, height: 842 });
+      }
+      return Print.printToFileAsync({ html: payload });
+    };
+    try {
+      const { uri } = await tryPrint(html, true);
+      return uri;
+    } catch {
       try {
-        const currentStock = Number(
-          itemsStock[selectedReceiptItem]?.weight || 0,
-        );
-        const updatedWeight = Number((currentStock + delta).toFixed(3));
-
-        const stockResponse = await fetch(
-          `${base_url}/stockMaster/${itemsStock[selectedReceiptItem]?._id}`,
-          {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              itemName: selectedReceiptItem,
-              weight: updatedWeight,
-              less: 0,
-              netWeight: updatedWeight,
-              calculation: 0,
-              pure: 0,
-            }),
-          },
-        );
-
-        if (!stockResponse.ok) {
-          console.error("Failed to update stock in database on blur");
-        } else {
-          console.log("✅ Stock updated in database on blur");
-        }
-      } catch (stockError) {
-        console.error("Error updating stock on blur:", stockError);
+        const { uri } = await tryPrint(html, false);
+        return uri;
+      } catch {
+        const stripped = String(html).replace(/<img\b[^>]*>/gi, '');
+        const { uri } = await tryPrint(stripped, false);
+        return uri;
       }
     }
-
-    setPreviousReceiptWeight(newWeight);
   };
 
-  const filteredCartCustomers = customers.filter(
-    (c) =>
-      (c.name && c.name.toLowerCase().includes(cartSearch.toLowerCase())) ||
-      (c.phone && String(c.phone).includes(cartSearch)),
-  );
-
-  const fetchCustomers = async () => {
-    try {
-      setLoadingCustomers(true);
-      const [b2bResponse, billResponse] = await Promise.all([
-        fetch(`${base_url}/customers`),
-        fetch(`${base_url}/billSummary?billType=B2B`),
-      ]);
-      const b2bData = await b2bResponse.json();
-      const billRows = billResponse.ok ? await billResponse.json() : [];
-      const normalizeId = (value) => String(value || "").trim().toLowerCase();
-      const normalizeName = (value) => String(value || "").trim().toLowerCase();
-      const getRowTs = (row) =>
-        new Date(row?.updatedAt || row?.createdAt || row?.date || 0).getTime() || 0;
-      const latestBillRows = [...(Array.isArray(billRows) ? billRows : [])]
-        .filter((row) => {
-          const dealerType = String(row?.dealerType || "").toUpperCase();
-          return dealerType !== "DEALER" && dealerType !== "SUPPLIER";
-        })
-        .sort((a, b) => getRowTs(b) - getRowTs(a));
-      const resolveLatestBalanceState = (customer) => {
-        const customerIds = new Set(
-          [customer?._id, customer?.customerId, customer?.id]
-            .map((value) => normalizeId(value))
-            .filter(Boolean),
-        );
-        const customerName = normalizeName(customer?.customerName || customer?.name);
-        const latestBill = latestBillRows.find((row) => {
-          const billCustomerId = normalizeId(row?.customerId);
-          const billCustomerName = normalizeName(row?.customerName);
-          return customerIds.has(billCustomerId) || (customerName && billCustomerName === customerName);
+  const generateBillPdf = async () => {
+    const html = generateHTML();
+    const tryPrint = async (payload, useFixedPage = true) => {
+      if (useFixedPage) {
+        return Print.printToFileAsync({
+          html: payload,
+          width: 204,
+          height: 842,
         });
-        if (!latestBill) {
-          return {
-            oldBalance: Number(customer?.oldBalance || 0),
-            advanceBalance: Number(customer?.advanceBalance || 0),
-          };
-        }
-        const latestBalanceType = String(
-          latestBill.balanceType || latestBill.summary?.balanceType || "",
-        ).toUpperCase();
-        const latestBalanceValue = Number(
-          latestBill.balanceValue ?? latestBill.summary?.balanceValue ?? latestBill.finalBalance,
-        );
-        if (Number.isFinite(latestBalanceValue) && latestBalanceType) {
-          return {
-            oldBalance: latestBalanceType === "OB" ? latestBalanceValue : 0,
-            advanceBalance: latestBalanceType === "AB" ? latestBalanceValue : 0,
-          };
-        }
-        const currentBalance = Number(
-          latestBill.currentBalance ?? latestBill.availableBalance ?? latestBill.summary?.current,
-        );
-        return Number.isFinite(currentBalance)
-          ? deriveBalanceStateFromNet(currentBalance)
-          : {
-              oldBalance: Number(latestBill.oldBalance ?? latestBill.ob ?? customer?.oldBalance ?? 0),
-              advanceBalance: Number(
-                latestBill.advanceBalance ?? latestBill.advBal ?? customer?.advanceBalance ?? 0,
-              ),
-            };
-      };
-
-      const b2bCustomers = b2bData
-        .filter((customer) => {
-          if (!customer.customerName) return false;
-          const normalizedType = normalizeCustomerType(customer.customerType, "B2B");
-          return normalizedType === "B2B";
-        })
-        .map((customer) => {
-          const latestBalanceState = resolveLatestBalanceState(customer);
-          return {
-            ...customer,
-            customerType: normalizeCustomerType(customer.customerType, "B2B"),
-            customerNumber: customer.phoneNumber,
-            customerId: customer.customerId,
-            id: customer._id, // ✅ MongoDB _id for API calls
-            // ✅ These are what the UI uses in filteredCartCustomers & display
-            name: customer.customerName,
-            ob: latestBalanceState.oldBalance,
-            ab: latestBalanceState.advanceBalance,
-            company: customer.shopName || "",
-            phone: customer.phoneNumber || "",
-            email: customer.emailId || "",
-            address: customer.address || "",
-            gst: customer.gstin || "",
-            // ✅ Keep these too for CustomerMasterList
-            customerName: customer.customerName,
-            shopName: customer.shopName || customer.companyName || "No Shop Name",
-            oldBalance: latestBalanceState.oldBalance,
-            advanceBalance: latestBalanceState.advanceBalance,
-            billCurrentBalance:
-              latestBalanceState.oldBalance - latestBalanceState.advanceBalance,
-            updatedAt: customer.updatedAt || new Date().toISOString(),
-          };
-        });
-
-      setCustomers(b2bCustomers);
-    } catch (error) {
-      console.error("Error fetching customers:", error);
-      Alert.alert("Error", "Failed to load customers from database");
-      setCustomers([]);
-    } finally {
-      setLoadingCustomers(false);
-    }
-  };
-
-  const fetchRecentNames = async () => {
-    try {
-      const resp = await fetch(`${base_url}/transactions`);
-      if (resp.ok) {
-        const data = await resp.json();
-        // Extract last 5 unique customer names
-        const names = [
-          ...new Set(
-            data
-              .filter(
-                (t) =>
-                  normalizeCustomerType(t?.customerType || t?.type, "B2B") === "B2B"
-              )
-              .map((t) => t.customerName)
-              .filter(Boolean),
-          ),
-        ].slice(0, 5);
-        setRecentNames(names);
       }
-    } catch (err) {
-      console.error("Recent names error:", err);
-    }
-  };
+      return Print.printToFileAsync({ html: payload });
+    };
 
-  const fetchItems = async () => {
     try {
-      setLoadingItems(true);
-      const response = await fetch(`${base_url}/items`);
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch items");
-      }
-
-      const rawData = await response.json();
-      const data = Array.isArray(rawData)
-        ? rawData
-        : Array.isArray(rawData?.items)
-          ? rawData.items
-          : Array.isArray(rawData?.data)
-            ? rawData.data
-            : [];
-
-      console.log("Fetched items:", data);
-
-      // Create items list from schema
-      const itemsList = data
-        .map((item) => {
-          const src = item?.item && typeof item.item === "object" ? item.item : item;
-          return {
-            itemName: src?.stockName || src?.itemName || "", // normalize name keys
-            itemDetails: src?.itemDetails || "",
-            buyingTouch:
-              src?.buyingTouch ??
-              src?.buyTouch ??
-              src?.buy ??
-              src?.result ??
-              "",
-            sellingTouch:
-              src?.sellingTouch ??
-              src?.sellTouch ??
-              src?.sell ??
-              src?.touch ??
-              "",
-            percentage: src?.percentage,
-            type: src?.type,
-            issue: src?.issue, // Include issue flag
-            receipt: src?.receipt, // Include receipt flag
-            date: src?.date,
-          };
-        })
-        .filter((item) => item.itemName); // ensure stockName exists
-
-      console.log("Items list:", itemsList);
-      setItemsList(itemsList);
-
-      // Build stock object by fetching from stock master
-      const fetchStock = async () => {
+      const { uri } = await tryPrint(html, true);
+      return uri;
+    } catch (firstErr) {
+      console.warn("printToFileAsync failed with fixed page size, retrying default size.", firstErr);
+      try {
+        const { uri } = await tryPrint(html, false);
+        return uri;
+      } catch (secondErr) {
+        console.warn("printToFileAsync failed with full HTML, retrying without images.", secondErr);
+        // Some devices fail writing PDF when very large/unsupported images are embedded.
+        const htmlWithoutImages = String(html).replace(/<img\b[^>]*>/gi, "");
         try {
-          const response = await fetch(`${base_url}/stockMaster`);
-          if (!response.ok) {
-            throw new Error("Failed to fetch stock");
-          }
-          const stockData = await response.json();
-          const stockObj = {};
-          stockData.forEach((item) => {
-            const name = item.itemName;
-            const weight = Number(item.weight);
-            if (stockObj[name]) {
-              stockObj[name].weight += weight;
-            } else {
-              stockObj[name] = { weight: weight, _id: item._id };
-            }
-          });
-          setItemsStock(stockObj);
-        } catch (error) {
-          console.error("Error fetching stock:", error);
-          // Fallback to 0 for each item
-          const stockObj = {};
-          itemsList.forEach((item) => {
-            if (item.itemName) {
-              stockObj[item.itemName] = { weight: 0, _id: null };
-            }
-          });
-          setItemsStock(stockObj);
+          const { uri } = await tryPrint(htmlWithoutImages, false);
+          return uri;
+        } catch (thirdErr) {
+          const finalErr = new Error(
+            "Failed to generate PDF. Please try again or reduce heavy bill content/images."
+          );
+          finalErr.cause = thirdErr;
+          throw finalErr;
         }
-      };
+      }
+    }
+  };
 
-      await fetchStock();
+  const prepareBillPdf = async ({ force = false } = {}) => {
+    if (!force && preparedPdfUriRef.current) {
+      const check = await FileSystem.getInfoAsync(preparedPdfUriRef.current);
+      if (check.exists) return preparedPdfUriRef.current;
+    }
+    const uri = await generateBillPdf();
+    preparedPdfUriRef.current = uri;
+    return uri;
+  };
+
+  const openWhatsAppChat = async (waPhone) => {
+    const appUrl = `whatsapp://send?phone=${waPhone}`;
+    const webUrl = `https://wa.me/${waPhone}`;
+
+    const canOpenApp = await Linking.canOpenURL(appUrl);
+    if (canOpenApp) {
+      await Linking.openURL(appUrl);
+      return true;
+    }
+
+    const canOpenWeb = await Linking.canOpenURL(webUrl);
+    if (canOpenWeb) {
+      await Linking.openURL(webUrl);
+      return true;
+    }
+
+    return false;
+  };
+
+  const fetchRegisteredCustomerPhone = async () => {
+    const customerId = getCustomerIdForLookup();
+    if (!customerId) return "";
+
+    const rawType = String(customer?.type || customer?.customerType || "").toUpperCase();
+    const endpoint = rawType === "B2C"
+      ? `${base_url}/customersB2C/${customerId}`
+      : rawType === "DEALER" || rawType === "SUPPLIER"
+        ? `${base_url}/customersDealer/${customerId}`
+        : `${base_url}/customers/${customerId}`;
+
+    try {
+      const res = await fetch(endpoint);
+      if (!res.ok) return "";
+      const data = await res.json();
+      return (
+        data?.phoneNumber ||
+        data?.phone ||
+        data?.mobileNumber ||
+        data?.mobile ||
+        data?.customerNumber ||
+        ""
+      );
+    } catch {
+      return "";
+    }
+  };
+
+	  const resolveCustomerWhatsAppPhone = async () => {
+	    const registeredPhone = await fetchRegisteredCustomerPhone();
+	    return normalizePhoneWithCountryCode(registeredPhone || getCustomerPhone());
+	  };
+
+		  const sharePdfViaDeviceWhatsApp = async ({ waPhone, pdfUri, isAuto = false } = {}) => {
+		    const canShare = await Sharing.isAvailableAsync();
+		    if (!canShare) {
+		      throw new Error("File sharing is not available on this device.");
+		    }
+
+	    // Verify file exists
+	    const fileInfo = await FileSystem.getInfoAsync(pdfUri);
+	    if (!fileInfo.exists) {
+	      throw new Error("Generated PDF file not found. Please try again.");
+	    }
+
+	    // Rename to a meaningful filename for better user experience
+	    let sharingUri = pdfUri;
+	    try {
+	      const billNoHint =
+	        currentBillNo ||
+	        resolveBillNoForDisplay(order?.orderNo, "B2B") ||
+	        Date.now();
+	      const cleanBillNo = String(billNoHint).replace(/[^a-zA-Z0-9]/g, "_");
+	      const newUri = `${FileSystem.cacheDirectory}Bill_${cleanBillNo}.pdf`;
+	      await FileSystem.copyAsync({ from: pdfUri, to: newUri });
+	      sharingUri = newUri;
+		    } catch (e) {
+		      console.warn("Renaming failed, sharing original URI", e);
+		    }
+
+		    // IMPORTANT: expo-sharing only supports local file URLs (file://).
+		    // Do not convert to content:// here; it will be rejected.
+		    const uriToShare = sharingUri;
+
+		    // On Android, calling Linking.openURL before Sharing.shareAsync often blocks the share sheet.
+		    // We only open the chat if NOT doing auto-share, or as a fallback.
+		    // For standard PDF sharing, shareAsync is much more reliable.
+		    try {
+		      await Sharing.shareAsync(uriToShare, {
+		        mimeType: "application/pdf",
+		        dialogTitle: "Send Bill on WhatsApp",
+		        UTI: "com.adobe.pdf",
+		      });
+		    } catch (shareErr) {
+		      console.error("ExpoSharing.shareAsync failed:", shareErr);
+		      throw new Error(
+		        shareErr?.message ||
+		          "Unable to open share sheet. Please try again."
+		      );
+		    }
+		  };
+
+	  const sendBillPdfViaWhatsAppCloudApi = async ({ waPhone, pdfUri } = {}) => {
+	    const billNoHint =
+	      currentBillNo ||
+	      resolveBillNoForDisplay(order?.orderNo, "B2B") ||
+	      resolveBillNoForDisplay(estimate?.estimateNo, "B2B") ||
+	      resolveBillNoForDisplay(suspense?.suspenseNo, "B2B") ||
+	      "";
+	    const filename = `NTJ_Bill_${billNoHint || Date.now()}.pdf`;
+	    const caption = billNoHint ? `Bill No: ${billNoHint}` : "NTJ Bill";
+
+	    const form = new FormData();
+	    form.append("phone", waPhone);
+	    form.append("filename", filename);
+	    form.append("caption", caption);
+	    form.append("pdf", {
+	      uri: pdfUri,
+	      name: filename,
+	      type: "application/pdf",
+	    });
+
+	    const response = await fetch(`${base_url}/whatsapp/send-bill-pdf`, {
+	      method: "POST",
+	      body: form,
+	    });
+
+	    const text = await response.text();
+	    let json = null;
+	    try {
+	      json = text ? JSON.parse(text) : null;
+	    } catch (_e) {}
+
+	    if (!response.ok) {
+	      const message =
+	        json?.message ||
+	        (typeof json?.error === "string" ? json.error : "") ||
+	        text;
+	      const err = new Error(message);
+	      err.status = response.status;
+	      err.payload = json || text;
+	      throw err;
+	    }
+
+	    return json || { ok: true };
+	  };
+
+		  const shareBillPdfOnly = async () => {
+		    if (isSharingRef.current) return;
+		    try {
+		      isSharingRef.current = true;
+		      const pdfUri = await prepareBillPdf();
+		      if (!pdfUri) throw new Error("Could not generate bill PDF.");
+		      const waPhone = await resolveCustomerWhatsAppPhone();
+
+		      // 1. Try direct Cloud API delivery first (most direct)
+		      let sentViaCloud = false;
+		      if (waPhone) {
+		        try {
+		          const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
+		          if (cloudRes?.ok) {
+		            sentViaCloud = true;
+		            console.log("Success", `Bill PDF sent directly to ${waPhone}`);
+		            await openWhatsAppChat(waPhone); // Open chat to show the sent document
+		            return;
+		          }
+		        } catch (e) {
+		          console.log("Cloud API skipped/failed");
+		        }
+		      }
+
+		      // 2. Fallback: Share the PDF via the OS share sheet.
+		      // Note: WhatsApp deep-links cannot pre-attach files reliably; opening WhatsApp first
+		      // often prevents the share sheet from appearing (app goes background).
+		      if (!sentViaCloud) {
+		        await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri, isAuto: false });
+		      }
+		    } catch (error) {
+		      Alert.alert("Error", error.message || "Failed to share PDF.");
+		    } finally {
+		      isSharingRef.current = false;
+		    }
+		  };
+
+	  const openCustomerChatOnly = async () => {
+	    try {
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) throw new Error("Customer WhatsApp number not found.");
+	      await openWhatsAppChat(waPhone);
+	    } catch (error) {
+	      Alert.alert("Error", error.message || "Could not open WhatsApp chat.");
+	    }
+	  };
+
+	  const shareBillToCustomerWhatsApp = async ({ isAuto = false } = {}) => {
+	    if (isSharingRef.current) return;
+	    try {
+	      isSharingRef.current = true;
+	      setIsSharing(true);
+
+	      // 1. Generate and verify PDF first
+	      const pdfUri = await prepareBillPdf();
+	      if (!pdfUri) {
+	        throw new Error("Could not generate bill PDF.");
+	      }
+
+	      // 2. Resolve target phone number
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) {
+	        throw new Error("Customer WhatsApp number not found.");
+	      }
+
+	      // 3. Try Background Cloud API Send (Ideal for 'attached in send area' effect)
+	      let cloudSent = false;
+	      try {
+	        const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
+	        if (cloudRes?.ok) {
+	          cloudSent = true;
+	        }
+	      } catch (e) {
+	        console.log("Cloud API skipped or failed");
+	      }
+
+	      // 4. Fallback for Auto/Manual trigger
+	      if (!cloudSent) {
+	        // On auto-share, we prioritize the attachment sheet as it's the main requirement
+	        await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri, isAuto });
+	      } else {
+	        Alert.alert("Success", "Bill sent via WhatsApp Cloud API");
+	      }
+	    } catch (error) {
+	      if (!isAuto || !(error?.message || "").toLowerCase().includes("cancel")) {
+	        Alert.alert("Error", error?.message || "Failed to share bill.");
+	      }
+	      console.error("WhatsApp share flow error:", error);
+	    } finally {
+	      setIsSharing(false);
+	      isSharingRef.current = false;
+	    }
+	  };
+
+  useEffect(() => {
+    preparedPdfUriRef.current = "";
+    const timer = setTimeout(() => {
+      prepareBillPdf().catch(() => { });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [customer?.billNo, customer?.invoiceNo, order?.orderNo, suspense?.netAmount, estimate?.totalAmount, safeIssueItems.length, safeReceiptItems.length]);
+
+  useEffect(() => {
+    const shouldAutoShare = Boolean(route.params?.customer?.autoShare || route.params?.autoShare);
+    const isBillReady = Boolean(customer?.billNo || customer?.invoiceNo || order || suspense || estimate);
+    if (!shouldAutoShare || hasAutoSharedRef.current || !isBillReady) return;
+
+    hasAutoSharedRef.current = true;
+    const timer = setTimeout(() => {
+      shareBillToCustomerWhatsApp({ isAuto: true });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [route.params?.customer?.autoShare, route.params?.autoShare, customer?.billNo, customer?.invoiceNo, order, suspense, estimate]);
+
+  const handleDownload = async () => {
+    try {
+      const uri = await prepareBillPdf();
+      setIsPrinting(false);
+      Alert.alert('Download Successful', `PDF saved to: ${uri} `);
     } catch (error) {
-      console.error("Error fetching items:", error);
-      Alert.alert("Error", "Failed to load items");
+      setIsPrinting(false);
+      Alert.alert('Error', 'Failed to download PDF');
+      console.error(error);
+    }
+  };
+
+	  const handleShare = async () => {
+	    await shareBillToCustomerWhatsApp({ isAuto: false });
+	  };
+
+  const handleTransferToB2B = () => {
+    if (estimate) {
+      navigation.navigate("B2BCalculationPage", {
+        previewData: {
+          itemName: estimate.itemName,
+          weight: estimate.weight,
+          touch: estimate.wastagePercent,
+          ftRate: estimate.goldRate,
+          items: estimate.items // Pass if it's a multi-item estimate
+        }
+      });
+    }
+  };
+
+  const handleTransferToB2C = () => {
+    if (estimate) {
+      navigation.navigate("B2CCalculationPage", {
+        estimate: {
+          itemName: estimate.itemName,
+          weight: estimate.weight,
+          wastagePercent: estimate.wastagePercent,
+          goldRate: estimate.goldRate,
+          items: estimate.items // Pass if it's a multi-item estimate
+        }
+      });
+      return;
+    }
+
+    navigation.navigate("B2CCalculationPage", {
+      printAgain: true,
+      lastBill: route.params,
+    });
+  };
+
+	  const openDirectWhatsApp = async () => {
+	    if (isSharingRef.current) return;
+	    try {
+	      isSharingRef.current = true;
+	      setIsSharing(true);
+
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) throw new Error('Customer mobile number is missing or invalid.');
+
+	      // Generate A4 PDF
+	      const pdfUri = await generateA4BillPdf();
+	      if (!pdfUri) throw new Error('Could not generate A4 bill PDF.');
+
+	      // Give the file a meaningful name
+	      const billNoHint = currentBillNo || order?.orderNo || Date.now();
+	      const cleanBillNo = String(billNoHint).replace(/[^a-zA-Z0-9]/g, '_');
+	      const namedUri = `${FileSystem.cacheDirectory}NTJ_Bill_${cleanBillNo}_A4.pdf`;
+	      try { await FileSystem.copyAsync({ from: pdfUri, to: namedUri }); } catch (_) {}
+	      const fileInfo = await FileSystem.getInfoAsync(namedUri);
+	      const sharableUri = fileInfo.exists ? namedUri : pdfUri;
+
+	      // 1. Try Cloud API (sends directly, no user action needed)
+	      let sentViaCloud = false;
+	      try {
+	        const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri: sharableUri });
+	        if (cloudRes?.ok) {
+	          sentViaCloud = true;
+	          Alert.alert('Sent!', `Bill PDF sent to ${waPhone} on WhatsApp!`);
+	          await openWhatsAppChat(waPhone);
+	        }
+	      } catch (_) {
+	        console.log('Cloud API unavailable, using device share.');
+	      }
+
+	      if (!sentViaCloud) {
+	        await shareA4PdfToWhatsApp(sharableUri, waPhone);
+	      }
+	    } catch (error) {
+	      Alert.alert('Error', error?.message || 'Failed to send bill on WhatsApp.');
+	      console.error('Direct WhatsApp send error:', error);
+	    } finally {
+	      setIsSharing(false);
+	      isSharingRef.current = false;
+	    }
+	  };
+
+	  // ─── Core helper: share A4 PDF directly into WhatsApp ───────────────────
+	  const shareA4PdfToWhatsApp = async (fileUri, waPhone) => {
+	    // react-native-share can target WhatsApp directly and attach a file.
+	    // On Android the uri must be a base64 data-uri OR a content:// uri.
+	    // Expo's FileSystem gives us a file:// uri — we read it as base64 first.
+	    try {
+	      const RNShare = getRNShare();
+	      if (!RNShare) throw new Error('RNShare native module not available');
+
+	      const base64 = await FileSystem.readAsStringAsync(fileUri, {
+	        encoding: FileSystem.EncodingType.Base64,
+	      });
+	      const dataUri = `data:application/pdf;base64,${base64}`;
+
+	      await RNShare.shareSingle({
+	        social: RNShare.Social.WHATSAPP,
+	        url: dataUri,
+	        type: 'application/pdf',
+	        filename: `NTJ_Bill.pdf`,
+	        title: 'NTJ Bill PDF',
+	        message: waPhone ? `Bill for ${waPhone}` : 'Please find your bill attached.',
+	      });
+	    } catch (rnShareErr) {
+	      // RNShare throws if user cancels or WhatsApp not installed — fall back to generic sheet
+	      console.warn('RNShare WhatsApp failed, falling back to expo-sharing:', rnShareErr?.message);
+	      try {
+	        // Use the safer sharing flow (checks isAvailableAsync, verifies file exists,
+	        // and converts file:// -> content:// on Android).
+	        await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri: fileUri, isAuto: false });
+	      } catch (sharingErr) {
+	        throw new Error(sharingErr?.message || 'Could not open share sheet. Please try again.');
+	      }
+	    }
+	  };
+
+	  const sendA4BillViaWhatsApp = async () => {
+	    if (isSharingRef.current) return;
+	    try {
+	      isSharingRef.current = true;
+	      setIsSharing(true);
+
+	      const waPhone = await resolveCustomerWhatsAppPhone();
+	      if (!waPhone) throw new Error('Customer WhatsApp number not found.');
+
+	      // Generate full A4 PDF
+	      const pdfUri = await generateA4BillPdf();
+	      if (!pdfUri) throw new Error('Could not generate A4 bill PDF.');
+
+	      // Give it a clean filename
+	      const billNoHint = currentBillNo || order?.orderNo || Date.now();
+	      const cleanBillNo = String(billNoHint).replace(/[^a-zA-Z0-9]/g, '_');
+	      const namedUri = `${FileSystem.cacheDirectory}NTJ_Bill_${cleanBillNo}_A4.pdf`;
+	      try { await FileSystem.copyAsync({ from: pdfUri, to: namedUri }); } catch (_) {}
+	      const fileInfo = await FileSystem.getInfoAsync(namedUri);
+	      const sharableUri = fileInfo.exists ? namedUri : pdfUri;
+
+	      // 1. Try Cloud API first (sends without user interaction)
+	      let cloudSent = false;
+	      try {
+	        const res = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri: sharableUri });
+	        if (res?.ok) {
+	          cloudSent = true;
+	          Alert.alert('Sent!', `Bill PDF sent to WhatsApp (${waPhone})`);
+	          // Only open the chat AFTER the cloud send succeeded
+	          await openWhatsAppChat(waPhone);
+	        }
+	      } catch (_) {}
+
+	      // 2. Fallback: open WhatsApp directly with PDF attached via react-native-share
+	      if (!cloudSent) {
+	        await shareA4PdfToWhatsApp(sharableUri, waPhone);
+	      }
+	    } catch (error) {
+	      Alert.alert('Error', error?.message || 'Failed to send PDF via WhatsApp.');
+	    } finally {
+	      setIsSharing(false);
+	      isSharingRef.current = false;
+	    }
+	  };
+
+	  async function handleWhatsAppShare() {
+	    await shareBillToCustomerWhatsApp({ isAuto: false });
+	  }
+
+  const handlePrint = async () => {
+    try {
+      setIsPrinting(true);
+      const html = generateHTML();
+      await Print.printAsync({
+        html,
+        width: 204,
+        height: 842,
+      });
+    } catch (error) {
+      Alert.alert('Error', 'Failed to process bill');
+      console.error("General bill processing error:", error);
     } finally {
-      setLoadingItems(false);
+      setIsPrinting(false);
     }
   };
 
-  // Fetch data on mount
-  useEffect(() => {
-    fetchCustomers();
-    fetchItems();
-    fetchRecentNames();
-  }, []);
-
-  useEffect(() => {
-    if (!selectedCustomer?.isGstCustomer) {
-      setBillTypeLabel("");
-    }
-  }, [selectedCustomer]);
-
-  // Handle new customer from CreateCustomerMaster
-  useFocusEffect(
-    useCallback(() => {
-      if (route.params?.newCustomer) {
-        const newCust = {
-          ...route.params.newCustomer,
-          customerType: normalizeCustomerType(
-            route.params.newCustomer?.customerType,
-            "B2B",
-          ),
-        };
-        setCustomers((prev) => [...prev, newCust]);
-        setSelectedCustomer(newCust);
-        setPhone(newCust.phone || "");
-        // Clear the param to avoid re-adding
-        navigation.setParams({ newCustomer: undefined });
-      }
-    }, [route.params?.newCustomer, navigation]),
-  );
-
-  useFocusEffect(
-    useCallback(() => {
-      if (route.params?.gstCustomer) {
-        const gstCustomer = route.params.gstCustomer;
-        setSelectedCustomer(gstCustomer);
-        setSearch(gstCustomer.name || "");
-        setPhone(gstCustomer.phone || "");
-        if (route.params?.billTypeLabel) {
-          setBillTypeLabel(route.params.billTypeLabel);
-        }
-        if (route.params?.forceGstEnabled) {
-          setGstEnabled(true);
-          const sgstNum = Number(sgst) || 0;
-          const cgstNum = Number(cgst) || 0;
-          const igstNum = Number(igst) || 0;
-          setIsSgstEnabled(sgstNum > 0);
-          setIsCgstEnabled(cgstNum > 0);
-          setIsIgstEnabled(igstNum > 0);
-        }
-        navigation.setParams({
-          gstCustomer: undefined,
-          billTypeLabel: undefined,
-          forceGstEnabled: undefined,
-        });
-      }
-    }, [route.params?.gstCustomer, route.params?.billTypeLabel, route.params?.forceGstEnabled, navigation, sgst, cgst, igst]),
-  );
-
-  // Load ft rate from route params or AsyncStorage on focus
-  useFocusEffect(
-    useCallback(() => {
-      const loadFtRate = async () => {
-        try {
-          // First check if ftRate is passed via route params
-          if (route.params?.ftRate) {
-            setGoldRate(route.params.ftRate);
-            // Also save to AsyncStorage for consistency
-            await AsyncStorage.setItem("ftRate", route.params.ftRate);
-          } else {
-            // Fallback to AsyncStorage
-            const storedFtRate = await AsyncStorage.getItem("ftRate");
-            if (storedFtRate) {
-              setGoldRate(storedFtRate);
-            }
-          }
-        } catch (error) {
-          console.error("Error loading ft rate:", error);
-        }
-      };
-      loadFtRate();
-    }, [route.params?.ftRate]),
-  );
-
-  // Function to refresh all data
-  const handleRefresh = async () => {
-    console.log("🔄 Refreshing data...");
-    await fetchCustomers();
-    await fetchItems();
-    await fetchRecentNames();
-    await refreshFtRate();
-    console.log("Success", "Data refreshed from database");
-  };
-
-  // Handle previewData or estimate from route params
-  useEffect(() => {
-    if (route.params?.previewData) {
-      const data = route.params.previewData;
-      console.log("📥 Received previewData:", data);
-
-      // 1. Handle Customer Context
-      if (data.customerName) {
-        const cust = customers.find((c) => c.name === data.customerName);
-        if (cust) {
-          setSelectedCustomer(cust);
-          setSearch(cust.name);
-          setPhone(cust.phone || "");
-        } else {
-          setSelectedCustomer({
-            name: data.customerName,
-            id: data.customerId || "N/A",
-            phone: data.phone || "",
-            ob: data.oldBalance || 0,
-            ab: data.advBal || 0,
+  const handlePrintQR = async () => {
+    try {
+      setIsPrinting(true);
+      if (qrRef.current) {
+        qrRef.current.toDataURL(async (dataURL) => {
+          const html = `
+    < html >
+              <head>
+                <style>
+                  @page { margin: 0; }
+                  body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; text-align: center; font-size: 10px; }
+                  h1 { margin-bottom: 10px; font-size: 14px; }
+                  img { max-width: 60mm; height: auto; }
+                </style>
+              </head>
+              <body>
+                <h1>UPI QR Code</h1>
+                <p>Amount: â‚¹${upiAmount}</p>
+                <img src="${dataURL}" alt="UPI QR Code" />
+              </body>
+            </html >
+    `;
+          await Print.printAsync({
+            html,
+            width: 204,
+            height: 842,
           });
-          setSearch(data.customerName);
-          setPhone(data.phone || "");
-        }
-      }
-
-      // 2. Handle Item(s)
-      if (data.items && Array.isArray(data.items)) {
-        // Multi-item transfer
-        const mappedItems = data.items.map((it) => {
-          const w = it.weight || 0;
-          const t = it.touch || it.wastagePercent || 0;
-          const s = it.stone || 0;
-          const purity = calcIssuePure(w, s, t);
-          return {
-            id: Date.now() + Math.random(),
-            item: it.itemName || it.item,
-            weight: Number(w),
-            stone: Number(s),
-            touch: Number(t),
-            purity: purity,
-            type: "issue",
-          };
+          setIsPrinting(false);
         });
-        setIssueItems((prev) => [...prev, ...mappedItems]);
-      } else if (data.itemName) {
-        // Single item transfer
-        const w = data.weight || 0;
-        const t = data.touch || 0;
-        const s = data.stone || 0;
-        const purity = calcIssuePure(w, s, t);
-
-        setIssueItems((prev) => [
-          ...prev,
-          {
-            id: Date.now() + Math.random(),
-            item: data.itemName,
-            weight: Number(w),
-            stone: Number(s),
-            touch: Number(t),
-            purity: purity,
-            type: "issue",
-          },
-        ]);
+      } else {
+        setIsPrinting(false);
+        Alert.alert('Error', 'QR Code not available');
       }
-
-      // 3. Handle FT Rate
-      if (data.ftRate) {
-        setGoldRate(data.ftRate.toString());
-      }
-
-      // Reset parameters to prevent re-processing on re-mounts
-      navigation.setParams({ previewData: undefined });
+    } catch (error) {
+      setIsPrinting(false);
+      Alert.alert('Error', 'Failed to print QR Code');
+      console.error(error);
     }
-  }, [route.params?.previewData, customers, navigation]);
+  };
 
-  useEffect(() => {
-    if (!route.params?.editTransaction) return;
-    const t = route.params.editTransaction;
-    const c = route.params.editCustomer || {};
+  const handleConvertToGold = async () => {
+    if (!isB2C) return;
 
-    const customerId = c.id || c._id || c.customerId || t.customerId;
-    const foundCustomer =
-      customers.find((cust) => String(cust.id) === String(customerId)) ||
-      customers.find((cust) => cust.name === (c.customerName || c.name || t.customerName));
+    const upi = Math.max(0, toNum(upiAmount, 0));
+    if (upi <= 0) {
+      Alert.alert("Invalid UPI Amount", "UPI Amount must be greater than 0 to convert.");
+      return;
+    }
 
-    if (foundCustomer) {
-      setSelectedCustomer(foundCustomer);
-      setSearch(foundCustomer.name || "");
-      setPhone(foundCustomer.phone || "");
+    if (currentB2CGoldRate <= 0) {
+      Alert.alert("Invalid Gold Rate", "Current gold rate is invalid for conversion.");
+      return;
+    }
+
+    const convertedGold = upi / currentB2CGoldRate;
+    const baseOB = toNum(displayB2COldBalance, 0);
+    const baseAB = toNum(displayB2CAdvanceBalance, 0);
+
+    let updatedOB = baseOB;
+    let updatedAB = baseAB;
+
+    if (baseAB > 0) {
+      if (convertedGold <= baseAB) {
+        updatedAB = baseAB - convertedGold;
+      } else {
+        updatedAB = 0;
+        updatedOB = baseOB + (convertedGold - baseAB);
+      }
     } else {
-      setSelectedCustomer({
-        id: customerId,
-        name: c.customerName || c.name || t.customerName || "Unknown",
-        phone: c.customerNumber || c.phone || c.phoneNumber || "",
-        customerType: normalizeCustomerType(c.customerType || c.type, "B2B"),
-        gst: c.gstin || "",
-        address: c.address || "",
-      });
-      setSearch(c.customerName || c.name || t.customerName || "");
-      setPhone(c.customerNumber || c.phone || c.phoneNumber || "");
+      updatedOB = baseOB + convertedGold;
     }
 
-    setDate(
-      t.date ||
-      (t.createdAt ? new Date(t.createdAt).toLocaleDateString("en-GB") : new Date().toLocaleDateString("en-GB"))
-    );
-
-    setIssueItems(
-      (Array.isArray(t.issueItems) ? t.issueItems : []).map((item, idx) => ({
-        id: Date.now() + idx,
-        item: item.name || item.item || "",
-        weight: Number(item.gross ?? item.weight ?? 0),
-        stone: Number(item.m ?? item.stone ?? 0),
-        touch: Number(item.calc ?? item.touch ?? 0),
-        purity: Number(item.pure ?? item.purity ?? 0),
-        type: "issue",
-      }))
-    );
-
-    setReceiptItems(
-      (Array.isArray(t.receiptItems) ? t.receiptItems : []).map((item, idx) => ({
-        id: Date.now() + idx + 1000,
-        item: item.name || item.item || "",
-        weight: Number(item.weight ?? 0),
-        stone: Number(item.result ?? item.stone ?? 0),
-        touch: Number(item.calc ?? item.touch ?? 0),
-        purity: Number(item.pure ?? item.purity ?? 0),
-        type: "receipt",
-      }))
-    );
-
-    setCashTable(
-      (Array.isArray(t.cashTable) ? t.cashTable : []).map((item, idx) => ({
-        id: Date.now() + idx + 2000,
-        rupees: Number(item.rupees ?? 0),
-        goldRate: Number(item.goldRate ?? 0),
-        pure: Number(item.pure ?? 0),
-      }))
-    );
-  }, [route.params?.editTransaction, route.params?.editCustomer, customers]);
-
-  // Function to refresh FT rate
-  const refreshFtRate = async () => {
+    // Persist immediately so BillHistory / CustomerDataList / HomeScreen see fresh values
     try {
-      const storedFtRate = await AsyncStorage.getItem("ftRate");
-      if (storedFtRate) {
-        setGoldRate(storedFtRate);
-        setCashPureInput(fmt(computeCashPure(rupees || 0, storedFtRate)));
-      }
-    } catch (error) {
-      console.error("Error refreshing ft rate:", error);
-    }
-  };
-
-  // -----------------------
-  // Utilities & Calculators
-  // -----------------------
-  const parseNum = (v) => {
-    const n = Number(String(v).replace(/[^0-9.-]+/g, ""));
-    return isNaN(n) ? 0 : n;
-  };
-
-  // Pure calculation for Issue Table entries
-  const calcIssuePure = (w, s, t) => {
-    const W = parseNum(w);
-    const S = parseNum(s);
-    const T = parseNum(t);
-    const net = Math.max(0, W - S);
-    const pure = net * (T / 100);
-    return Number(pure.toFixed(3));
-  };
-
-  // Pure calculation for Receipt Table entries
-  const calcReceiptPure = (w, s, t) => {
-    const W = parseNum(w);
-    const S = parseNum(s);
-    const T = parseNum(t);
-    const pure = W * (S / 100) * (T / 100);
-    return Number(pure.toFixed(3));
-  };
-
-  // Cash pure from rupees and goldRate
-  const computeCashPure = (r, rate) => {
-    const R = parseNum(r);
-    const G = parseNum(rate);
-    if (G <= 0) return 0;
-    return Number((R / G).toFixed(3));
-  };
-
-  // Format helper
-  const fmt = (n) => Number(n || 0).toFixed(3);
-  const fmt2 = (n) => Number(n || 0).toFixed(2);
-
-  // -----------------------
-  // Add / Remove operations
-  // -----------------------
-  const addIssueItem = async () => {
-    console.log("🔵 addIssueItem called");
-
-    if (!selectedIssueItem) {
-      Alert.alert("Select Item", "Please choose an issue item before adding.");
-      return;
-    }
-
-    if (!selectedCustomer) {
-      Alert.alert("Select Customer", "Please select a customer first.");
-      return;
-    }
-
-    const issueWeight = parseNum(weight);
-
-    if (issueWeight <= 0) {
-      Alert.alert(
-        "Invalid Weight",
-        "Please enter a valid weight greater than 0",
-      );
-      return;
-    }
-
-    const purity = calcIssuePure(weight, stone, touch);
-
-    console.log("📊 Calculated purity:", purity);
-
-    const issueEntryData = {
-      itemName: selectedIssueItem,
-      weight: issueWeight,
-      stone: parseNum(stone),
-      touch: parseNum(touch),
-      purity: purity,
-    };
-
-    console.log("📤 Sending to backend:", issueEntryData);
-    console.log("🌐 URL:", `${base_url}/issueEntries`);
-
-    try {
-      const response = await fetch(`${base_url}/issueEntries`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(issueEntryData),
-      });
-
-      console.log("📥 Response status:", response.status);
-
-      const responseText = await response.text();
-      console.log("📥 Response body:", responseText);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${responseText}`);
-      }
-
-      const savedEntry = JSON.parse(responseText);
-      console.log("✅ Saved successfully:", savedEntry);
-
-      // Update stock in database
-      try {
-        const currentStock = Number(itemsStock[selectedIssueItem]?.weight || 0);
-        const newWeight = Number((currentStock - issueWeight).toFixed(3));
-
-        const stockResponse = await fetch(
-          `${base_url}/stockMaster/${itemsStock[selectedIssueItem]?._id}`,
-          {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              itemName: selectedIssueItem,
-              weight: newWeight,
-              less: 0, // Assuming less remains the same, adjust if needed
-              netWeight: newWeight, // Assuming netWeight = weight - less
-              calculation: 0, // Adjust based on your schema
-              pure: 0, // Adjust based on your schema
-            }),
-          },
-        );
-
-        if (!stockResponse.ok) {
-          console.error("Failed to update stock in database");
-        } else {
-          console.log("✅ Stock updated in database");
-        }
-      } catch (stockError) {
-        console.error("Error updating stock:", stockError);
-      }
-
-      // Update local stock
-      setItemsStock((prev) => ({
-        ...prev,
-        [selectedIssueItem]: {
-          ...prev[selectedIssueItem],
-          weight: Number(
-            ((prev[selectedIssueItem]?.weight || 0) - issueWeight).toFixed(3),
-          ),
-        },
-      }));
-
-      // Add to issue items
-      setIssueItems((prev) => [
-        ...prev,
-        {
-          id: Date.now() + Math.random(),
-          item: selectedIssueItem,
-          weight: issueWeight,
-          stone: parseNum(stone),
-          touch: parseNum(touch),
-          purity,
-          details: issueDetails,
-          type: "issue",
-        },
-      ]);
-
-      // Clear inputs
-      setWeight("");
-      setStone("0");
-      setTouch("");
-      setIssueDetails("");
-      setSelectedIssueItem(null);
-      setIssueItemSearch("");
-
-      // Success message removed as per user request
-    } catch (error) {
-      console.error("❌ Error:", error);
-      Alert.alert("Error", `Failed to save: ${error.message}`);
-    }
-  };
-
-  const addReceiptItem = async () => {
-    console.log("🟢 addReceiptItem called");
-
-    if (!selectedReceiptItem) {
-      Alert.alert("Select Item", "Please choose a receipt item before adding.");
-      return;
-    }
-
-    if (!selectedCustomer) {
-      Alert.alert("Select Customer", "Please select a customer first.");
-      return;
-    }
-
-    const receiptW = parseNum(receiptWeight);
-
-    if (receiptW <= 0) {
-      Alert.alert(
-        "Invalid Weight",
-        "Please enter a valid weight greater than 0",
-      );
-      return;
-    }
-
-    const purity = calcReceiptPure(receiptWeight, receiptStone, receiptTouch);
-
-    console.log("📊 Calculated purity:", purity);
-
-    const receiptEntryData = {
-      itemName: selectedReceiptItem,
-      weight: receiptW,
-      stone: parseNum(receiptStone),
-      touch: parseNum(receiptTouch),
-      purity: purity,
-    };
-
-    console.log("📤 Sending to backend:", receiptEntryData);
-    console.log("🌐 URL:", `${base_url}/receiptEntries`);
-
-    try {
-      const response = await fetch(`${base_url}/receiptEntries`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(receiptEntryData),
-      });
-
-      console.log("📥 Response status:", response.status);
-
-      const responseText = await response.text();
-      console.log("📥 Response body:", responseText);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${responseText}`);
-      }
-
-      const savedEntry = JSON.parse(responseText);
-      console.log("✅ Saved successfully:", savedEntry);
-
-      // Update stock in database
-      try {
-        const currentStock = Number(
-          itemsStock[selectedReceiptItem]?.weight || 0,
-        );
-        const newWeight = Number((currentStock + receiptW).toFixed(3));
-
-        const stockResponse = await fetch(
-          `${base_url}/stockMaster/${itemsStock[selectedReceiptItem]?._id}`,
-          {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              itemName: selectedReceiptItem,
-              weight: newWeight,
-              less: 0, // Assuming less remains the same, adjust if needed
-              netWeight: newWeight, // Assuming netWeight = weight - less
-              calculation: 0, // Adjust based on your schema
-              pure: 0, // Adjust based on your schema
-            }),
-          },
-        );
-
-        if (!stockResponse.ok) {
-          console.error("Failed to update stock in database");
-        } else {
-          console.log("✅ Stock updated in database");
-        }
-      } catch (stockError) {
-        console.error("Error updating stock:", stockError);
-      }
-
-      // ➕ Increase item stock locally
-      setItemsStock((prev) => ({
-        ...prev,
-        [selectedReceiptItem]: {
-          ...prev[selectedReceiptItem],
-          weight: (
-            Number(prev[selectedReceiptItem]?.weight || 0) + receiptW
-          ).toFixed(3),
-        },
-      }));
-
-      // Add to receipt items
-      setReceiptItems((prev) => [
-        ...prev,
-        {
-          id: Date.now() + Math.random(),
-          item: selectedReceiptItem,
-          weight: Number(receiptW.toFixed(3)),
-          stone: Number(parseNum(receiptStone).toFixed(3)),
-          touch: Number(parseNum(receiptTouch).toFixed(3)),
-          purity,
-          type: "receipt",
-        },
-      ]);
-
-      // Clear inputs
-      setReceiptWeight("");
-      setReceiptStone("0");
-      setReceiptTouch("");
-      setSelectedReceiptItem(null);
-      setReceiptItemSearch("");
-
-      // Success message removed as per user request
-    } catch (error) {
-      console.error("❌ Error:", error);
-      Alert.alert("Error", `Failed to save: ${error.message}`);
-    }
-  };
-
-  const addCashEntry = async () => {
-    console.log("🟢 addCashEntry called");
-
-    const r = rupees || "0";
-    const rate = goldRate || "0";
-
-    if (parseNum(r) <= 0) {
-      Alert.alert("Invalid Amount", "Please enter rupees greater than 0");
-      return;
-    }
-
-    if (parseNum(rate) <= 0) {
-      Alert.alert(
-        "Invalid Rate",
-        "Please enter a valid gold rate greater than 0",
-      );
-      return;
-    }
-
-    const pure = computeCashPure(r, rate);
-
-    console.log("📊 Computed Pure:", pure);
-
-    const cashEntryData = {
-      rupees: parseNum(r),
-      goldrate: parseNum(rate), // <<< IMPORTANT FIX
-      pure,
-    };
-
-    console.log("📤 Sending to backend:", cashEntryData);
-    console.log("🌐 URL:", `${base_url}/cashReceived`);
-
-    try {
-      const response = await fetch(`${base_url}/cashReceived`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(cashEntryData),
-      });
-
-      const responseText = await response.text();
-      console.log("📥 Response status:", response.status);
-      console.log("📥 Response body:", responseText);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${responseText}`);
-      }
-
-      const savedEntry = JSON.parse(responseText);
-      console.log("✅ Cash entry saved:", savedEntry);
-
-      setCashTable((prev) => [
-        ...prev,
-        {
-          id: Date.now() + Math.random(),
-          rupees: Number(parseNum(r).toFixed(2)),
-          goldRate: Number(parseNum(rate).toFixed(2)),
-          pure,
-        },
-      ]);
-
-      
-      setRupees("");
-      setCashPureInput("0.000");
-
-      
-
-      // Success message removed as per user request
-    } catch (error) {
-      console.error("❌ Error:", error);
-      Alert.alert("Error", `Failed to save: ${error.message}`);
-    }
-  };
-
-  const removeIssueItem = (id) => {
-    const itemToRemove = issueItems.find((item) => item.id === id);
-    if (itemToRemove) {
-      // ➕ Add back the weight to stock
-      setItemsStock((prev) => ({
-        ...prev,
-        [itemToRemove.item]: {
-          ...prev[itemToRemove.item],
-          weight: Number(
-            (
-              (prev[itemToRemove.item]?.weight || 0) + itemToRemove.weight
-            ).toFixed(3),
-          ),
-        },
-      }));
-    }
-    setIssueItems((prev) => prev.filter((p) => p.id !== id));
-  };
-
-  const removeReceiptItem = (id) => {
-    const itemToRemove = receiptItems.find((item) => item.id === id);
-    if (itemToRemove) {
-      // 🔻 Subtract the weight from stock
-      setItemsStock((prev) => ({
-        ...prev,
-        [itemToRemove.item]: {
-          ...prev[itemToRemove.item],
-          weight: Number(
-            (
-              (prev[itemToRemove.item]?.weight || 0) - itemToRemove.weight
-            ).toFixed(3),
-          ),
-        },
-      }));
-    }
-    setReceiptItems((prev) => prev.filter((p) => p.id !== id));
-  };
-
-  const removeCashEntry = (id) => {
-    setCashTable((prev) => prev.filter((p) => p.id !== id));
-  };
-
-  const customerOldBalance = selectedCustomer
-    ? Number(parseNum(selectedCustomer.ob ?? selectedCustomer.oldBalance))
-    : 0;
-  const customerAdvanceBalance = selectedCustomer
-    ? Number(parseNum(selectedCustomer.ab ?? selectedCustomer.advanceBalance))
-    : 0;
-
-  const gstPureValue = gstEnabled
-    ? (totalIssuePure * (parseFloat(gstPercentage) || 0)) / 100
-    : 0;
-
-  const liveBalanceSummary = buildBalanceSummary({
-    oldBalance: customerOldBalance,
-    advanceBalance: customerAdvanceBalance,
-    issue: totalIssuePure,
-    receipt: totalReceiptPure,
-    cash: totalCashPure,
-  });
-  const liveAdvanceBalance = liveBalanceSummary.advanceBalance;
-  const balance = liveBalanceSummary.netBalance;
-
-  // Save stock to AsyncStorage
-  const saveStock = async () => {
-    try {
-      await AsyncStorage.setItem("STOCK_MASTER", JSON.stringify(itemsStock));
-    } catch (error) {
-      console.error("Error saving stock:", error);
-    }
-  };
-
-  // Combined products for product table (issue + receipt)
-  const productList = [
-    ...issueItems.map((it) => ({ ...it, kind: "Issue" })),
-    ...receiptItems.map((it) => ({ ...it, kind: "Receipt" })),
-  ];
-
-  const calculateReport = () => {
-    const totalIssue = issueItems.reduce(
-      (acc, it) => acc + Number(it.weight || 0),
-      0,
-    );
-    const totalIssuePure = issueItems.reduce(
-      (acc, it) => acc + Number(it.purity || 0),
-      0,
-    );
-    const totalReceipt = receiptItems.reduce(
-      (acc, it) => acc + Number(it.weight || 0),
-      0,
-    );
-    const totalReceiptPure = receiptItems.reduce(
-      (acc, it) => acc + Number(it.purity || 0),
-      0,
-    );
-    const cash = cashTable.reduce((sum, c) => sum + Number(c.rupees || 0), 0);
-    const cashPure = cashTable.reduce((sum, c) => sum + Number(c.pure || 0), 0);
-
-    return {
-      totalIssue: totalIssue.toFixed(3),
-      totalIssuePure: totalIssuePure.toFixed(3),
-      totalReceipt: totalReceipt.toFixed(3),
-      totalReceiptPure: totalReceiptPure.toFixed(3),
-      cash: cash.toFixed(2),
-      cashPure: cashPure.toFixed(3),
-    };
-  };
-
-  const formatTransactions = () => {
-    const txns = [];
-
-    // Issue transactions
-    issueItems.forEach((item) => {
-      txns.push({
-        date,
-        issue: item.weight.toFixed(3),
-        issuePure: item.purity.toFixed(3),
-        receipt: "0.000",
-        receiptPure: "0.000",
-        cashPure: "0.000",
-      });
-    });
-
-    // Receipt transactions
-    receiptItems.forEach((item) => {
-      txns.push({
-        date,
-        issue: "0.000",
-        issuePure: "0.000",
-        receipt: item.weight.toFixed(3),
-        receiptPure: item.purity.toFixed(3),
-        cashPure: "0.000",
-      });
-    });
-
-    // Cash transactions
-    cashTable.forEach((cash) => {
-      txns.push({
-        date,
-        issue: "0.000",
-        issuePure: "0.000",
-        receipt: "0.000",
-        receiptPure: "0.000",
-        cashPure: cash.pure.toFixed(3),
-      });
-    });
-
-    return txns;
-  };
-
-  const saveCompleteTransaction = async () => {
-    console.log("💾 saveCompleteTransaction called");
-
-    if (!selectedCustomer) {
-      Alert.alert("Error", "Please select a customer first");
-      return;
-    }
-
-    if (
-      issueItems.length === 0 &&
-      receiptItems.length === 0 &&
-      cashTable.length === 0
-    ) {
-      Alert.alert("Error", "No items added to transaction");
-      return;
-    }
-
-    // ✅ FIX 1: Remove - advBalance from formula
-    const finalDistinctBalance = liveBalanceSummary.netBalance;
-
-    const transactionData = {
-      customerName: selectedCustomer.name,
-      customerId: resolveCustomerRecordId(selectedCustomer),
-      customerType: normalizeCustomerType(selectedCustomer.customerType, "B2B"),
-      type: normalizeCustomerType(selectedCustomer.customerType, "B2B"),
-      issueTotal: Number(totalIssueWeight.toFixed(3)),
-      issuePure: Number(totalIssuePure.toFixed(3)),
-      oldBalance: Number(customerOldBalance.toFixed(3)),
-      receiptPure: Number(totalReceiptPure.toFixed(3)),
-      cashPure: Number(totalCashPure.toFixed(3)),
-      balance: finalDistinctBalance,
-      advBal: Number(customerAdvanceBalance.toFixed(3)),
-    };
-
-    try {
-      const editBill = route.params?.editTransaction;
-      const isEditMode = Boolean(editBill?._id);
-      let savedTransaction = editBill || null;
-
-      if (!isEditMode) {
-        const response = await fetch(`${base_url}/transactions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(transactionData),
-        });
-
-        if (!response.ok) {
-          const responseText = await response.text();
-          throw new Error(`HTTP ${response.status}: ${responseText}`);
-        }
-
-        savedTransaction = await response.json();
-        console.log("✅ Transaction saved:", savedTransaction);
-      }
-
-      const customerRecordId = resolveCustomerRecordId(selectedCustomer);
-      const customerType = normalizeCustomerType(selectedCustomer.customerType, "B2B");
-      const isB2C = customerType === "B2C";
-      const updateEndpoint = isB2C
-        ? `${base_url}/customersB2C/${selectedCustomer.id || selectedCustomer._id}`
-        : `${base_url}/customers/${selectedCustomer.id || selectedCustomer._id}`;
-
-      const newNet = liveBalanceSummary.netBalance;
-      const finalState = deriveBalanceStateFromNet(newNet);
-      const final_OB = finalState.oldBalance;
-      const final_AB = finalState.advanceBalance;
-
-      if (!selectedCustomer.isGstCustomer) {
-        const customerUpdateRes = await fetch(updateEndpoint, {
-          method: "PUT",
+      const customerId =
+        customer?.id ||
+        customer?._id ||
+        customer?.customerId ||
+        transactions?.[0]?.customerId ||
+        "";
+
+      if (customerId) {
+        const activeBillId = transactions?.[0]?._id || transactions?.[0]?.id || "";
+        const patchRes = await fetch(`${base_url}/customersB2C/${customerId}/balances`, {
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            billCurrentBalance: newNet,
-            oldBalance: final_OB.toFixed(3),
-            advanceBalance: final_AB.toFixed(3),
-            ...(gstEnabled && {
-              gstin: selectedCustomer.gst || "",
-              gstPercentage: gstPercentage,
-              gstAmount: gstAmount,
-              sgst: isSgstEnabled ? sgst : "0",
-              cgst: isCgstEnabled ? cgst : "0",
-              igst: isIgstEnabled ? igst : "0",
-            }),
+            oldBalance: updatedOB,
+            advanceBalance: updatedAB,
+            billId: activeBillId,
           }),
         });
-
-        if (!customerUpdateRes.ok) {
-          throw new Error("Failed to update customer balance in master.");
+        if (!patchRes.ok) {
+          const errText = await patchRes.text();
+          console.warn("Convert-to-Gold balance update failed:", errText);
         }
       }
-
-      const billSummaryData = {
-        customerId: customerRecordId,
-        customerName: selectedCustomer.name,
-        customerType: customerType,
-        billType: customerType === "B2C" ? "B2C" : "B2B",
-        date: date,
-        oldBalance: Number(final_OB.toFixed(3)),
-        ob: Number(customerOldBalance.toFixed(3)),
-        issuePure: Number(totalIssuePure.toFixed(3)),
-        receiptPure: Number(totalReceiptPure.toFixed(3)),
-        cashPure: Number(totalCashPure.toFixed(3)),
-        gstPure: Number((gstEnabled ? gstPureValue : 0).toFixed(3)),
-        advanceBalance: Number(final_AB.toFixed(3)),
-        advBal: Number(customerAdvanceBalance.toFixed(3)),
-        currentBalance: newNet,
-        issueItems: issueItems.map((item) => ({
-          name: item.item,
-          gross: fmt(item.weight),
-          m: fmt(item.stone),
-          net: fmt(item.weight - item.stone),
-          calc: fmt(item.touch),
-          pure: fmt(item.purity),
-        })),
-        receiptItems: receiptItems.map((item) => ({
-          name: item.item,
-          weight: fmt(item.weight),
-          result: fmt(item.stone),
-          calc: fmt(item.touch),
-          pure: fmt(item.purity),
-        })),
-        cashTable: cashTable,
-        gst: gstEnabled
-          ? {
-            enabled: true,
-            percentage: (
-              (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
-              (isCgstEnabled ? parseFloat(cgst) || 0 : 0)
-            ).toString(),
-            amount: gstAmount,
-            sgst: isSgstEnabled ? sgst : "0",
-            cgst: isCgstEnabled ? cgst : "0",
-            igst: isIgstEnabled ? igst : "0",
-            taxableAmount: taxableBillAmount.toFixed(2),
-            finalAmount: finalBillAmountWithGst.toFixed(2),
-          }
-          : null,
-      };
-
-      // AFTER
-      const billTypeForSave = customerType === "B2C" ? "B2C" : "B2B";
-      const billEndpoint = isEditMode
-        ? `${base_url}/billSummary/${editBill._id}?billType=${billTypeForSave}`
-        : `${base_url}/billSummary`;
-      const billMethod = isEditMode ? "PUT" : "POST";
-
-      if (isEditMode) {
-        billSummaryData.billNo = editBill.billNo || editBill.invoiceNo || "";
-        billSummaryData.invoiceNo = editBill.billNo || editBill.invoiceNo || "";
-      }
-
-      const billRes = await fetch(billEndpoint, {
-        method: billMethod,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(billSummaryData),
-      });
-
-      if (!billRes.ok) {
-        const billErrText = await billRes.text(); // ← reveals actual server error
-        throw new Error(`Failed to save full bill summary: ${billErrText}`);
-      }
-      const savedBillSummary = await billRes.json();
-      const generatedBillNo = savedBillSummary?.billNo || savedBillSummary?.invoiceNo || "N/A";
-
-      console.log("✅ Entire bill saved successfully");
-
-      navigation.navigate("BillPreview", {
-        customer: {
-          name: selectedCustomer.name,
-          id: selectedCustomer.id || selectedCustomer._id,
-          customerId: customerRecordId,
-          customerType: customerType,
-          billNo: generatedBillNo,
-          ...(customerType === "B2C" ? { invoiceNo: generatedBillNo } : {}),
-          phone: selectedCustomer.phone || "",
-          type: billTypeLabel || customerType, // ✅ GST label support
-          address: selectedCustomer.address || "",
-          gstin: selectedCustomer.gst || "",
-          date,
-          oldBalance: fmt(customerOldBalance),
-          advanceBalance: fmt(customerAdvanceBalance),
-          transactionId: savedTransaction?._id || "",
-          autoShare: true,
-        },
-        issueItems: issueItems.map((item) => ({
-          name: item.item,
-          gross: fmt(item.weight),
-          m: fmt(item.stone),
-          net: fmt(item.weight - item.stone),
-          calc: fmt(item.touch),
-          pure: fmt(item.purity),
-        })),
-        receiptItems: receiptItems.map((item) => ({
-          name: item.item,
-          weight: fmt(item.weight),
-          result: fmt(item.stone),
-          calc: fmt(item.touch),
-          pure: fmt(item.purity),
-        })),
-        cashTable: cashTable,
-        gst: gstEnabled
-          ? {
-            enabled: gstEnabled,
-            percentage: (
-              (isSgstEnabled ? parseFloat(sgst) || 0 : 0) +
-              (isCgstEnabled ? parseFloat(cgst) || 0 : 0)
-            ).toString(),
-            amount: gstAmount,
-            sgst: isSgstEnabled ? sgst : "0",
-            cgst: isCgstEnabled ? cgst : "0",
-            igst: isIgstEnabled ? igst : "0",
-            taxableAmount: taxableBillAmount.toFixed(2),
-            finalAmount: finalBillAmountWithGst.toFixed(2),
-            showInBill: true,
-          }
-          : {
-            enabled: false,
-            sgst: "0",
-            cgst: "0",
-            igst: "0"
-          },
-        summary: {
-          ob: fmt(customerOldBalance),
-          issue: fmt(totalIssuePure),
-          gstPure: fmt(gstPureValue),
-          receipt: fmt(totalReceiptPure),
-          cash: fmt(totalCashPure),
-          current: fmt(newNet),
-          obPlusIssue: fmt(customerOldBalance + totalIssuePure + gstPureValue),
-          receiptPlusCash: fmt(totalReceiptPure + totalCashPure),
-        },
-      });
-    } catch (error) {
-      console.error("❌ Error saving transaction:", error);
-      Alert.alert("Error", `Failed to save transaction: ${error.message}`);
+    } catch (err) {
+      console.warn("Convert-to-Gold network error:", err?.message || err);
     }
+    setB2cConversion({
+      applied: true,
+
+      goldWeight: convertedGold,
+      updatedOB,
+      updatedAB,
+    });
+    Alert.alert("Converted", `UPI ₹${upi.toFixed(2)} = ${convertedGold.toFixed(3)}g`);
   };
 
-  // -----------------------
-  // UI rendering
-  // -----------------------
-  return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: "#F7F7F7" }}
-      nestedScrollEnabled={true}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
-      <CommonHeader
-        title="Create Transaction"
-        backgroundColor="#F7F7F7"
-        titleColor="#000"
-        statusBarStyle="dark-content"
-        left={
-          <TouchableOpacity onPress={() => navigation.navigate("Home")}>
-            <Icon name="arrow-left" size={32} color="#000" />
-          </TouchableOpacity>
-        }
-        right={
-          <View style={styles.headerIcons}>
-            {route.params?.printAgain && route.params?.lastBill && (
-              <TouchableOpacity
-                onPress={() => navigation.navigate("BillPreview", route.params.lastBill)}
-                style={{ marginRight: 15 }}
-              >
-                <Icon name="printer-refresh" color="#007bff" size={30} />
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              onPress={() => navigation.navigate("Home")}
-              style={{ marginRight: 15 }}
-            >
-              <Icon name="home-outline" color="#000" size={30} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() =>
-                navigation.navigate("CreateCustomerMaster", { type: "B2B" })
+  const handleNullifyBalance = async () => {
+    if (!isB2C) return;
+
+    Alert.alert(
+      "Nullify Balance",
+      "Are you sure you want to set the customer balance to zero? This will save the bill with a zero balance.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Yes, Nullify",
+          onPress: async () => {
+            // Update local state so the preview shows 0 and save a zero-balance snapshot.
+            try {
+              const customerId = customer?.id || customer?._id || customer?.customerId || transactions?.[0]?.customerId || "";
+              if (customerId) {
+                const activeBillId = transactions?.[0]?._id || transactions?.[0]?.id || "";
+                await fetch(`${base_url}/customersB2C/${customerId}/balances`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    oldBalance: 0,
+                    advanceBalance: 0,
+                    billId: activeBillId,
+                  }),
+                });
               }
-            >
-              <Feather name="user-plus" color="#000" size={30} />
-            </TouchableOpacity>
-          </View>
+            } catch (err) {
+              console.warn("Nullify balance network error:", err);
+            }
+
+            setB2cConversion({
+              applied: true,
+              goldWeight: 0,
+              updatedOB: 0,
+              updatedAB: 0,
+            });
+            setB2cCashReceived(toNum(b2cFinalPayableAmount, 0).toFixed(2));
+            await handleSaveBill({ b2cForceZero: true });
+            Alert.alert("Success", "Balance set to zero for this transaction.");
+          }
         }
-      />
+      ]
+    );
+  };
 
-      <View style={{ paddingHorizontal: 16, paddingBottom: 300 }}>
+  const handleSaveBalanceB2C = async () => {
+    if (!isB2C) return;
+    const cashVal = String(b2cCashReceived || "").trim();
+    if (!cashVal) {
+      Alert.alert("Missing Cash Received", "Please enter Cash Received before saving balance.");
+      return;
+    }
+    await handleSaveBill({ b2cSaveBalance: true });
+  };
 
-        {/* CUSTOMER CART */}
-        {!selectedCustomer && !loadingCustomers && (
-          <View style={styles.card}>
-            <View style={styles.sectionHeader}>
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-              >
-                <Icon name="account-group" size={24} />
-                <Text style={styles.sectionTitle}>All Customers</Text>
-              </View>
-              <TouchableOpacity onPress={handleRefresh}>
-                <Icon name="refresh" color="#000" size={30} />
+  const handleSaveBill = async (options = {}) => {
+    if (isSavingBillRef.current && savePromiseRef.current) {
+      return savePromiseRef.current;
+    }
+    const {
+      b2cSaveBalance = false,
+      b2cForceZero = false,
+      silent = false,
+      force = false,
+    } = options || {};
+    const saveTask = (async () => {
+      try {
+        isSavingBillRef.current = true;
+        const billType = String(customer?.type || customer?.customerType || "B2B").toUpperCase() === "B2C" ? "B2C" : "B2B";
+        const isB2BBill = billType === "B2B";
+        const isB2CBill = billType === "B2C";
+        const forceZeroBalance = isB2CBill && b2cForceZero;
+        const customerId = getCustomerIdForSave();
+
+        if (!customerId) {
+          Alert.alert("Error", "Customer ID is missing. Please select a valid customer and try again.");
+          return;
+        }
+
+      const billNo = currentBillNo;
+      const allowBillNoForSave = Boolean(billNo);
+
+      const b2cItems = normalizedB2CItems;
+      const b2cIssueRows = b2cItems.map((it) => {
+        const weight = toNum(it?.weight, 0);
+        const touch = toNum(it?.touch, 0);
+        const wastage = toNum(it?.wastage, 0);
+        const rate = toNum(it?.rate, 0);
+        const total = toNum(it?.total, 0);
+        const gstValue = toNum(it?.gst, 0);
+        const finalValue = toNum(it?.final, total);
+        const pure = toNum(it?.pure, (weight * touch) / 100);
+        const displayName = it?.displayItemName || it?.itemName || "";
+        return {
+          name: displayName,
+          itemName: it?.itemName || displayName,
+          displayItemName: displayName,
+          weight,
+          touch,
+          wastage,
+          rate,
+          total,
+          gst: gstValue,
+          final: finalValue,
+          gross: weight.toFixed(3),
+          m: wastage.toFixed(3),
+          net: weight.toFixed(3),
+          calc: touch.toFixed(3),
+          pure: pure.toFixed(3),
+        };
+      });
+      const b2cReceiptRows = normalizedB2CReceiptItems.map((it) => ({
+        name: it?.name || "",
+        weight: toNum(it?.weight, 0).toFixed(3),
+        sub: toNum(it?.sub, 0).toFixed(3),
+        netWeight: toNum(it?.netWeight, toNum(it?.result, toNum(it?.pure, 0))).toFixed(3),
+        rate: toNum(it?.rate, 0).toFixed(2),
+        amount: toNum(it?.amount, 0).toFixed(2),
+        // compatibility
+        result: toNum(it?.netWeight, toNum(it?.result, toNum(it?.pure, 0))).toFixed(3),
+        calc: toNum(it?.calc, 0).toFixed(3),
+        pure: toNum(it?.netWeight, toNum(it?.result, toNum(it?.pure, 0))).toFixed(3),
+      }));
+      const issueRowsToSave = isB2BBill ? safeIssueItems : b2cIssueRows;
+      const receiptRowsToSave = isB2BBill ? safeReceiptItems : b2cReceiptRows;
+      const displayedIssue = toNum(displaySummary?.issue, toNum(summary?.issue, toNum(totalIssuePure, 0)));
+      const displayedReceipt = toNum(displaySummary?.receipt, toNum(summary?.receipt, toNum(totalReceiptPure, 0)));
+      const displayedCash = toNum(displaySummary?.cash, toNum(summary?.cash, 0));
+      const displayedGstPure = toNum(displaySummary?.gstPure, toNum(summary?.gstPure, 0));
+      const totalIssueWeightToSave = isB2BBill
+        ? displayedIssue
+        : b2cIssueRows.reduce((sum, row) => sum + toNum(row?.pure, 0), 0);
+      const totalReceiptWeightToSave = isB2BBill
+        ? displayedReceipt
+        : b2cReceiptRows.reduce((sum, row) => sum + toNum(row?.netWeight, 0), 0);
+      const b2cFinalBalanceGrams = toNum(b2cDisplayBalanceAfterCashGrams, 0);
+      const b2cOldBalanceForSave = Math.max(0, b2cFinalBalanceGrams);
+      const b2cAdvanceBalanceForSave = Math.max(0, -b2cFinalBalanceGrams);
+      const oldBalanceForSave = isB2CBill
+        ? (forceZeroBalance ? 0 : (b2cSaveBalance ? b2cOldBalanceForSave : b2cNextOldBalance))
+        : toNum(customer?.oldBalance, summaryOB);
+      const advanceBalanceForSave = isB2CBill
+        ? (forceZeroBalance ? 0 : (b2cSaveBalance ? b2cAdvanceBalanceForSave : b2cNextAdvanceBalance))
+        : toNum(customer?.advanceBalance, summaryAB);
+      const b2bFinalNetBalance = summaryFinal;
+      const dealerFinalNetBalance = dealerFinalBalanceRaw;
+      const finalNetBalanceForSave = isB2CBill
+        ? (forceZeroBalance ? 0 : (b2cSaveBalance ? b2cFinalBalanceGrams : (toNum(oldBalanceForSave, 0) - toNum(advanceBalanceForSave, 0))))
+        : toNum(isDealerPreview ? dealerFinalNetBalance : b2bFinalNetBalance, 0);
+      const finalSavedBalanceState = deriveBalanceStateFromNet(finalNetBalanceForSave);
+      const finalBalanceTypeCode = finalSavedBalanceState.advanceBalance > 0 ? "AB" : "OB";
+      const finalBalanceValue = finalSavedBalanceState.advanceBalance > 0
+        ? finalSavedBalanceState.advanceBalance
+        : finalSavedBalanceState.oldBalance;
+      const availableBalanceForSave = finalNetBalanceForSave;
+      const finalB2BOldBalance = isB2BBill
+        ? (availableBalanceForSave > 0 ? availableBalanceForSave : 0)
+        : oldBalanceForSave;
+      const finalB2BAdvanceBalance = isB2BBill
+        ? (availableBalanceForSave < 0 ? Math.abs(availableBalanceForSave) : 0)
+        : advanceBalanceForSave;
+      const finalDealerOldBalance = isDealerPreview
+        ? (availableBalanceForSave >= 0 ? availableBalanceForSave : 0)
+        : oldBalanceForSave;
+      const finalDealerAdvanceBalance = isDealerPreview
+        ? (availableBalanceForSave < 0 ? Math.abs(availableBalanceForSave) : 0)
+        : advanceBalanceForSave;
+
+      const previousOldBalance = isB2CBill && b2cSaveBalance && !forceZeroBalance ? b2cOldBalanceForSave : toNum(summaryOB, 0);
+      const previousAdvanceBalance = isB2CBill && b2cSaveBalance && !forceZeroBalance ? b2cAdvanceBalanceForSave : toNum(summaryAB, 0);
+      const balanceType = finalBalanceTypeCode;
+      const finalBalance = finalBalanceValue;
+      const customerRecordType = isDealerPreview ? previewType : billType;
+      const saveSignature = [
+        customerId,
+        currentBillNo || "",
+        customerRecordType,
+        Number(displayedIssue).toFixed(3),
+        Number(displayedReceipt).toFixed(3),
+        Number(displayedCash).toFixed(3),
+        Number(finalBalanceValue).toFixed(3),
+        finalBalanceTypeCode,
+      ].join("|");
+      if (!force && lastSavedSignatureRef.current === saveSignature && savedBillIdRef.current) {
+        return { _id: savedBillIdRef.current, skipped: true };
+      }
+      const saveSummary = {
+        ...summary,
+        ob: previousOldBalance,
+        ab: previousAdvanceBalance,
+        issue: displayedIssue,
+        receipt: displayedReceipt,
+        cash: displayedCash,
+        gstPure: displayedGstPure,
+        current: finalNetBalanceForSave,
+        balanceType: finalBalanceTypeCode,
+        balanceValue: finalBalanceValue,
+      };
+
+      const normalizedBillDate = (() => {
+        const d = customer?.date;
+        if (!d || typeof d !== 'string' || d.toLowerCase().includes('invalid')) return new Date().toISOString().split('T')[0];
+        if (d.includes('/')) return d.split("/").reverse().join("-");
+        if (d.includes('-')) {
+           const parts = d.split("-");
+           if (parts[0].length === 2) return parts.reverse().join("-");
+           return d;
+        }
+        return d;
+      })();
+
+      const previewSnapshot = JSON.parse(JSON.stringify({
+        header: {
+          billNo: allowBillNoForSave ? String(billNo) : "",
+          type: isDealerPreview
+            ? (customer?.type || customer?.customerType || previewTx?.dealerType || "Dealer")
+            : billType,
+          date: normalizedBillDate,
+          customerName: customer?.name || customer?.customerName || "Unknown",
+          phoneNumber:
+            customer?.phoneNumber ||
+            customer?.phone ||
+            customer?.customerNumber ||
+            "",
+          address: customer?.address || "",
+          gstin: customer?.gstin || customer?.gst || "",
+          oldBalance: previousOldBalance,
+          advanceBalance: previousAdvanceBalance,
+          startLabel: summaryStartLabel,
+          finalLabel: summaryFinalLabel,
+        },
+        issue: {
+          items: issueRowsToSave,
+          totals: {
+            tw: totalIssueTW,
+            nw: totalIssueNW,
+            pure: totalIssuePure,
+          },
+        },
+        receipt: {
+          items: receiptRowsToSave,
+          totals: {
+            tw: totalReceiptTW,
+            nw: totalReceiptNW,
+            pure: totalReceiptPure,
+          },
+        },
+        cash: {
+          rows: safeCashTable,
+          totalPure: toNum(displaySummary?.cash, toNum(summary?.cash, toNum(cashFromRows, 0))).toFixed(3),
+        },
+        totals: {
+          totalIssueWeight: totalIssueWeightToSave,
+          totalReceiptWeight: totalReceiptWeightToSave,
+          totalCashPure: toNum(cashFromRows, 0).toFixed(3),
+          issuePure: toNum(displayedIssue, 0).toFixed(3),
+          receiptPure: toNum(displayedReceipt, 0).toFixed(3),
+          cashPure: toNum(displayedCash, 0).toFixed(3),
+        },
+        summary: {
+          ...saveSummary,
+          previousOldBalance,
+          previousAdvanceBalance,
+          finalBalance,
+          finalLabel: finalBalanceTypeCode === "AB" ? "Advance Balance" : "Old Balance",
+          balanceType,
+          balanceValue: finalBalanceValue,
+        },
+        displaySummary: {
+          issue: displaySummary?.issue ?? displayedIssue,
+          receipt: displaySummary?.receipt ?? displayedReceipt,
+          cash: displaySummary?.cash ?? displayedCash,
+          gstPure: displaySummary?.gstPure ?? displayedGstPure,
+        },
+        dealerSummary: dealerSummaryValues,
+        isDealerPreview,
+        billType,
+        report: report || null,
+        items: isB2BBill ? [] : b2cItems,
+        gst,
+      }));
+
+      const payload = {
+        customerId: String(customerId),
+        customerName: customer?.name || customer?.customerName || "Unknown",
+        phoneNumber:
+          customer?.phoneNumber ||
+          customer?.phone ||
+          customer?.customerNumber ||
+          "",
+        address: customer?.address || "",
+        gstin: customer?.gstin || customer?.gst || "",
+        ...(allowBillNoForSave ? { billNo: String(billNo) } : {}),
+        billType,
+        customerType: customerRecordType,
+        dealerType: isDealerPreview ? (customer?.type || customer?.customerType || previewTx?.dealerType || "Dealer") : "",
+        receiptImage: dealerProofImageUri || null,
+        proofImage: dealerProofImageUri || null,
+        image: dealerProofImageUri || null,
+        issueItems: issueRowsToSave,
+        receiptItems: receiptRowsToSave,
+        ...(isB2BBill ? {} : { items: b2cItems }),
+        totalIssueWeight: totalIssueWeightToSave,
+        totalReceiptWeight: totalReceiptWeightToSave,
+        cashAmount: toNum(report?.cash, displayedCash),
+        kadaiAmount: isB2CBill ? Math.max(0, toNum(kadaiAmount, 0)) : 0,
+        manualCashAmount: isB2CBill ? b2cCashReceivedNum.toFixed(2) : (hasManualCashForB2C ? parsedCashAmount.toFixed(2) : ""),
+        upiAmount: hasManualCashForB2C ? parsedUpiAmount.toFixed(2) : "",
+        b2cUpiGoldValue: b2cConversion.applied ? b2cUpiGoldValue.toFixed(3) : "",
+        isConvertedToGold: Boolean(b2cConversion.applied || transactions?.[0]?.isConvertedToGold),
+        goldRate: toNum(customer?.goldRate, currentB2CGoldRate),
+        advanceBalance: isDealerPreview ? finalDealerAdvanceBalance : finalB2BAdvanceBalance,
+        oldBalance: isDealerPreview ? finalDealerOldBalance : finalB2BOldBalance,
+        availableBalance: availableBalanceForSave,
+        currentBalance: availableBalanceForSave,
+        createdAt: new Date().toISOString(),
+        cashTable: safeCashTable,
+        ...(isB2BBill
+          ? {
+            ob: toNum(oldBalanceForSave, 0),
+            advBal: toNum(advanceBalanceForSave, 0),
+          }
+          : {}),
+        summary: saveSummary,
+        previousOldBalance,
+        previousAdvanceBalance,
+        finalBalance,
+        balanceType,
+        balanceValue: finalBalanceValue,
+        totals: {
+          issuePure: toNum(displayedIssue, 0),
+          receiptPure: toNum(displayedReceipt, 0),
+          cashPure: toNum(displayedCash, 0),
+          totalCashPure: toNum(cashFromRows, 0),
+        },
+        previewSnapshot,
+        gst,
+        ...(!isB2BBill && billNo ? { invoiceNo: String(billNo) } : {}),
+        date: normalizedBillDate,
+      };
+
+      if (isB2CBill) {
+        const customerEndpoint = `${base_url}/customersB2C/${customerId}/balances`;
+        const updateRes = await fetch(customerEndpoint, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            oldBalance: toNum(oldBalanceForSave, 0),
+            advanceBalance: toNum(advanceBalanceForSave, 0),
+            billId: transactions?.[0]?._id || transactions?.[0]?.id || "",
+          }),
+        });
+        if (!updateRes.ok) {
+          const err = await updateRes.text();
+          throw new Error(err || "Failed to update B2C customer balance");
+        }
+      }
+
+      const existingBillId = savedBillIdRef.current || route.params?.savedBillId || route.params?.billId || "";
+      const saveUrl = existingBillId
+        ? `${base_url}/billSummary/${existingBillId}?billType=${billType}`
+        : `${base_url}/billSummary`;
+      const res = await fetch(saveUrl, {
+        method: existingBillId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(err || "Failed to save bill");
+      }
+
+      const savedBill = await res.json();
+      savedBillIdRef.current = savedBill?._id || savedBill?.id || existingBillId || "";
+      lastSavedSignatureRef.current = saveSignature;
+      hasAutoSavedRef.current = true;
+      if (!silent) {
+        Alert.alert("Success", "Bill saved successfully");
+      }
+      return savedBill;
+      } catch (error) {
+      console.error("Save Bill error:", error);
+        if (!silent) {
+          Alert.alert("Error", `Failed to save bill: ${error.message}`);
+        }
+        return null;
+      } finally {
+        isSavingBillRef.current = false;
+        savePromiseRef.current = null;
+      }
+    })();
+    savePromiseRef.current = saveTask;
+    return saveTask;
+  };
+
+  useEffect(() => {
+    if (!shouldAutoSavePreview) return;
+    const customerId = getCustomerIdForLookup();
+    if (!customerId) return;
+    const issueKey = safeIssueItems.length;
+    const receiptKey = safeReceiptItems.length;
+    const cashKey = safeCashTable.length;
+    const totalsKey = [
+      summaryStartValue,
+      displaySummary.issue,
+      displaySummary.receipt,
+      displaySummary.cash,
+      isDealerPreview ? dealerFinalBalanceRaw : summaryFinal,
+      currentBillNo || "",
+      customer?.date || "",
+    ].join("|");
+    const autoSaveKey = `${customerId}|${issueKey}|${receiptKey}|${cashKey}|${totalsKey}`;
+    if (lastAutoSaveKeyRef.current === autoSaveKey) return;
+    lastAutoSaveKeyRef.current = autoSaveKey;
+    const timer = setTimeout(() => {
+      handleSaveBill({ silent: true });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [
+    shouldAutoSavePreview,
+    isDealerPreview,
+    safeIssueItems.length,
+    safeReceiptItems.length,
+    safeCashTable.length,
+    summaryStartValue,
+    displaySummary.issue,
+    displaySummary.receipt,
+    displaySummary.cash,
+    dealerFinalBalanceRaw,
+    summaryFinal,
+    currentBillNo,
+    customer?.date,
+  ]);
+
+  useEffect(() => {
+    if (!shouldAutoSavePreview) return;
+    const unsubscribe = navigation.addListener("beforeRemove", (event) => {
+      if (allowNextBeforeRemoveRef.current) {
+        allowNextBeforeRemoveRef.current = false;
+        return;
+      }
+      event.preventDefault();
+      handleSaveBill({ silent: true })
+        .finally(() => {
+          allowNextBeforeRemoveRef.current = true;
+          navigation.dispatch(event.data.action);
+        });
+    });
+    return unsubscribe;
+  }, [navigation, shouldAutoSavePreview]);
+
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      style={{ flex: 1, backgroundColor: '#fff' }}
+    >
+      <View style={{ flex: 1 }}>
+        {/* FIXED HEADER BAR */}
+        {!isPrinting && (
+          <View style={styles.buttonContainer}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <TouchableOpacity style={styles.headerBtn} onPress={() => {
+                if (customer && (customer.customerId || customer.id) && !items) {
+                  navigation.navigate("BillHistory", { customer: customer });
+                } else {
+                  navigation.navigate(order ? "Order" : estimate ? "Estimate" : isB2C ? "B2CCalculationPage" : "B2BCalculationPage" );
+                }
+              }}>
+                <Icon name="arrow-left" size={22} color="#1E88E5" />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate("Home")}>
+                <Icon name="home" size={22} color="#1E88E5" />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.headerBtn} onPress={handlePrint}>
+                <Icon name="printer" size={22} color="#1E88E5" />
               </TouchableOpacity>
             </View>
 
-            <View style={styles.searchRow}>
-              <TextInput
-                placeholder="Customers Name and Phone No...."
-                style={styles.searchBox}
-                value={cartSearch}
-                onChangeText={setCartSearch}
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                style={[styles.actionIcon, isSharing && { opacity: 0.5 }]}
+                onPress={openDirectWhatsApp}
+                disabled={isSharing}
+              >
+                <Icon name="whatsapp" size={24} color="#25D366" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionIcon, isSharing && { opacity: 0.5 }]}
+                onPress={handleWhatsAppShare}
+                disabled={isSharing}
+              >
+                <Icon name="share-variant" size={24} color="#1E88E5" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.actionIcon, isSharing && { opacity: 0.5 }]}
+                onPress={handleDownload}
+                disabled={isSharing}
+              >
+                <Icon name="download" size={24} color="#1E88E5" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        <ScrollView
+          style={styles.page}
+          contentContainerStyle={{ flexGrow: 1, paddingBottom: 160 }}
+          showsVerticalScrollIndicator={true}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          nestedScrollEnabled={true}
+          bounces={true}
+        >
+          {/* TRANSFER BUTTONS FOR ESTIMATE */}
+          {estimate && (
+            <View style={styles.transferContainer}>
+              <TouchableOpacity style={styles.transferBtnB2B} onPress={handleTransferToB2B}>
+                <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 5 }} />
+                <Text style={styles.transferBtnText}>Transfer to B2B</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.transferBtnB2C} onPress={handleTransferToB2C}>
+                <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 5 }} />
+                <Text style={styles.transferBtnText}>Transfer to B2C</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={styles.headerBox}>
+            <Text style={styles.billTitle}>{estimate ? 'ESTIMATE BILL' : suspense ? 'SUSPENSE BILL' : order ? 'ORDER RECEIPT' : 'BILL'}</Text>
+
+            <View style={styles.headerRow}>
+              <View style={styles.headerColLeft}>
+                {!estimate && !suspense && !order && <Text style={styles.headerText}>Bill No : {currentBillNo || 'N/A'}</Text>}
+                {order && <Text style={styles.headerText}>Order No : {order.orderNo}</Text>}
+                <Text style={styles.headerText}>Name : {estimate ? (estimate.itemName || "Estimate Customer") : order ? order.customer : customer.name}</Text>
+                {!estimate && <Text style={styles.headerText}>Phone : {order ? order.phone : (customer.phone || customer.phoneNumber || customer.customerNumber || 'N/A')}</Text>}
+                <Text style={styles.headerText}>Address : {customer?.address || 'N/A'}</Text>
+                <Text style={styles.headerText}>GST No : {customer?.gstin || 'N/A'}</Text>
+              </View>
+
+              <View style={styles.headerColRight}>
+                <Text style={[styles.headerText, styles.headerTextRight]}>Type : {estimate ? 'Estimate' : order ? 'Order' : customer.type}</Text>
+                <Text style={[styles.headerText, styles.headerTextRight]}>Date : {estimate ? new Date().toLocaleDateString() : order ? order.date : customer.date}</Text>
+                {estimate ? (
+                  <Text style={[styles.headerText, styles.headerTextRight]}>OD : N/A</Text>
+                ) : (
+                  <>
+                    {customer.oldBalance && parseFloat(customer.oldBalance) !== 0 ? (
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Old Balance : {customer.oldBalance}</Text>
+                    ) : null}
+                    {customer.advanceBalance && parseFloat(customer.advanceBalance) !== 0 ? (
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Advance Balance : {customer.advanceBalance}</Text>
+                    ) : null}
+                    {isB2C && customer.advanceBalance && parseFloat(customer.advanceBalance) !== 0 && toNum(b2cGoldRateAtPurchase, 0) > 0 ? (
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Gold Rate (Past) : {"\u20B9"}{toNum(b2cGoldRateAtPurchase).toFixed(2)}/g</Text>
+                    ) : null}
+                    {isB2C && homeGoldRateNum > 0 ? (
+                      <Text style={[styles.headerText, styles.headerTextRight]}>Gold Rate Today : {"\u20B9"}{toNum(homeGoldRateNum).toFixed(2)}/g</Text>
+                    ) : null}
+                  </>
+                )}
+              </View>
+            </View>
+          </View>
+
+          {!estimate && !suspense && !order && !isB2C && isDealerPreview && dealerProofImageUri ? (
+            <View style={styles.sectionBox}>
+              <Text style={styles.sectionTitle}>RECEIPT PROOF :</Text>
+              <Image
+                source={{ uri: dealerProofImageUri }}
+                style={{ width: "100%", height: 170, borderRadius: 8, borderWidth: 1, borderColor: "#ddd" }}
+                resizeMode="cover"
               />
             </View>
+          ) : null}
 
-            <ScrollView style={{ maxHeight: 200 }}>
-              {!cartSearch && recentNames.length > 0 && (
-                <View>
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: "#888",
-                      marginBottom: 10,
-                      marginLeft: 5,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    RECENT TRANSACTIONS
-                  </Text>
-                  {customers
-                    .filter((c) => recentNames.includes(c.name))
-                    .map((cust, index) => {
-                      let currentBalance = Number(cust.ob || 0);
-                      let advanceBalance = Number(cust.ab || 0);
-                      if (currentBalance < 0) {
-                        advanceBalance += Math.abs(currentBalance);
-                        currentBalance = 0;
-                      }
-                      return (
-                        <TouchableOpacity
-                          key={`recent-${cust.id || index}`}
-                          onPress={() => setSelectedCustomer(cust)}
-                          style={[
-                            styles.listItem,
-                            { borderLeftWidth: 4, borderLeftColor: "#2E7D32" },
-                          ]}
-                        >
-                          <View>
-                            <Text style={styles.listItemText}>
-                              <Text
-                                style={{ fontWeight: "bold", color: "#000" }}
-                              >
-                                {cust.name}
-                              </Text>{" "}
-                              | P : {cust.phone}
-                            </Text>
-                            <Text style={styles.balanceText}>
-                              OB: {Number(currentBalance || 0).toFixed(3)}g{" "}
-                              {advanceBalance > 0
-                                ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g`
-                                : ""}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: "#888",
-                      marginVertical: 10,
-                      marginLeft: 5,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    ALL CUSTOMERS
-                  </Text>
+          {estimate ? (
+            <>
+              {/* ESTIMATE DETAILS */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ESTIMATE DETAILS :</Text>
+
+                {/* Table Header */}
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.cell, { flex: 2 }]}>Item Name</Text>
+                  <Text style={styles.cell}>Wt (g)</Text>
+                  <Text style={styles.cell}>W%</Text>
+                  <Text style={styles.cell}>Gross Wt</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Net Amt</Text>
+                  {estimate.enableGST && <Text style={styles.cell}>GST</Text>}
+                  <Text style={styles.cell}>Total</Text>
                 </View>
-              )}
-              {filteredCartCustomers.length > 0 ? (
-                filteredCartCustomers.map((cust, index) => {
-                  // Calculate balances: if old balance (ob) is negative, convert to advance balance
-                  let currentBalance = Number(cust.ob || 0);
-                  let advanceBalance = Number(cust.ab || 0);
 
-                  if (currentBalance < 0) {
-                    advanceBalance += Math.abs(currentBalance);
-                    currentBalance = 0;
-                  }
-
-                  return (
-                    <TouchableOpacity
-                      key={cust.id || index}
-                      onPress={() => setSelectedCustomer(cust)}
-                      style={styles.listItem}
-                    >
-                      <View>
-                        <Text style={styles.listItemText}>
-                          <Text style={{ fontWeight: "bold", color: "#000" }}>
-                            {cust.name}
-                          </Text>{" "}
-                          | P : {cust.phone}
-                        </Text>
-                        <Text style={styles.balanceText}>
-                          OB: {Number(currentBalance || 0).toFixed(3)}g{" "}
-                          {advanceBalance > 0
-                            ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g`
-                            : ""}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })
-              ) : (
-                <Text style={styles.infoText}>No customers found</Text>
-              )}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* CUSTOMER INFO */}
-        {selectedCustomer && (
-          <View style={styles.card}>
-            <View style={styles.sectionHeader}>
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-              >
-                <Icon name="account-circle" size={24} />
-                <Text style={styles.sectionTitle}>Customer Info</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.changeButton}
-                onPress={() => {
-                  setSelectedCustomer(null);
-                  setSearch("");
-                  setPhone("");
-                  setCartSearch("");
-                }}
-              >
-                <Icon name="account-switch" size={20} color="#1E88E5" />
-                <Text style={styles.changeButtonText}>Change</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.customerInfoRow}>
-              <View style={styles.customerDetails}>
-                <TouchableOpacity onPress={() => {navigation.navigate('CustomerDataList', { customerId: selectedCustomer.id })}}>
-                  <Text style={styles.infoText}>{selectedCustomer.name}</Text>
-                </TouchableOpacity>
-                {/* <Text style={styles.infoText}>
-                  Company: {selectedCustomer.company}
-                </Text> */}
-                <Text style={styles.infoText}>
-                  Phone: {selectedCustomer.phone}
-                </Text>
-                {/* <Text style={styles.infoText}>
-                  Address: {selectedCustomer.address || "N/A"}
-                </Text>
-                <Text style={styles.infoText}>
-                  GST No: {selectedCustomer.gst || "N/A"}
-                </Text> */}
-              </View>
-
-              <View style={styles.balanceContainer}>
-                <Text style={styles.balanceText}>Old: {fmt(customerOldBalance)}g</Text>
-                <Text style={styles.balanceText}>Adv: {fmt(customerAdvanceBalance)}g</Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* ISSUE ENTRY */}
-        {selectedCustomer && (
-          <View style={styles.card}>
-            <View style={styles.issueHeader}>
-              <View style={styles.greenDot} />
-              <Text style={styles.sectionTitle}>Issue Entry</Text>
-              <View style={styles.cartContainer}>
-                <View style={{ position: 'relative' }}>
-                  <Icon name="cart" size={28} color="#000" />
-                  {issueItems.length > 0 && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{issueItems.length}</Text>
+                {/* Multi-item list OR single-item fallback */}
+                {estimate.items && estimate.items.length > 0
+                  ? estimate.items.map((item, idx) => (
+                    <View key={item.id || idx} style={styles.tableRow}>
+                      <Text style={[styles.cell, { flex: 2 }]}>{item.itemName}</Text>
+                      <Text style={styles.cell}>{item.weight}</Text>
+                      <Text style={styles.cell}>{item.wastagePercent}</Text>
+                      <Text style={styles.cell}>{item.grossWeight}</Text>
+                      <Text style={styles.cell}>{formatIndianNumber(item.goldRate)}</Text>
+                      <Text style={styles.cell}>â‚¹{formatIndianNumber(item.netAmount)}</Text>
+                      {estimate.enableGST && <Text style={styles.cell}>â‚¹{formatIndianNumber(item.gst)}</Text>}
+                      <Text style={[styles.cell, { fontWeight: 'bold' }]}>â‚¹{formatIndianNumber(item.totalAmount)}</Text>
                     </View>
-                  )}
+                  ))
+                  : (
+                    <View style={styles.tableRow}>
+                      <Text style={[styles.cell, { flex: 2 }]}>{estimate.itemName}</Text>
+                      <Text style={styles.cell}>{estimate.weight}</Text>
+                      <Text style={styles.cell}>{estimate.wastagePercent || 0}</Text>
+                      <Text style={styles.cell}>{estimate.grossWeight}</Text>
+                      <Text style={styles.cell}>{formatIndianNumber(estimate.goldRate)}</Text>
+                      <Text style={styles.cell}>â‚¹{formatIndianNumber(estimate.netAmount)}</Text>
+                      {estimate.enableGST && <Text style={styles.cell}>â‚¹{formatIndianNumber(estimate.gst || 0)}</Text>}
+                      <Text style={[styles.cell, { fontWeight: 'bold' }]}>â‚¹{formatIndianNumber(estimate.totalAmount)}</Text>
+                    </View>
+                  )
+                }
+              </View>
+
+              {estimateGSTEnabled && (
+                <View style={styles.sectionBox}>
+                  <Text style={styles.sectionTitle}>GST SUMMARY :</Text>
+                  <View style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>Subtotal</Text>
+                    <Text style={[styles.cell, { flex: 2 }]}>{"\u20B9"}{estimateSubTotal.toFixed(2)}</Text>
+                  </View>
+                  <View style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>GST Percentage</Text>
+                    <Text style={[styles.cell, { flex: 2 }]}>{estimateGstPercent.toFixed(2)}%</Text>
+                  </View>
+                  <View style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>GST Amount</Text>
+                    <Text style={[styles.cell, { flex: 2 }]}>{"\u20B9"}{estimateGstAmount.toFixed(2)}</Text>
+                  </View>
+                  <View style={[styles.tableRow, { backgroundColor: '#f0f0f0' }]}>
+                    <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>Final Total (Incl. GST)</Text>
+                    <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>{"\u20B9"}{estimateFinalTotal.toFixed(2)}</Text>
+                  </View>
                 </View>
-                <Text style={styles.cartText}>{totalIssuePure.toFixed(3)}g</Text>
-                <Text style={styles.cartText}>
-                  {"\u20B9"}<Text style={{ fontWeight: "bold" }}>{issueFtAmount.toFixed(2)}</Text> 
-                  {/* <Text style={{ fontSize: 12 }}>( {totalIssuePure.toFixed(3)} x {ftRateValue.toFixed(2)})</Text> */}
+              )}
+              {/* ESTIMATE GRAND TOTAL */}
+              <View style={styles.estimateTotalBox}>
+                <Text style={styles.estimateTotalLabel}>TOTAL ESTIMATE AMOUNT</Text>
+                <Text style={styles.estimateTotalValue}>
+                  {"\u20B9"}{formatIndianNumber(estimateFinalTotal)}
                 </Text>
               </View>
-            </View>
-
-            {/* SEARCH BOX */}
-            <TextInput
-              placeholder="Search items..."
-              style={styles.searchBox}
-              value={issueItemSearch}
-              onChangeText={(text) => {
-                setIssueItemSearch(text);
-                setIssueItemDropdownOpen(true);
-              }}
-              onFocus={() => setIssueItemDropdownOpen(true)}
-              onBlur={() =>
-                setTimeout(() => setIssueItemDropdownOpen(false), 200)
-              }
-            />
-
-            {issueItemDropdownOpen && !loadingItems && (
-              <View style={styles.dropdownFloating}>
-                {itemsList.length > 0 ? (
-                  itemsList
-                    .filter(
-                      (it) =>
-                        // Filter by search
-                        it.itemName
-                          .toLowerCase()
-                          .includes(issueItemSearch.toLowerCase()) &&
-                        // Filter by required type
-                        (it.type === "issue" || it.issue),
-                    )
-                    .slice(0, 3)
-                    .map((it, idx) => (
-                      <TouchableOpacity
-                        key={idx}
-                        style={[
-                          styles.listItem,
-                          styles.dropdownItemContentIssue,
-                        ]}
-                        onPress={() => {
-                          setSelectedIssueItem(it.itemName);
-                          setIssueItemDropdownOpen(false);
-                          setIssueItemSearch(it.itemName);
-                          setTouch(it.sellingTouch?.toString() || ""); // Auto-fill touch
-                        }}
-                      >
-                        <Text style={styles.dropdownItemTextIssue}>
-                          {it.itemName}
-                        </Text>
-                        <Text style={styles.dropdownItemWeightIssue}>
-                          Weight: {itemsStock[it.itemName]?.weight || 0} g
-                        </Text>
-                      </TouchableOpacity>
-                    ))
-                ) : (
-                  <Text style={styles.infoText}>No items in stock master</Text>
-                )}
-              </View>
-            )}
-
-            {/* Inputs */}
-            <View style={styles.row}>
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Weight (g)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={weight}
-                  onChangeText={setWeight}
-                  keyboardType="decimal-pad"
-                  placeholder="0.000"
-                />
-              </View>
-
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Stone (g)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={stone}
-                  onChangeText={setStone}
-                  keyboardType="decimal-pad"
-                  placeholder="0.000"
-                />
-              </View>
-            </View>
-
-            <View style={styles.row}>
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Touch (%)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={touch}
-                  onChangeText={setTouch}
-                  keyboardType="decimal-pad"
-                  placeholder="0.0"
-                />
-              </View>
-
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Purity</Text>
-                <View style={styles.purityBox}>
-                  <Text style={styles.purityText}>
-                    {fmt(calcIssuePure(weight || 0, stone || 0, touch || 0))} g
-                  </Text>
+            </>
+          ) : suspense ? (
+            <>
+              {/* SUSPENSE DETAILS */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ISSUE ITEMS :</Text>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.cell, { flex: 2 }]}>Item</Text>
+                  <Text style={styles.cell}>Wght</Text>
+                  <Text style={styles.cell}>Qty</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Pure</Text>
+                  <Text style={styles.cell}>Amt</Text>
                 </View>
-              </View>
-            </View>
-
-            <TouchableOpacity style={styles.addBtn} onPress={addIssueItem}>
-              <Text style={styles.addBtnText}>+ Add New Item (Issue)</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* ISSUE TABLE */}
-        {issueItems.length > 0 && (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Issue Entry Table</Text>
-
-            <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
-              <View style={styles.productTable}>
-                <View style={styles.productTableHeader}>
-                  <Text style={styles.productHeaderCell}>#</Text>
-                  <Text style={styles.productHeaderCell}>Kind</Text>
-                  <Text style={styles.productHeaderCell}>Item</Text>
-                  <Text style={styles.productHeaderCell}>Weight (g)</Text>
-                  <Text style={styles.productHeaderCell}>Stone (g)</Text>
-                  <Text style={styles.productHeaderCell}>Touch (%)</Text>
-                  <Text style={styles.productHeaderCell}>Pure (g)</Text>
-                  <Text style={styles.productHeaderCell}>Action</Text>
-                </View>
-
-                {issueItems.map((row, idx) => (
-                  <View key={row.id} style={styles.productTableRow}>
-                    <Text style={styles.productCell}>{idx + 1}</Text>
-                    <Text style={styles.productCell}>Issue</Text>
-                    <Text style={styles.productCell}>{row.item}</Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.weight).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.stone).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.touch).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.purity).toFixed(3)}
-                    </Text>
-                    <TouchableOpacity onPress={() => removeIssueItem(row.id)}>
-                      <Text style={[styles.actionText, { color: "#d9534f" }]}>
-                        Remove
-                      </Text>
-                    </TouchableOpacity>
+                {suspense.issueItems.map((item, idx) => (
+                  <View key={idx} style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>{item.name}</Text>
+                    <Text style={styles.cell}>{item.weight.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.count}</Text>
+                    <Text style={styles.cell}>{item.rate}</Text>
+                    <Text style={styles.cell}>{item.pure.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.amount.toFixed(2)}</Text>
                   </View>
                 ))}
+                <View style={[styles.tableRow, { backgroundColor: '#f0f0f0' }]}>
+                  <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>Total</Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalIssuePure.toFixed(3)}</Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalIssueAmount.toFixed(2)}</Text>
+                </View>
               </View>
-            </ScrollView>
-          </View>
-        )}
 
-        {/* RECEIPT ENTRY */}
-        {selectedCustomer && (
-          <View style={styles.card}>
-            <View style={styles.issueHeader}>
-              <View style={[styles.greenDot, { backgroundColor: "#0aa76a" }]} />
-              <Text style={styles.sectionTitle}>Receipt Entry</Text>
-              <View style={styles.cartContainer}>
-                <View style={{ position: 'relative' }}>
-                  <Icon name="cart" size={28} color="#000" />
-                  {receiptItems.length > 0 && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{receiptItems.length}</Text>
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>RECEIPT ITEMS :</Text>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.cell, { flex: 2 }]}>Item</Text>
+                  <Text style={styles.cell}>Wght</Text>
+                  <Text style={styles.cell}>Qty</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Pure</Text>
+                  <Text style={styles.cell}>Amt</Text>
+                </View>
+                {suspense.receiptItems.map((item, idx) => (
+                  <View key={idx} style={styles.tableRow}>
+                    <Text style={[styles.cell, { flex: 2 }]}>{item.name}</Text>
+                    <Text style={styles.cell}>{item.weight.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.count}</Text>
+                    <Text style={styles.cell}>{item.rate}</Text>
+                    <Text style={styles.cell}>{item.pure.toFixed(3)}</Text>
+                    <Text style={styles.cell}>{item.amount.toFixed(2)}</Text>
+                  </View>
+                ))}
+                <View style={[styles.tableRow, { backgroundColor: '#f0f0f0' }]}>
+                  <Text style={[styles.cell, { flex: 2, fontWeight: 'bold' }]}>Total</Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={styles.cell}></Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalReceiptPure.toFixed(3)}</Text>
+                  <Text style={[styles.cell, { fontWeight: 'bold' }]}>{suspense.totalReceiptAmount.toFixed(2)}</Text>
+                </View>
+              </View>
+
+              <View style={styles.cashBox}>
+                <Text style={styles.sectionTitle}>SUMMARY :</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 }}>
+                  <Text style={{ fontWeight: 'bold' }}>Net Pure Gold:</Text>
+                  <Text style={{ fontWeight: 'bold', color: suspense.netPure >= 0 ? '#D32F2F' : '#2E7D32' }}>{suspense.netPure.toFixed(3)} g</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ fontWeight: 'bold' }}>Net Amount:</Text>
+                  <Text style={{ fontWeight: 'bold' }}>â‚¹{suspense.netAmount.toFixed(2)}</Text>
+                </View>
+              </View>
+            </>
+          ) : order ? (
+            <>
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ORDER DETAILS :</Text>
+                <View style={{ padding: 10, flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Order No: {order.orderNo}</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Item: {order.type}</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Weight: {order.weight} GMS</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Payment: {order.payment}</Text>
+                    <Text style={{ fontSize: 16, marginBottom: 5 }}>Pending Balance: â‚¹{order.balance}</Text>
+                  </View>
+                  {order.image && (
+                    <View style={{ width: 120, height: 120, borderRadius: 10, overflow: 'hidden', backgroundColor: '#f9f9f9', borderWidth: 1, borderColor: '#eee' }}>
+                      <Image
+                        source={{ uri: order.image.startsWith('data:') || order.image.startsWith('http') ? order.image : `${base_url}/${order.image}` }}
+                        style={{ width: '100%', height: '100%' }}
+                        resizeMode="cover"
+                      />
                     </View>
                   )}
                 </View>
-                <Text style={styles.cartText}>{totalReceiptPure.toFixed(3)}g</Text>
-                <Text style={styles.cartText}>
-                  {"\u20B9"}<Text style={{ fontWeight: "bold" }}>{receiptFtAmount.toFixed(2)}</Text> 
-                  {/* <Text style={{ fontSize: 12 }}>( {totalReceiptPure.toFixed(3)} x {ftRateValue.toFixed(2)})</Text> */}
-                </Text>
               </View>
-            </View>
 
-            {/* SEARCH BOX */}
-            <TextInput
-              placeholder="Search items..."
-              style={styles.searchBox}
-              value={receiptItemSearch}
-              onChangeText={(text) => {
-                setReceiptItemSearch(text);
-                setReceiptItemDropdownOpen(true);
-              }}
-              onFocus={() => setReceiptItemDropdownOpen(true)}
-              onBlur={() =>
-                setTimeout(() => setReceiptItemDropdownOpen(false), 200)
-              }
-            />
 
-            {receiptItemDropdownOpen && !loadingItems && (
-              <View style={styles.dropdownFloating}>
-                {itemsList.length > 0 ? (
-                  itemsList
-                    .filter(
-                      (it) =>
-                        // Filter by search input
-                        it.itemName
-                          .toLowerCase()
-                          .includes(receiptItemSearch.toLowerCase()) &&
-                        // Filter by required type
-                        (it.type === "receipt" || it.receipt),
-                    )
-                    .slice(0, 3)
-                    .map((it, idx) => (
-                      <TouchableOpacity
-                        key={idx}
-                        style={[
-                          styles.listItem,
-                          styles.dropdownItemContentReceipt,
-                        ]}
-                        onPress={() => {
-                          const selectedName = it.itemName;
-                          const matchedItem = itemsList.find(
-                            (entry) => entry.itemName === selectedName,
-                          );
-                          const buyingValue = matchedItem?.buyingTouch ?? it.buyingTouch;
-                          const sellingValue = matchedItem?.sellingTouch ?? it.sellingTouch;
 
-                          setSelectedReceiptItem(selectedName);
-                          setReceiptItemDropdownOpen(false);
-                          setReceiptItemSearch(selectedName);
-                          setReceiptStone(
-                            buyingValue === null || buyingValue === undefined
-                              ? ""
-                              : String(buyingValue),
-                          ); // Buying Touch -> Result
-                          setReceiptTouch(
-                            sellingValue === null || sellingValue === undefined
-                              ? ""
-                              : String(sellingValue),
-                          ); // Selling Touch -> Touch
-                        }}
-                      >
-                        <Text style={styles.dropdownItemTextReceipt}>
-                          {it.itemName}
-                        </Text>
-                        <Text style={styles.dropdownItemWeightReceipt}>
-                          Weight: {itemsStock[it.itemName]?.weight || 0} g
-                        </Text>
-                      </TouchableOpacity>
-                    ))
+              <View style={styles.kuralContainer}>
+                <Text style={styles.kuralText}>{thirukkural}</Text>
+                <Text style={styles.visitAgainText}>Thank you for choosing NJT Jewellery!</Text>
+              </View>
+            </>
+          ) : isB2C ? (
+            <>
+              {/* B2C ITEMS */}
+              <View style={styles.sectionBox}>
+                <Text style={styles.sectionTitle}>ITEMS :</Text>
+
+                <View style={styles.tableHeader}>
+                  <Text style={styles.cell}>Item</Text>
+                  <Text style={styles.cell}>Weight</Text>
+                  <Text style={styles.cell}>Touch</Text>
+                  <Text style={styles.cell}>W/M</Text>
+                  <Text style={styles.cell}>Rate</Text>
+                  <Text style={styles.cell}>Total</Text>
+                  <Text style={styles.cell}>GST</Text>
+                  <Text style={styles.cell}>Final</Text>
+                </View>
+
+                {normalizedB2CItems.length > 0 ? (
+                  normalizedB2CItems.map((item, i) => (
+                    <View key={i} style={styles.tableRow}>
+                      <Text style={styles.cell}>{item.displayItemName || item.itemName}</Text>
+                      <Text style={styles.cell}>{item.weight}</Text>
+                      <Text style={styles.cell}>{item.touch}</Text>
+                      <Text style={styles.cell}>{item.wastage}</Text>
+                      <Text style={styles.cell}>{item.rate}</Text>
+                      <Text style={styles.cell}>{item.total}</Text>
+                      <Text style={styles.cell}>{item.gst}</Text>
+                      <Text style={styles.cell}>{item.final}</Text>
+                    </View>
+                  ))
                 ) : (
-                  <Text style={styles.infoText}>No items in stock master</Text>
+                  <Text style={styles.noData}>No items</Text>
                 )}
               </View>
-            )}
 
-            {/* INPUTS */}
-            <View style={styles.row}>
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Weight (g)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={receiptWeight}
-                  onChangeText={setReceiptWeight}
-                  keyboardType="decimal-pad"
-                  placeholder="0.000"
-                />
-              </View>
+              {/* B2C RECEIPT / OLD GOLD ITEMS */}
+              {normalizedB2CReceiptItems.length > 0 && (
+                <View style={styles.sectionBox}>
+                  <Text style={styles.sectionTitle}>RECEIPT / OLD GOLD :</Text>
 
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Result (g)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={receiptStone}
-                  onChangeText={setReceiptStone}
-                  keyboardType="decimal-pad"
-                  placeholder="0.000"
-                />
-              </View>
-            </View>
+                  <View style={styles.tableHeader}>
+                    <Text style={styles.cell}>Item</Text>
+                    <Text style={styles.cell}>Wt</Text>
+                    <Text style={styles.cell}>Sub</Text>
+                    <Text style={styles.cell}>Net Wt</Text>
+                    <Text style={styles.cell}>Rate</Text>
+                    <Text style={styles.cell}>Amt</Text>
+                  </View>
 
-            <View style={styles.row}>
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Touch (%)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={receiptTouch}
-                  onChangeText={setReceiptTouch}
-                  keyboardType="decimal-pad"
-                  placeholder="0.0"
-                />
-              </View>
+                  {normalizedB2CReceiptItems.map((item, i) => (
+                    <View key={i} style={styles.tableRow}>
+                      <Text style={styles.cell}>{item.name}</Text>
+                      <Text style={styles.cell}>{item.weight}</Text>
+                      <Text style={styles.cell}>{item.sub}</Text>
+                      <Text style={styles.cell}>{item.netWeight}</Text>
+                      <Text style={styles.cell}>{item.rate}</Text>
+                      <Text style={styles.cell}>{item.amount}</Text>
+                    </View>
+                  ))}
 
-              <View style={styles.inputBox}>
-                <Text style={styles.subLabel}>Pure</Text>
-                <View style={styles.purityBox}>
-                  <Text style={styles.purityText}>
-                    {fmt(
-                      calcReceiptPure(
-                        receiptWeight || 0,
-                        receiptStone || 0,
-                        receiptTouch || 0,
-                      ),
-                    )}{" "}
-                    g
-                  </Text>
+                  <View style={styles.totalRow}>
+                    <Text style={styles.totalCell}>Total Old Gold Amount:</Text>
+                    <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>
+                      â‚¹{totalB2COldGoldAmount.toFixed(2)}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* B2C CASH RECEIVED */}
+              {safeCashTable && safeCashTable.length > 0 && (
+                <View style={styles.sectionBox}>
+                  <Text style={styles.sectionTitle}>CASH RECEIVED :</Text>
+
+                  <View style={styles.tableHeader}>
+                    <Text style={styles.cell}>Rupees</Text>
+                    <Text style={styles.cell}>FT Rate</Text>
+                    <Text style={styles.cell}>Pure</Text>
+                  </View>
+
+                  {safeCashTable.map((entry, i) => (
+                    <View key={i} style={styles.tableRow}>
+                      <Text style={styles.cell}>{entry.rupees}</Text>
+                      <Text style={styles.cell}>{entry.goldRate}</Text>
+                      <Text style={styles.cell}>{entry.pure}</Text>
+                    </View>
+                  ))}
+
+                  <View style={styles.totalRow}>
+                    <Text style={styles.totalCell}>Total Cash Pure:</Text>
+                    <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>
+                      {safeCashTable.reduce((sum, c) => sum + toNum(c?.pure, 0), 0).toFixed(3)} g
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* GST */}
+              {gst && gst.enabled && (
+                <View style={styles.cashBox}>
+                  <Text style={styles.sectionTitle}>GST :</Text>
+                  <Text>GST Percentage: {gst.percentage}%</Text>
+                  <Text>GST Amount: ₹{gst.amount}</Text>
+                </View>
+              )}
+
+              {/* Professional B2C Total Summary Card */}
+              <View style={styles.b2cProfessionalCard}>
+                <View style={styles.b2cCardHeader}>
+                  <Icon name="sigma" size={20} color="#1B4D1B" />
+                  <Text style={styles.b2cCardTitle}>TOTAL SUMMARY</Text>
+                </View>
+
+                <View style={styles.b2cCardBody}>
+                  <View style={styles.b2cNormalRow}>
+                    <View style={styles.b2cRowLeft}>
+                      <Text style={styles.b2cLabel}>Total Cash Amount</Text>
+                    </View>
+                    <View style={styles.b2cRowRight}>
+                      <Text style={styles.b2cValue} numberOfLines={1}>
+                        {"\u20B9"} {toNum(b2cTotalCashAmount).toFixed(2)}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.b2cNormalRow}>
+                    <View style={styles.b2cRowLeft}>
+                      <Text style={styles.b2cLabel}>{b2cBalanceLabel}</Text>
+                      <Text style={styles.b2cFormulaText} numberOfLines={2}>
+                        ({toNum(b2cBalanceWeight).toFixed(3)} g x {"\u20B9"} {toNum(currentB2CGoldRate).toFixed(2)}/g)
+                      </Text>
+                    </View>
+                    <View style={styles.b2cRowRight}>
+                      <Text style={styles.b2cValue} numberOfLines={1}>
+                        {b2cHasAdvanceBalance ? "- " : ""}{"\u20B9"} {Math.abs(toNum(b2cBalanceRupees)).toFixed(2)}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  <View style={styles.b2cHighlightRow}>
+                    <View style={styles.b2cRowLeft}>
+                      <Text style={styles.b2cHighlightLabel}>Final Payable Amount</Text>
+                    </View>
+                    <View style={styles.b2cRowRight}>
+                      <Text style={styles.b2cHighlightValue} numberOfLines={1}>
+                        {"\u20B9"} {toNum(b2cFinalPayableAmount).toFixed(2)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Cash Table */}
+                  <View style={styles.b2cCashTable}>
+                    <View style={styles.b2cCashRow}>
+                      <View style={styles.b2cCashCol}>
+                        <Text style={styles.b2cCashLabel}>Cash Received</Text>
+                        <TextInput
+                          style={styles.b2cCashInput}
+                          value={b2cCashReceived}
+                          onChangeText={setB2cCashReceived}
+                          keyboardType="numeric"
+                          placeholder="0.00"
+                          placeholderTextColor="#9aa0a6"
+                          editable={!isFromHistory}
+                        />
+                      </View>
+                      <View style={styles.b2cCashCol}>
+                        <Text style={styles.b2cCashLabel}>Balance</Text>
+                        <View style={styles.b2cCashReadOnly}>
+                          <Text style={styles.b2cCashValue} numberOfLines={1}>
+                            {"\u20B9"} {toNum(b2cDisplayBalanceAfterCash).toFixed(2)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={styles.b2cNormalRow}>
+                      <View style={styles.b2cRowLeft}>
+                        <Text style={styles.b2cLabel}>Balance in grams</Text>
+                        <Text style={styles.b2cFormulaText} numberOfLines={2}>
+                          ({"\u20B9"} {toNum(b2cDisplayBalanceAfterCash).toFixed(2)} / {"\u20B9"} {toNum(currentB2CGoldRate).toFixed(2)}/g)
+                        </Text>
+                      </View>
+                      <View style={styles.b2cRowRight}>
+                        <Text style={styles.b2cValue} numberOfLines={1}>
+                          {toNum(b2cDisplayBalanceAfterCashGrams).toFixed(3)} g
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.b2cNormalRow}>
+                      <View style={styles.b2cRowLeft}>
+                        <Text style={styles.b2cLabel}>Current Balance</Text>
+                      </View>
+                      <View style={styles.b2cRowRight}>
+                        <Text style={styles.b2cValue} numberOfLines={1}>
+                          {toNum(b2cDisplayBalanceAfterCashGrams).toFixed(3)} g
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+
                 </View>
               </View>
-            </View>
+
+              {false && (
+              <View style={styles.b2cInputSection}>
+                <View style={styles.b2cInputWrapper}>
+                  <Text style={styles.b2cInputLabel}>Payment Method</Text>
+                  <View style={styles.paymentSelectorContainer}>
+                    <ScrollView 
+                      horizontal 
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.paymentSelectorScroll}
+                    >
+                      {['Cash', 'GPay', 'PhonePe', 'Paytm', 'Bank Transfer', 'Card', 'Mixed', 'Other'].map((method) => (
+                        <TouchableOpacity 
+                          key={method}
+                          style={[
+                            styles.paymentOptionCompact, 
+                            additionalPhone === method && styles.paymentOptionActive
+                          ]} 
+                          onPress={() => setAdditionalPhone(method)}
+                        >
+                          <Text style={[
+                            styles.paymentOptionTextCompact,
+                            additionalPhone === method && styles.paymentOptionTextActive
+                          ]}>{method}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+
+                  {additionalPhone === 'Other' && (
+                    <View style={{ marginTop: 10 }}>
+                      <TextInput
+                        style={styles.b2cInputField}
+                        placeholder="Enter custom payment method"
+                        value={customPayment}
+                        onChangeText={(txt) => {
+                          setCustomPayment(txt);
+                          // Optionally also set upiAmount if this is used as a amount field in some contexts,
+                          // but usually it's just a method name.
+                          // However, UI shows upiAmount is used for conversion later.
+                        }}
+                      />
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.b2cInputWrapper}>
+                  <Text style={styles.b2cInputLabel}>Cash Amount</Text>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TextInput
+                      style={[styles.b2cInputField, { flex: 1 }]}
+                      placeholder="Enter cash amount"
+                      keyboardType="numeric"
+                      value={cashAmount}
+                      onChangeText={setCashAmount}
+                    />
+                    <TouchableOpacity 
+                      style={[styles.b2cActionButton, { backgroundColor: '#37474f', paddingHorizontal: 15, height: 50, marginTop: 0, elevation: 0 }]} 
+                      onPress={() => setCashAmount(toNum(displayB2CTotalAmount).toFixed(2))}
+                    >
+                      <Text style={[styles.b2cActionButtonText, { fontSize: 13 }]}>Balance Amount</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Conversion Line */}
+                <View style={styles.b2cConversionLineContainer}>
+                  <Text style={styles.b2cConversionLineText}>
+                    {`${toNum(upiAmount || displayB2CTotalAmount).toFixed(2)} / ${toNum(currentB2CGoldRate).toFixed(0)} => ${toNum(toNum(upiAmount || displayB2CTotalAmount) / currentB2CGoldRate).toFixed(3)} g`}
+                  </Text>
+                </View>
+
+                {!(b2cConversion.applied || transactions?.[0]?.isConvertedToGold) && (
+                  <View style={styles.b2cActionButtonsRow}>
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <TouchableOpacity 
+                        style={[styles.b2cActionButton, { backgroundColor: '#2E7D32', flex: 1.2 }]} 
+                        onPress={handleConvertToGold}
+                      >
+                        <Icon name="swap-horizontal" size={20} color="#fff" />
+                        <Text style={[styles.b2cActionButtonText, { fontSize: 14 }]}>Convert to Gold</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity 
+                        style={[styles.b2cActionButton, { backgroundColor: '#d32f2f', flex: 0.8 }]} 
+                        onPress={handleNullifyBalance}
+                      >
+                        <Icon name="close-circle-outline" size={20} color="#fff" />
+                        <Text style={[styles.b2cActionButtonText, { fontSize: 14 }]}>Null</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {upiAmount > 0 && (
+                      <TouchableOpacity 
+                        style={[styles.b2cActionButton, { backgroundColor: '#1565C0' }]} 
+                        onPress={() => setShowUpi(true)}
+                      >
+                        <Icon name="qrcode-scan" size={20} color="#fff" />
+                        <Text style={styles.b2cActionButtonText}>Generate QR Code</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+              </View>
+              )}
+
+
+              {/* QR CODE */}
+              {false && showUpi && upiAmount > 0 && (
+                <View style={styles.qrContainer}>
+                  <Text style={styles.qrLabel}>UPI QR Code for ₹{upiAmount}</Text>
+                  <Text style={styles.upiIdText}>UPI ID: {upiId}</Text>
+                  <TouchableOpacity style={styles.changeUpiBtn} onPress={() => navigation.navigate('UPIControl')}>
+                    <Text style={styles.changeUpiText}>Change UPI ID</Text>
+                  </TouchableOpacity>
+                  <Image
+                    source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent("NTJ Jewellery")}&am=${upiAmount}&cu=INR`)}` }}
+                    style={{ width: 200, height: 200 }}
+                  />
+                  <TouchableOpacity style={styles.printQrBtn} onPress={handlePrintQR}>
+                    <Text style={styles.printQrText}>Print QR Code</Text>
+                  </TouchableOpacity>
+                </View >
+              )}
+
+              {/* Save Balance + Nil (Complete Settlement) */}
+              <View style={{ alignItems: 'center', marginTop: 10 }}>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.saveButton, { backgroundColor: '#2E7D32' }]}
+                    onPress={handleSaveBalanceB2C}
+                    activeOpacity={0.8}
+                  >
+                    <Icon name="content-save-outline" size={22} color="#fff" />
+                    <Text style={styles.homeButtonText}>Save Balance</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.saveButton, { backgroundColor: '#d32f2f' }]}
+                    onPress={handleNullifyBalance}
+                    activeOpacity={0.8}
+                  >
+                    <Icon name="close-circle-outline" size={22} color="#fff" />
+                    <Text style={styles.homeButtonText}>Nil</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Thirukkural Quote for B2C */}
+              <View style={styles.kuralContainer}>
+                <Text style={styles.kuralText}>{thirukkural}</Text>
+                <Text style={styles.visitAgainText}>Thank you for your visit. Please visit again.</Text>
+              </View>
+            </>
+          ) : (
+            <>
+              {isDealerPreview ? (
+                <>
+                  {/* RECEIPT */}
+                  <View style={styles.sectionBox}>
+                    <Text style={styles.sectionTitle}>RECEIPT :</Text>
+
+                    <View style={styles.tableHeader}>
+                      <Text style={styles.cell}>Name</Text>
+                      <Text style={styles.cell}>Weight</Text>
+                      <Text style={styles.cell}>Result</Text>
+                      <Text style={styles.cell}>Calc</Text>
+                      <Text style={styles.cell}>Pure</Text>
+                    </View>
+
+                    {safeReceiptItems.length > 0 ? (
+                      safeReceiptItems.map((row, i) => (
+                        <View key={i} style={styles.tableRow}>
+                          <Text style={styles.cell}>{row.name}</Text>
+                          <Text style={styles.cell}>{row.weight}</Text>
+                          <Text style={styles.cell}>{row.result}</Text>
+                          <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
+                          <Text style={styles.cell}>{row.pure}</Text>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={styles.noData}>No receipt items</Text>
+                    )}
+
+                    {/* RECEIPT TOTAL */}
+                    <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalReceiptTW}</Text>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalReceiptNW}</Text>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalReceiptPure}</Text>
+                    </View>
+                  </View>
+
+                  {/* ISSUE */}
+                  <View style={styles.sectionBox}>
+                    <Text style={styles.sectionTitle}>ISSUE :</Text>
+
+                    <View style={styles.tableHeader}>
+                      <Text style={styles.cell}>Name</Text>
+                      <Text style={styles.cell}>G.Weight</Text>
+                      {showIssueMColumn && <Text style={styles.cell}>M</Text>}
+                      {showIssueNetWeightColumn && <Text style={styles.cell}>N.Weight</Text>}
+                      <Text style={styles.cell}>Calc</Text>
+                      <Text style={styles.cell}>Pure</Text>
+                    </View>
+
+                    {safeIssueItems.map((row, i) => (
+                      <View key={i} style={styles.tableRow}>
+                        <Text style={styles.cell}>{row.name}</Text>
+                        <Text style={styles.cell}>{row.gross}</Text>
+                        {showIssueMColumn && <Text style={styles.cell}>{row.m}</Text>}
+                        {showIssueNetWeightColumn && <Text style={styles.cell}>{row.net}</Text>}
+                        <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
+                        <Text style={styles.cell}>{row.pure}</Text>
+                      </View>
+                    ))}
+
+                    {/* ISSUE TOTAL */}
+                    <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalIssueTW}</Text>
+                      {showIssueNetWeightColumn && (
+                        <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalIssueNW}</Text>
+                      )}
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalIssuePure}</Text>
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <>
+                  {/* ISSUE */}
+                  <View style={styles.sectionBox}>
+                    <Text style={styles.sectionTitle}>ISSUE :</Text>
+
+                    <View style={styles.tableHeader}>
+                      <Text style={styles.cell}>Name</Text>
+                      <Text style={styles.cell}>G.Weight</Text>
+                      {showIssueMColumn && <Text style={styles.cell}>M</Text>}
+                      {showIssueNetWeightColumn && <Text style={styles.cell}>N.Weight</Text>}
+                      <Text style={styles.cell}>Calc</Text>
+                      <Text style={styles.cell}>Pure</Text>
+                    </View>
+
+                    {safeIssueItems.map((row, i) => (
+                      <View key={i} style={styles.tableRow}>
+                        <Text style={styles.cell}>{row.name}</Text>
+                        <Text style={styles.cell}>{row.gross}</Text>
+                        {showIssueMColumn && <Text style={styles.cell}>{row.m}</Text>}
+                        {showIssueNetWeightColumn && <Text style={styles.cell}>{row.net}</Text>}
+                        <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
+                        <Text style={styles.cell}>{row.pure}</Text>
+                      </View>
+                    ))}
+
+                    {/* ISSUE TOTAL */}
+                    <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalIssueTW}</Text>
+                      {showIssueNetWeightColumn && (
+                        <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalIssueNW}</Text>
+                      )}
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalIssuePure}</Text>
+                    </View>
+                  </View>
+
+                  {/* RECEIPT */}
+                  <View style={styles.sectionBox}>
+                    <Text style={styles.sectionTitle}>RECEIPT :</Text>
+
+                    <View style={styles.tableHeader}>
+                      <Text style={styles.cell}>Name</Text>
+                      <Text style={styles.cell}>Weight</Text>
+                      <Text style={styles.cell}>Result</Text>
+                      <Text style={styles.cell}>Calc</Text>
+                      <Text style={styles.cell}>Pure</Text>
+                    </View>
+
+                    {safeReceiptItems.length > 0 ? (
+                      safeReceiptItems.map((row, i) => (
+                        <View key={i} style={styles.tableRow}>
+                          <Text style={styles.cell}>{row.name}</Text>
+                          <Text style={styles.cell}>{row.weight}</Text>
+                          <Text style={styles.cell}>{row.result}</Text>
+                          <Text style={styles.cell}>{parseFloat(row.calc || 0).toFixed(2)}</Text>
+                          <Text style={styles.cell}>{row.pure}</Text>
+                        </View>
+                      ))
+                    ) : (
+                      <Text style={styles.noData}>No receipt items</Text>
+                    )}
+
+                    {/* RECEIPT TOTAL */}
+                    <View style={[styles.totalRow, { paddingHorizontal: 10, backgroundColor: '#f9f9f9', borderTopWidth: 1 }]}>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>TW: {totalReceiptTW}</Text>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalReceiptNW}</Text>
+                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalReceiptPure}</Text>
+                    </View>
+                  </View>
+                </>
+              )}
+
+              {/* CASH */}
+              <View style={styles.cashBox}>
+                <Text style={styles.sectionTitle}>CASH :</Text>
+                {safeCashTable.length > 0 ? (
+                  <View>
+                    <View style={styles.tableHeader}>
+                      <Text style={styles.cell}>Amount</Text>
+                      <Text style={styles.cell}>Rate</Text>
+                      <Text style={styles.cell}>Pure</Text>
+                    </View>
+                    {safeCashTable.map((cashEntry, i) => (
+                      <View key={i} style={styles.tableRow}>
+                        <Text style={styles.cell}>{cashEntry.rupees}</Text>
+                        <Text style={styles.cell}>{cashEntry.goldRate}</Text>
+                        <Text style={styles.cell}>{cashEntry.pure}</Text>
+                      </View>
+                    ))}
+                    <View style={styles.totalRow}>
+                      <Text style={styles.totalCell}>Total Cash Pure:</Text>
+                      <Text style={{ fontWeight: 'bold', right: 20, top: 5 }}>
+                        {safeCashTable.reduce((sum, c) => sum + parseFloat(c.pure || 0), 0).toFixed(3)}
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <Text>N/A</Text>
+                )}
+              </View>
+
+              {/* GST */}
+              {gst && gst.enabled && gst.showInBill !== false && (gst.igst > 0 || gst.cgst > 0 || gst.sgst > 0) && (
+                <View style={styles.cashBox}>
+                  <Text style={styles.sectionTitle}>GST BREAKDOWN :</Text>
+
+                  {/* Dynamic Display Logic */}
+                  {parseFloat(gst.igst) > 0 ? (
+                    // IGST Case
+                    <View>
+                      <Text>IGST {gst.igst}% : â‚¹{gst.amount}</Text>
+                    </View>
+                  ) : (parseFloat(gst.sgst) > 0 || parseFloat(gst.cgst) > 0) ? (
+                    // SGST + CGST Case
+                    <View>
+                      <Text>SGST {gst.sgst || 0}% : â‚¹{(parseFloat(gst.amount) / 2).toFixed(2)}</Text>
+                      <Text>CGST {gst.cgst || 0}% : â‚¹{(parseFloat(gst.amount) / 2).toFixed(2)}</Text>
+                    </View>
+                  ) : (
+                    // Fallback (Legacy or Total only)
+                    <View>
+                      <Text>GST Percentage: {gst.percentage}%</Text>
+                      <Text>GST Amount: â‚¹{gst.amount}</Text>
+                    </View>
+                  )}
+
+                  {(parseFloat(gst.igst) > 0 || parseFloat(gst.sgst) > 0) && (
+                    <Text style={{ marginTop: 4, fontWeight: 'bold' }}>Total GST Amount: â‚¹{gst.amount}</Text>
+                  )}
+                </View>
+              )}
+
+              {/* SUMMARY */}
+              <View style={styles.summaryBox}>
+                <Text style={styles.sectionTitle}>SUMMARY :</Text>
+
+                {customer?.type === "B2B" ? (
+                  hasB2BAdvanceBalance ? (
+                    <View style={styles.b2bSummaryTable}>
+	                      <View style={styles.b2bSummaryHeaderRow}>
+	                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>ISSUE</Text>
+	                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>Advance Balance</Text>
+	                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>RECEIPT</Text>
+	                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>CASH</Text>
+	                        <Text style={styles.b2bSummaryHeaderCell}>{b2bAdvanceSummaryValues.finalLabel}</Text>
+	                      </View>
+
+                      <View style={styles.b2bSummaryRow}>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bAdvanceSummaryValues.issue}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bAdvanceSummaryValues.advanceBalance}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bAdvanceSummaryValues.receipt}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bAdvanceSummaryValues.cash}</Text>
+                        <Text style={styles.b2bSummaryCell}>{b2bAdvanceSummaryValues.finalAdvanceBalance}</Text>
+                      </View>
+
+                      <View style={styles.b2bSummaryEquationRow}>
+                        <Text style={[styles.b2bSummaryCell, { flex: 3, borderRightWidth: 1 }]}>{b2bAdvanceSummaryValues.expression}</Text>
+                        <Text style={[styles.b2bSummaryCell, { flex: 0.6, borderRightWidth: 1 }]}>=</Text>
+                        <Text style={[styles.b2bSummaryCell, { flex: 1 }]}>{b2bAdvanceSummaryValues.finalAdvanceBalance}</Text>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={styles.b2bSummaryTable}>
+                      <View style={styles.b2bSummaryHeaderRow}>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>Old Balance</Text>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>ISSUE</Text>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>RECEIPT</Text>
+                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>CASH</Text>
+                        <Text style={styles.b2bSummaryHeaderCell}>Final Balance</Text>
+                      </View>
+
+                      <View style={styles.b2bSummaryRow}>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bSummaryValues.oldBalance}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bSummaryValues.issue}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bSummaryValues.receipt}</Text>
+                        <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bSummaryValues.cash}</Text>
+                        <Text style={styles.b2bSummaryCell}>{b2bSummaryValues.finalBalance}</Text>
+                      </View>
+
+	                      <View style={styles.b2bSummaryEquationRow}>
+	                        <Text style={[styles.b2bSummaryCell, { flex: 1 }]}>
+	                          {`${b2bSummaryValues.oldBalance} + ${b2bSummaryValues.issue} - (${b2bSummaryValues.receipt} + ${b2bSummaryValues.cash}) = ${b2bSummaryValues.finalBalance}`}
+	                        </Text>
+	                      </View>
+                    </View>
+                  )
+                ) : (
+	                  <View style={styles.dealerSummaryTable}>
+	                    <View style={styles.dealerSummaryHeaderRow}>
+	                      <Text style={styles.dealerSummaryHeaderCell}>{dealerSummaryValues.activeLabel}</Text>
+	                      <Text style={styles.dealerSummaryHeaderCell}>RECEIPT</Text>
+	                      <Text style={styles.dealerSummaryHeaderCell}>ISSUE</Text>
+	                      <Text style={styles.dealerSummaryHeaderCell}>CASH</Text>
+	                      <Text style={styles.dealerSummaryHeaderCell}>{dealerSummaryValues.finalLabel}</Text>
+	                    </View>
+
+                    <View style={styles.dealerSummaryRow}>
+                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.oldBalance}</Text>
+                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.receipt}</Text>
+                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.issue}</Text>
+                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.cash}</Text>
+                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.finalBalance}</Text>
+                    </View>
+
+	                    <View style={styles.dealerSummaryRow}>
+	                      <Text style={[styles.dealerSummaryCell, { flex: 4 }]}>{dealerSummaryValues.expression}</Text>
+	                      <Text style={styles.dealerSummaryCell}>{`= ${dealerSummaryValues.finalBalance}`}</Text>
+	                    </View>
+	                  </View>
+                )}
+              </View>
+            </>
+          )}
+
+          {/* B2B / B2C and Print Again Buttons */}
+          <View style={styles.transferContainer}>
+            {customer?.type === "B2B" ? (
+              <TouchableOpacity
+                style={styles.transferBtnB2B}
+                onPress={() => navigation.navigate("B2BCalculationPage", { printAgain: true, lastBill: route.params })}
+              >
+                <Icon name="file-document-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.transferBtnText}>B2B</Text>
+              </TouchableOpacity>
+            ) : customer?.type === "B2C" ? (
+              <TouchableOpacity
+                style={styles.transferBtnB2C}
+                onPress={handleTransferToB2C}
+              >
+                <Icon name="file-document-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.transferBtnText}>Transfer to B2C</Text>
+              </TouchableOpacity>
+            ) : customer?.type === "Estimate" ? (
+              <>
+                <TouchableOpacity
+                  style={styles.transferBtnB2B}
+                  onPress={handleTransferToB2B}
+                >
+                  <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.transferBtnText}>Transfer to B2B</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.transferBtnB2C}
+                  onPress={handleTransferToB2C}
+                >
+                  <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.transferBtnText}>Transfer to B2C</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
 
             <TouchableOpacity
-              style={[styles.addBtn, { backgroundColor: "#C9F8D0" }]}
-              onPress={addReceiptItem}
+              style={[styles.transferBtnB2B, { backgroundColor: '#17a2b8' }]} // Teal for Print Again
+              onPress={handlePrint}
             >
-              <Text style={[styles.addBtnText, { color: "#135F25" }]}>
-                + Add Receipt Item
+              <Icon name="printer" size={20} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.transferBtnText}>Print Again</Text>
+            </TouchableOpacity>
+          </View>
+          
+
+          {/* Save Button */}
+          <View style={{ alignItems: 'center', marginTop: 10 }}>
+            <TouchableOpacity
+              style={styles.saveButton}
+              onPress={handleSaveBill}
+              activeOpacity={0.8}
+            >
+              <Icon name="content-save-outline" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>Save Bill</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* WhatsApp – Send A4 Bill PDF directly to customer chat */}
+          <View style={{ alignItems: 'center', marginTop: 10 }}>
+            <TouchableOpacity
+              style={[
+                styles.saveButton,
+                { backgroundColor: '#25D366', paddingHorizontal: 28 },
+                isSharing && { opacity: 0.6 },
+              ]}
+              onPress={sendA4BillViaWhatsApp}
+              disabled={isSharing}
+              activeOpacity={0.8}
+            >
+              <Icon name="whatsapp" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>
+                {isSharing ? 'Preparing PDF…' : 'Send Bill via WhatsApp'}
               </Text>
             </TouchableOpacity>
           </View>
-        )}
 
-        {/* RECEIPT TABLE */}
-        {receiptItems.length > 0 && (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Receipt Entry Table</Text>
-
-            <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
-              <View style={styles.productTable}>
-                <View style={styles.productTableHeader}>
-                  <Text style={styles.productHeaderCell}>#</Text>
-                  <Text style={styles.productHeaderCell}>Kind</Text>
-                  <Text style={styles.productHeaderCell}>Item</Text>
-                  <Text style={styles.productHeaderCell}>Weight (g)</Text>
-                  <Text style={styles.productHeaderCell}>Result (g)</Text>
-                  <Text style={styles.productHeaderCell}>Touch (%)</Text>
-                  <Text style={styles.productHeaderCell}>Pure (g)</Text>
-                  <Text style={styles.productHeaderCell}>Action</Text>
-                </View>
-
-                {receiptItems.map((row, idx) => (
-                  <View key={row.id} style={styles.productTableRow}>
-                    <Text style={styles.productCell}>{idx + 1}</Text>
-                    <Text style={styles.productCell}>Receipt</Text>
-                    <Text style={styles.productCell}>{row.item}</Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.weight).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.stone).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.touch).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.purity).toFixed(3)}
-                    </Text>
-                    <TouchableOpacity onPress={() => removeReceiptItem(row.id)}>
-                      <Text style={[styles.actionText, { color: "#d9534f" }]}>
-                        Remove
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
-          </View>
-        )}
-
-        {/* PRODUCT LIST (combined) */}
-        {productList.length > 0 && (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Products (Combined)</Text>
-            <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
-              <View style={styles.productTable}>
-                <View style={styles.productTableHeader}>
-                  <Text style={styles.productHeaderCell}>#</Text>
-                  <Text style={styles.productHeaderCell}>Kind</Text>
-                  <Text style={styles.productHeaderCell}>Item</Text>
-                  <Text style={styles.productHeaderCell}>Weight (g)</Text>
-                  <Text style={styles.productHeaderCell}>Result (g)</Text>
-                  <Text style={styles.productHeaderCell}>Touch (%)</Text>
-                  <Text style={styles.productHeaderCell}>Pure (g)</Text>
-                </View>
-
-                {productList.map((row, idx) => (
-                  <View key={row.id} style={styles.productTableRow}>
-                    <Text style={styles.productCell}>{idx + 1}</Text>
-                    <Text style={styles.productCell}>{row.kind}</Text>
-                    <Text style={styles.productCell}>{row.item}</Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.weight).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.stone).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.touch).toFixed(3)}
-                    </Text>
-                    <Text style={styles.productCell}>
-                      {Number(row.purity).toFixed(3)}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
-          </View>
-        )}
-
-        {/* CASH ENTRY */}
-        {selectedCustomer && (
-          <View style={styles.card}>
-            <View style={styles.issueHeader}>
-              <View style={[styles.greenDot, { backgroundColor: "#1e88e5" }]} />
-              <Text style={styles.sectionTitle}>Cash Received</Text>
-              <View style={styles.cartContainer}>
-                <Icon name="cart" size={24} color="#000" />
-                <Text style={styles.cartText}>{totalCashPure.toFixed(3)}g</Text>
-                {cashTable.length > 0 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{cashTable.length}</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-
-            <Text style={styles.subLabel}>Rupees ₹</Text>
-            <TextInput
-              style={styles.input}
-              value={rupees}
-              onChangeText={(val) => {
-                setRupees(val);
-                setCashPureInput(fmt(computeCashPure(val, goldRate || 0)));
-              }}
-              keyboardType="decimal-pad"
-              placeholder="0"
-            />
-
-            <Text style={[styles.subLabel, { marginTop: 12 }]}>FT Rate ₹</Text>
-            <TextInput
-              style={styles.input}
-              value={goldRate}
-              onChangeText={async (val) => {
-                setGoldRate(val);
-                setCashPureInput(fmt(computeCashPure(rupees || 0, val)));
-                await AsyncStorage.setItem("ftRate", val);
-              }}
-              keyboardType="decimal-pad"
-              placeholder="0"
-            />
-
-            <Text style={[styles.subLabel, { marginTop: 12 }]}>Pure (g)</Text>
-            <View style={styles.purityBox}>
-              <Text style={styles.purityText}>{cashPureInput} g</Text>
-            </View>
-
-            <TouchableOpacity style={styles.addBtn2} onPress={addCashEntry}>
-              <Text style={styles.addBtnText2}>Add Cash</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* CASH TABLE */}
-        {cashTable.length > 0 && (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Cash Received Table</Text>
-
-            <View style={styles.secondTableHeader}>
-              <Text style={styles.secondTableHeaderText}>Rupees</Text>
-              <Text style={styles.secondTableHeaderText}>FT Rate</Text>
-              <Text style={styles.secondTableHeaderText}>Pure</Text>
-              <Text style={styles.secondTableHeaderText}>Action</Text>
-            </View>
-
-            {cashTable.map((row, idx) => (
-              <View key={row.id} style={styles.secondTableRow}>
-                <Text style={styles.secondTableCell}>{fmt2(row.rupees)}</Text>
-                <Text style={styles.secondTableCell}>{fmt2(row.goldRate)}</Text>
-                <Text style={styles.secondTableCell}>{fmt(row.pure)}</Text>
-                <TouchableOpacity onPress={() => removeCashEntry(row.id)}>
-                  <Text style={[styles.actionText, { color: "#d9534f" }]}>
-                    Remove
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* GST ENTRY */}
-        {selectedCustomer && (
-          <View style={styles.card}>
-            <View style={styles.checkboxRow}>
-              <TouchableOpacity
-                style={styles.checkboxContainer}
-                onPress={async () => {
-                  const newState = !gstEnabled;
-                  setGstEnabled(newState);
-                  if (newState) {
-                    await fetchLatestB2BGstSettings();
-                  } else {
-                    setIsSgstEnabled(false);
-                    setIsCgstEnabled(false);
-                    setIsIgstEnabled(false);
-                  }
-                }}
-              >
-                <View
-                  style={[
-                    styles.checkbox,
-                    gstEnabled && styles.checkboxChecked,
-                  ]}
-                >
-                  {gstEnabled && <Icon name="check" size={16} color="#fff" />}
-                </View>
-                <Text style={styles.checkboxLabel}>Enable GST</Text>
-              </TouchableOpacity>
-            </View>
-
-            {gstEnabled && (
-              <View style={{ marginTop: 8 }}>
-                <View style={styles.row}>
-                  <View style={styles.inputBox}>
-                    <Text style={styles.subLabel}>SGST ({sgstPercentValue.toFixed(2)}%)</Text>
-                    <View style={styles.purityBox}>
-                      <Text style={styles.purityText}>{"\u20B9"}{sgstAmountValue.toFixed(2)}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.inputBox}>
-                    <Text style={styles.subLabel}>CGST ({cgstPercentValue.toFixed(2)}%)</Text>
-                    <View style={styles.purityBox}>
-                      <Text style={styles.purityText}>{"\u20B9"}{cgstAmountValue.toFixed(2)}</Text>
-                    </View>
-                  </View>
-                </View>
-                <Text style={[styles.subLabel, { marginTop: 12 }]}>Total GST</Text>
-                <View style={styles.purityBox}>
-                  <Text style={styles.purityText}>{"\u20B9"}{totalGstValue.toFixed(2)}</Text>
-                </View>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Saved GST Selection Modal */}
-        {showSavedGstModal && (
-          <Modal
-            visible={showSavedGstModal}
-            transparent={true}
-            animationType="slide"
-            onRequestClose={() => setShowSavedGstModal(false)}
-          >
-            <View
-              style={{
-                flex: 1,
-                backgroundColor: "rgba(0,0,0,0.5)",
-                justifyContent: "center",
-                padding: 20,
-              }}
-            >
-              <View
-                style={{
-                  backgroundColor: "#fff",
-                  borderRadius: 12,
-                  padding: 20,
-                  maxHeight: 500,
-                }}
-              >
-                <Text
-                  style={{ fontSize: 18, fontWeight: "bold", marginBottom: 15 }}
-                >
-                  Select a Saved GST Record
-                </Text>
-
-                <ScrollView>
-                  {savedGstList.map((item) => (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={{
-                        borderBottomWidth: 1,
-                        borderBottomColor: "#eee",
-                        paddingVertical: 12,
-                      }}
-                      onPress={() => {
-                        setSgst(item.sgst || "");
-                        setCgst(item.cgst || "");
-                        setIgst(item.igst || "");
-
-                        setShowSavedGstModal(false);
-                      }}
-                    >
-                      <Text style={{ fontWeight: "bold" }}>
-                        {item.type} - HSN: {item.hsn}
-                      </Text>
-                      <View
-                        style={{ flexDirection: "row", gap: 10, marginTop: 4 }}
-                      >
-                        <Text>SGST: {item.sgst || 0}%</Text>
-                        <Text>CGST: {item.cgst || 0}%</Text>
-                        <Text>IGST: {item.igst || 0}%</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-
-                  {savedGstList.length === 0 && (
-                    <Text
-                      style={{
-                        textAlign: "center",
-                        color: "#888",
-                        marginVertical: 20,
-                      }}
-                    >
-                      No saved records found.
-                    </Text>
-                  )}
-                </ScrollView>
-
-                <TouchableOpacity
-                  style={{ marginTop: 20, alignSelf: "center", padding: 10 }}
-                  onPress={() => setShowSavedGstModal(false)}
-                >
-                  <Text style={{ color: "red", fontWeight: "bold" }}>
-                    Close
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Modal>
-        )}
-
-        {/* TRANSACTION SUMMARY (HORIZONTAL SCROLL) */}
-        {selectedCustomer && (
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Transaction Summary</Text>
-
-            <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
-              <View style={styles.summaryContainer}>
-                <View style={styles.summaryHeaderRow}>
-                  <Text style={styles.summaryHeaderText}>Issue Total (g)</Text>
-                  <Text style={styles.summaryHeaderText}>Issue Pure (g)</Text>
-                  {gstEnabled && (
-                    <Text style={styles.summaryHeaderText}>GST Pure (g)</Text>
-                  )}
-                  <Text style={styles.summaryHeaderText}>Old Balance (g)</Text>
-                  <Text style={styles.summaryHeaderText}>Receipt Pure (g)</Text>
-                  <Text style={styles.summaryHeaderText}>Cash Pure (g)</Text>
-                  <Text style={styles.summaryHeaderText}>Balance (g)</Text>
-                  <Text style={styles.summaryHeaderText}>Adv.Bal (g)</Text>
-                </View>
-
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryCell}>
-                    {fmt(totalIssueWeight)}
-                  </Text>
-                  <Text style={styles.summaryCell}>{fmt(totalIssuePure)}</Text>
-                  {gstEnabled && (
-                    <Text style={styles.summaryCell}>{fmt(gstPureValue)}</Text>
-                  )}
-                  <Text style={styles.summaryCell}>{fmt(customerOldBalance)}</Text>
-                  <Text style={styles.summaryCell}>
-                    {fmt(totalReceiptPure)}
-                  </Text>
-                  <Text style={styles.summaryCell}>{fmt(totalCashPure)}</Text>
-                  <Text style={styles.summaryCell}>{fmt(balance)}</Text>
-                  <Text style={styles.summaryCell}>{fmt(liveAdvanceBalance)}</Text>
-                </View>
-              </View>
-            </ScrollView>
+          {/* Share Bill PDF (generic share sheet) */}
+          <View style={{ alignItems: 'center', marginTop: 10 }}>
             <TouchableOpacity
-              style={styles.addBtn2}
-              onPress={saveCompleteTransaction}
+              style={[styles.saveButton, { backgroundColor: '#FF9800' }, isSharing && { opacity: 0.6 }]}
+              onPress={shareBillPdfOnly}
+              disabled={isSharing}
+              activeOpacity={0.8}
             >
-              <Text style={styles.addBtnText2}>Save Transaction</Text>
+              <Icon name="file-pdf-box" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>Share Bill PDF</Text>
             </TouchableOpacity>
           </View>
-        )}
+
+          {/* Bottom Home Button */}
+          <View style={styles.homeButtonWrapper}>
+            <TouchableOpacity
+              style={styles.homeButton}
+              onPress={() => navigation.navigate('Home')}
+              activeOpacity={0.8}
+            >
+              <Icon name="home-outline" size={22} color="#fff" />
+              <Text style={styles.homeButtonText}>Home</Text>
+            </TouchableOpacity>
+          </View>
+
+        </ScrollView>
       </View>
-    </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  page: { padding: 10, backgroundColor: "#fff", flex: 1, alignSelf: 'center', width: '100%', maxWidth: 350 },
+
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    paddingTop: Platform.OS === "ios" ? 50 : 40,
+    paddingBottom: 25,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    zIndex: 10,
+  },
+
+  headerBtn: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F5',
+    top: 15,
+  },
+
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    top: 15,
+  },
+
+  actionIcon: {
+    padding: 8,
+  },
+
+  button: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#007bff', padding: 10, borderRadius: 5 },
+
+  buttonText: { color: '#fff', marginLeft: 5, fontWeight: 'bold' },
+
+  billTitle: { textAlign: "center", fontWeight: "bold", marginBottom: 5, fontSize: 14, textTransform: 'uppercase' },
+
+  headerBox: { padding: 5, marginBottom: 8, borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
+
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 4 },
+  headerColLeft: { flex: 1, paddingRight: 8 },
+  headerColRight: { flex: 1, paddingLeft: 8, alignItems: "flex-end" },
+  headerText: { flexShrink: 1, fontSize: 11, lineHeight: 16 },
+  headerTextRight: { textAlign: "right", alignSelf: "stretch" },
+
+  sectionBox: { marginBottom: 8 },
+
+  sectionTitle: { marginVertical: 4, fontWeight: "bold", fontSize: 11, alignSelf: 'flex-start', borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
+
+  tableHeader: { flexDirection: "row", borderBottomWidth: 1, borderTopWidth: 1, borderColor: '#000' },
+
+  tableRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000' },
+
+  cell: { flex: 1, textAlign: "center", paddingVertical: 4, paddingHorizontal: 1, fontSize: 8 },
+
+  cashBox: { padding: 5, marginBottom: 8, borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
+
+  summaryBox: { padding: 5, marginBottom: 8, borderTopWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
+
+  b2bSummaryTable: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#000',
+  },
+  b2bSummaryHeaderRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderColor: '#000',
+  },
+  b2bSummaryRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderColor: '#000',
+  },
+  b2bSummaryEquationRow: {
+    flexDirection: "row",
+    borderTopWidth: 0.5,
+    borderColor: '#000',
+  },
+  b2bSummaryHeaderCell: {
+    flex: 1,
+    textAlign: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    fontWeight: "bold",
+    fontSize: 9,
+    borderColor: '#000',
+  },
+  b2bSummaryCell: {
+    flex: 1,
+    textAlign: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    fontSize: 9,
+    fontWeight: "600",
+    borderColor: '#000',
+  },
+
+  finalSummaryRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000', justifyContent: 'center' },
+
+  summaryHeader: { flexDirection: "row", borderBottomWidth: 1, borderTopWidth: 1, borderColor: '#000' },
+
+  summaryRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000' },
+
+  sumCell: { flex: 1, textAlign: "center", padding: 4, paddingHorizontal: 1, fontWeight: "bold", fontSize: 9 },
+
+  dealerSummaryTable: {
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderColor: '#000',
+  },
+  dealerSummaryHeaderRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderColor: '#000',
+  },
+  dealerSummaryRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderColor: '#000',
+  },
+  dealerSummaryHeaderCell: {
+    flex: 1,
+    textAlign: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    fontWeight: "bold",
+    fontSize: 9,
+  },
+  dealerSummaryCell: {
+    flex: 1,
+    textAlign: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 2,
+    fontSize: 9,
+    fontWeight: "600",
+  },
+
+  totalRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000', justifyContent: "space-between" },
+
+  totalCell: { paddingVertical: 4, fontSize: 13, fontWeight: 'bold', left: 5, top: 2 },
+
+  row: {
+    marginBottom: 12,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  kadaiInputWrap: {
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  kadaiLabel: {
+    fontSize: 12,
+    marginBottom: 3,
+  },
+  kadaiInput: {
+    minWidth: 150,
+    maxWidth: 200,
+    height: 34,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: "#fff",
+  },
+  input: {
+    backgroundColor: "#fff",
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#ddd",
+  },
+  upiRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  upiInput: {
+    flex: 1,
+  },
+  convertBtn: {
+    backgroundColor: "#2E7D32",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  convertBtnText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 12,
+  },
+  toggleBtn: {
+    backgroundColor: "#28a745",
+    padding: 10,
+    borderRadius: 5,
+    alignItems: "center",
+    marginTop: 10,
+  },
+  toggleText: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  submitBtn: {
+    backgroundColor: "#007bff",
+    padding: 10,
+    borderRadius: 5,
+    alignItems: "center",
+    marginTop: 20,
+    bottom: 10,
+  },
+  submitText: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  qrContainer: {
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  qrLabel: {
+    fontSize: 16,
+    fontWeight: "bold",
+    marginBottom: 10,
+  },
+  upiIdText: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 5,
+  },
+  changeUpiBtn: {
+    backgroundColor: "#ffc107",
+    padding: 6,
+    borderRadius: 4,
+    marginBottom: 10,
+  },
+  changeUpiText: {
+    fontSize: 12,
+    color: "#000",
+    fontWeight: "bold",
+  },
+  printQrBtn: {
+    backgroundColor: "#17a2b8",
+    padding: 8,
+    borderRadius: 5,
+    marginTop: 10,
+  },
+  printQrText: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  kuralContainer: {
+    alignItems: "center",
+    marginTop: 20,
+    padding: 15,
+    borderTopWidth: 1,
+    borderTopColor: "#eee",
+    marginBottom: 20,
+  },
+  visitAgainText: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 8,
+  },
+  kuralText: {
+    fontSize: 14,
+    color: "#1B4D1B",
+    fontWeight: "bold",
+    textAlign: "center",
+    fontStyle: "italic",
+    lineHeight: 22,
+    fontFamily: tamilFontFamily,
+  },
+  estimateTotalBox: {
+    backgroundColor: '#1b5e20',
+    borderRadius: 10,
+    padding: 16,
+    marginTop: 10,
+    marginBottom: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  estimateTotalLabel: {
+    color: '#c8e6c9',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  estimateTotalValue: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+
+  homeButtonWrapper: {
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 30,
+  },
+  homeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1B4D1B',
+    paddingVertical: 13,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    gap: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  homeButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0056b3', // Premium Blue
+    paddingVertical: 13,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    gap: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  transferContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 10,
+    gap: 10,
+    marginTop: 5,
+    marginBottom: 5,
+  },
+  transferBtnB2B: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#1e3d59',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  transferBtnB2C: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: '#135F25',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  transferBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+
+  // ── B2C Professional Styles ──
+  b2cProfessionalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+  },
+  b2cCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAF9',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+    gap: 10,
+  },
+  b2cCardTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1B4D1B',
+    letterSpacing: 1,
+  },
+  b2cCardBody: {
+    padding: 16,
+  },
+  b2cNormalRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 8,
+    gap: 10,
+  },
+  b2cRowLeft: {
+    flex: 1,
+    minWidth: 0,
+  },
+  b2cRowRight: {
+    minWidth: 110,
+    maxWidth: 150,
+    alignItems: "flex-end",
+    justifyContent: "flex-start",
+  },
+  b2cLabel: {
+    fontSize: 13,
+    color: '#757575',
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  b2cFormulaText: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#8a8a8a',
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  b2cValue: {
+    fontSize: 14,
+    color: '#212121',
+    fontWeight: '600',
+    textAlign: "right",
+  },
+  b2cHighlightRow: {
+    flexDirection: 'row',
+    alignItems: "center",
+    justifyContent: 'space-between',
+    backgroundColor: '#E8F5E9',
+    padding: 12,
+    borderRadius: 10,
+    marginVertical: 10,
+    borderWidth: 1,
+    borderColor: '#C8E6C9',
+  },
+  b2cHighlightLabel: {
+    fontSize: 14,
+    color: '#1B5E20',
+    fontWeight: '700',
+  },
+  b2cHighlightValue: {
+    fontSize: 16,
+    color: '#1B5E20',
+    fontWeight: '900',
+  },
+  b2cCashTable: {
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderColor: '#F0F0F0',
+  },
+  b2cCashRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+  },
+  b2cCashCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  b2cCashLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  b2cCashInput: {
+    height: 42,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+    color: '#111',
+  },
+  b2cCashReadOnly: {
+    height: 42,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#F8F9FA',
+    justifyContent: 'center',
+  },
+  b2cCashValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111',
+    textAlign: 'right',
+  },
+  b2cDividerLine: {
+    height: 1,
+    backgroundColor: '#F0F0F0',
+    marginVertical: 8,
+  },
+  b2cGoldHighlightRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFF8E1',
+    padding: 12,
+    borderRadius: 10,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#FFECB3',
+  },
+  b2cGoldLabel: {
+    fontSize: 13,
+    color: '#7F6D17',
+    fontWeight: '700',
+  },
+  b2cGoldValue: {
+    fontSize: 14,
+    color: '#7F6D17',
+    fontWeight: '800',
+  },
+  b2cGoldRateText: {
+    fontSize: 12,
+    color: '#7F6D17',
+    opacity: 0.85,
+    marginTop: 2,
+    fontWeight: '700',
+  },
+
+  b2cInputSection: {
+    paddingHorizontal: 4,
+    marginBottom: 20,
+  },
+  b2cInputWrapper: {
+    marginBottom: 16,
+  },
+  b2cInputLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#444',
+    marginBottom: 8,
+    marginLeft: 2,
+  },
+  b2cInputField: {
+    backgroundColor: '#fff',
+    height: 50,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#E0E0E0',
+    paddingHorizontal: 16,
+    fontSize: 16,
+    color: '#333',
+  },
+  b2cConversionLineContainer: {
+    alignItems: 'center',
+    marginVertical: 15,
+    paddingVertical: 10,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+  },
+  b2cConversionLineText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1B4D1B',
+    letterSpacing: 1,
+  },
+  b2cActionButtonsRow: {
+    gap: 12,
+    marginTop: 10,
+  },
+  b2cActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 54,
+    borderRadius: 14,
+    gap: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+  b2cActionButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+
+  // ── Payment Selector Styles ──
+  paymentSelectorContainer: {
+    marginTop: 8,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F5',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  paymentSelectorScroll: {
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+  },
+  paymentOptionCompact: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginHorizontal: 4,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#D1D1D1',
+  },
+  paymentOptionActive: {
+    backgroundColor: '#2E7D32',
+    borderColor: '#2E7D32',
+  },
+  paymentOptionTextCompact: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  paymentOptionTextActive: {
+    color: '#fff',
+  },
+});
