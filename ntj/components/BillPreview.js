@@ -239,7 +239,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const lastSavedSignatureRef = useRef("");
   const isSavingBillRef = useRef(false);
   const savePromiseRef = useRef(null);
-  const allowNextBeforeRemoveRef = useRef(false);
+  const latestSilentSaveRef = useRef(() => Promise.resolve(null));
 
   const [upiId, setUpiId] = useState("kaliyamoorthirengaraj@okaxis");
   const [additionalPhone, setAdditionalPhone] = useState('');
@@ -2672,14 +2672,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
       if (customerId) {
         const activeBillId = transactions?.[0]?._id || transactions?.[0]?.id || "";
-        const patchRes = await fetch(`${base_url}/customersB2C/${customerId}/balances`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            oldBalance: updatedOB,
-            advanceBalance: updatedAB,
-            billId: activeBillId,
-          }),
+        const patchRes = await updateB2CBalances({
+          customerId,
+          oldBalance: updatedOB,
+          advanceBalance: updatedAB,
+          billId: activeBillId,
         });
         if (!patchRes.ok) {
           const errText = await patchRes.text();
@@ -2715,14 +2712,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
               const customerId = customer?.id || customer?._id || customer?.customerId || transactions?.[0]?.customerId || "";
               if (customerId) {
                 const activeBillId = transactions?.[0]?._id || transactions?.[0]?.id || "";
-                await fetch(`${base_url}/customersB2C/${customerId}/balances`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    oldBalance: 0,
-                    advanceBalance: 0,
-                    billId: activeBillId,
-                  }),
+                await updateB2CBalances({
+                  customerId,
+                  oldBalance: 0,
+                  advanceBalance: 0,
+                  billId: activeBillId,
                 });
               }
             } catch (err) {
@@ -2752,6 +2746,46 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       return;
     }
     await handleSaveBill({ b2cSaveBalance: true });
+  };
+
+  const updateB2CBalances = async ({ customerId, oldBalance, advanceBalance, billId = "" }) => {
+    const safeOldBalance = toNum(oldBalance, 0);
+    const safeAdvanceBalance = toNum(advanceBalance, 0);
+    const payload = {
+      oldBalance: safeOldBalance,
+      advanceBalance: safeAdvanceBalance,
+      availableBalance: safeOldBalance - safeAdvanceBalance,
+      billCurrentBalance: safeOldBalance - safeAdvanceBalance,
+      lastTransactionDate: new Date().toISOString(),
+      lastTransactionType: "B2C",
+      ...(billId ? { billId } : {}),
+    };
+
+    const patchResponse = await fetch(`${base_url}/customersB2C/${customerId}/balances`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (patchResponse.ok) {
+      return patchResponse;
+    }
+
+    const patchErrorText = await patchResponse.text().catch(() => "");
+    const shouldFallbackToPut =
+      patchResponse.status === 404 ||
+      patchResponse.status === 405 ||
+      /Cannot PATCH/i.test(patchErrorText);
+
+    if (!shouldFallbackToPut) {
+      throw new Error(patchErrorText || "Failed to update B2C customer balance");
+    }
+
+    return fetch(`${base_url}/customersB2C/${customerId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
   };
 
   const handleSaveBill = async (options = {}) => {
@@ -3041,15 +3075,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       };
 
       if (isB2CBill) {
-        const customerEndpoint = `${base_url}/customersB2C/${customerId}/balances`;
-        const updateRes = await fetch(customerEndpoint, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            oldBalance: toNum(oldBalanceForSave, 0),
-            advanceBalance: toNum(advanceBalanceForSave, 0),
-            billId: transactions?.[0]?._id || transactions?.[0]?.id || "",
-          }),
+        const updateRes = await updateB2CBalances({
+          customerId,
+          oldBalance: toNum(oldBalanceForSave, 0),
+          advanceBalance: toNum(advanceBalanceForSave, 0),
+          billId: transactions?.[0]?._id || transactions?.[0]?.id || "",
         });
         if (!updateRes.ok) {
           const err = await updateRes.text();
@@ -3096,6 +3126,10 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   };
 
   useEffect(() => {
+    latestSilentSaveRef.current = () => handleSaveBill({ silent: true });
+  }, [handleSaveBill]);
+
+  useEffect(() => {
     if (!shouldAutoSavePreview) return;
     const customerId = getCustomerIdForLookup();
     if (!customerId) return;
@@ -3136,19 +3170,17 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
   useEffect(() => {
     if (!shouldAutoSavePreview) return;
-    const unsubscribe = navigation.addListener("beforeRemove", (event) => {
-      if (allowNextBeforeRemoveRef.current) {
-        allowNextBeforeRemoveRef.current = false;
-        return;
-      }
-      event.preventDefault();
-      handleSaveBill({ silent: true })
-        .finally(() => {
-          allowNextBeforeRemoveRef.current = true;
-          navigation.dispatch(event.data.action);
-        });
+    const unsubscribe = navigation.addListener("blur", () => {
+      latestSilentSaveRef.current?.().catch((error) => {
+        console.warn("BillPreview blur auto-save failed:", error?.message || error);
+      });
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      latestSilentSaveRef.current?.().catch((error) => {
+        console.warn("BillPreview unmount auto-save failed:", error?.message || error);
+      });
+    };
   }, [navigation, shouldAutoSavePreview]);
 
   return (
@@ -3623,7 +3655,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                           onChangeText={setB2cCashReceived}
                           keyboardType="numeric"
                           placeholder="0.00"
-                          placeholderTextColor="#9aa0a6"
+                          placeholderTextColor="#666"
                           editable={!isFromHistory}
                         />
                       </View>
@@ -3700,6 +3732,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                       <TextInput
                         style={styles.b2cInputField}
                         placeholder="Enter custom payment method"
+                        placeholderTextColor="#666"
                         value={customPayment}
                         onChangeText={(txt) => {
                           setCustomPayment(txt);
@@ -3718,6 +3751,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                     <TextInput
                       style={[styles.b2cInputField, { flex: 1 }]}
                       placeholder="Enter cash amount"
+                      placeholderTextColor="#666"
                       keyboardType="numeric"
                       value={cashAmount}
                       onChangeText={setCashAmount}
@@ -4257,25 +4291,25 @@ const styles = StyleSheet.create({
 
   buttonText: { color: '#fff', marginLeft: 5, fontWeight: 'bold' },
 
-  billTitle: { textAlign: "center", fontWeight: "bold", marginBottom: 5, fontSize: 14, textTransform: 'uppercase' },
+  billTitle: { textAlign: "center", fontWeight: "bold", marginBottom: 5, fontSize: 14, textTransform: 'uppercase', color: "#000" },
 
   headerBox: { padding: 5, marginBottom: 8, borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
 
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 4 },
   headerColLeft: { flex: 1, paddingRight: 8 },
   headerColRight: { flex: 1, paddingLeft: 8, alignItems: "flex-end" },
-  headerText: { flexShrink: 1, fontSize: 11, lineHeight: 16 },
+  headerText: { flexShrink: 1, fontSize: 11, lineHeight: 16, color: "#000" },
   headerTextRight: { textAlign: "right", alignSelf: "stretch" },
 
   sectionBox: { marginBottom: 8 },
 
-  sectionTitle: { marginVertical: 4, fontWeight: "bold", fontSize: 11, alignSelf: 'flex-start', borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
+  sectionTitle: { marginVertical: 4, fontWeight: "bold", fontSize: 11, alignSelf: 'flex-start', borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000', color: "#000" },
 
   tableHeader: { flexDirection: "row", borderBottomWidth: 1, borderTopWidth: 1, borderColor: '#000' },
 
   tableRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000' },
 
-  cell: { flex: 1, textAlign: "center", paddingVertical: 4, paddingHorizontal: 1, fontSize: 8 },
+  cell: { flex: 1, textAlign: "center", paddingVertical: 4, paddingHorizontal: 1, fontSize: 8, color: "#000" },
 
   cashBox: { padding: 5, marginBottom: 8, borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
 
@@ -4309,6 +4343,7 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 9,
     borderColor: '#000',
+    color: "#000",
   },
   b2bSummaryCell: {
     flex: 1,
@@ -4318,6 +4353,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "600",
     borderColor: '#000',
+    color: "#000",
   },
 
   finalSummaryRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000', justifyContent: 'center' },
@@ -4326,7 +4362,7 @@ const styles = StyleSheet.create({
 
   summaryRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000' },
 
-  sumCell: { flex: 1, textAlign: "center", padding: 4, paddingHorizontal: 1, fontWeight: "bold", fontSize: 9 },
+  sumCell: { flex: 1, textAlign: "center", padding: 4, paddingHorizontal: 1, fontWeight: "bold", fontSize: 9, color: "#000" },
 
   dealerSummaryTable: {
     marginTop: 4,
@@ -4350,6 +4386,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     fontWeight: "bold",
     fontSize: 9,
+    color: "#000",
   },
   dealerSummaryCell: {
     flex: 1,
@@ -4358,11 +4395,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     fontSize: 9,
     fontWeight: "600",
+    color: "#000",
   },
 
   totalRow: { flexDirection: "row", borderBottomWidth: 0.5, borderColor: '#000', justifyContent: "space-between" },
 
-  totalCell: { paddingVertical: 4, fontSize: 13, fontWeight: 'bold', left: 5, top: 2 },
+  totalCell: { paddingVertical: 4, fontSize: 13, fontWeight: 'bold', left: 5, top: 2, color: "#000" },
 
   row: {
     marginBottom: 12,
@@ -4371,6 +4409,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     marginBottom: 4,
+    color: "#000",
   },
   kadaiInputWrap: {
     marginTop: 4,
@@ -4379,6 +4418,7 @@ const styles = StyleSheet.create({
   kadaiLabel: {
     fontSize: 12,
     marginBottom: 3,
+    color: "#333",
   },
   kadaiInput: {
     minWidth: 150,
@@ -4390,6 +4430,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     backgroundColor: "#fff",
+    color: "#000",
   },
   input: {
     backgroundColor: "#fff",
@@ -4397,6 +4438,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: "#ddd",
+    color: "#000",
   },
   upiRow: {
     flexDirection: "row",
@@ -4448,10 +4490,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
     marginBottom: 10,
+    color: "#000",
   },
   upiIdText: {
     fontSize: 14,
-    color: "#666",
+    color: "#455A64",
     marginBottom: 5,
   },
   changeUpiBtn: {
@@ -4485,7 +4528,7 @@ const styles = StyleSheet.create({
   },
   visitAgainText: {
     fontSize: 14,
-    color: "#666",
+    color: "#455A64",
     marginBottom: 8,
   },
   kuralText: {
@@ -4650,14 +4693,14 @@ const styles = StyleSheet.create({
   },
   b2cLabel: {
     fontSize: 13,
-    color: '#757575',
+    color: '#455A64',
     fontWeight: '500',
     flexShrink: 1,
   },
   b2cFormulaText: {
     marginTop: 2,
     fontSize: 12,
-    color: '#8a8a8a',
+    color: '#555',
     fontWeight: '500',
     flexShrink: 1,
   },
@@ -4855,7 +4898,7 @@ const styles = StyleSheet.create({
   paymentOptionTextCompact: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#666',
+    color: '#455A64',
   },
   paymentOptionTextActive: {
     color: '#fff',
