@@ -163,11 +163,22 @@ const buildBillPayload = (body = {}) => {
     const openingAdvanceBalance = toNumber(
         body.previousAdvanceBalance ?? body.advBal ?? body.summary?.ab ?? body.advanceBalance,
     );
+    const explicitBalanceType = String(
+        body.balanceType || body.summary?.balanceType || '',
+    ).trim().toUpperCase();
+    const explicitBalanceValue = toNumber(
+        body.balanceValue ?? body.summary?.balanceValue,
+        NaN,
+    );
+    const explicitSignedBalance = Number.isFinite(explicitBalanceValue)
+        ? (explicitBalanceType === 'AB' ? -explicitBalanceValue : explicitBalanceValue)
+        : NaN;
     const availableBalance = toNumber(
-        body.finalBalance ??
         body.availableBalance ??
         body.currentBalance ??
         body.summary?.current ??
+        (Number.isFinite(explicitSignedBalance) ? explicitSignedBalance : undefined) ??
+        body.finalBalance ??
         (openingOldBalance - openingAdvanceBalance) +
             totalIssueWeight +
             toNumber(body.gstPure ?? body.summary?.gstPure) -
@@ -176,6 +187,10 @@ const buildBillPayload = (body = {}) => {
     );
     let oldBalance = toNumber(body.oldBalance ?? openingOldBalance);
     let advanceBalance = toNumber(body.advanceBalance ?? openingAdvanceBalance);
+    if (Number.isFinite(explicitBalanceValue) && explicitBalanceType) {
+        oldBalance = explicitBalanceType === 'OB' ? explicitBalanceValue : 0;
+        advanceBalance = explicitBalanceType === 'AB' ? explicitBalanceValue : 0;
+    }
     if (!hasSnapshot && billType === "B2B" && Number.isFinite(availableBalance)) {
         const isDealerLike = String(body.dealerType || body.customerType || body.type || "").toUpperCase();
         if (isDealerLike === "DEALER" || isDealerLike === "SUPPLIER") {
@@ -189,6 +204,10 @@ const buildBillPayload = (body = {}) => {
         }
     }
 
+    const rawCustomerType = String(body.customerType || body.type || '').trim();
+    const rawDealerType = String(body.dealerType || body.type || body.customerType || '').trim();
+    const effectiveCustomerType = rawDealerType || rawCustomerType || billType;
+
     return {
         customerId: pickCustomerId(body),
         customerName: String(body.customerName || '').trim() || 'Unknown',
@@ -197,7 +216,7 @@ const buildBillPayload = (body = {}) => {
         gstin: String(body.gstin || body.gstNo || body.gst || '').trim(),
         billNo: pickBillNo(body),
         billType,
-        dealerType: String(body.dealerType || body.type || body.customerType || '').trim(),
+        dealerType: rawDealerType,
         issueItems,
         receiptItems,
         cashTable,
@@ -209,7 +228,7 @@ const buildBillPayload = (body = {}) => {
         advanceBalance,
         oldBalance,
         availableBalance,
-        customerType: billType,
+        customerType: effectiveCustomerType,
         invoiceNo: formatMainBillNo(body.invoiceNo || body.billNo) || 'N/A',
         date: body.date || '',
         ob: openingOldBalance,
@@ -239,6 +258,13 @@ const buildBillPayload = (body = {}) => {
         previousAdvanceBalance: toNumber(body.previousAdvanceBalance ?? openingAdvanceBalance),
         finalBalance: toNumber(body.finalBalance ?? availableBalance),
         balanceType: String(body.balanceType || '').trim(),
+        balanceValue: toNumber(
+            body.balanceValue ??
+            body.summary?.balanceValue ??
+            (String(body.balanceType || '').trim().toUpperCase() === 'AB'
+                ? Math.max(0, advanceBalance)
+                : Math.max(0, oldBalance)),
+        ),
         totals: body.totals || null,
     };
 };
@@ -258,7 +284,9 @@ const findCustomerAndUpdateOverview = async (billDoc) => {
     const customerId = toIdString(billDoc.customerId);
     if (!customerId) return null;
 
-    const netBalance = toNumber(billDoc.finalBalance ?? billDoc.availableBalance ?? billDoc.currentBalance);
+    const netBalance = toNumber(
+        billDoc.availableBalance ?? billDoc.currentBalance ?? billDoc.finalBalance,
+    );
     const lastAmount = toNumber(billDoc.gst?.finalAmount || billDoc.gst?.amount || billDoc.totalAmount || billDoc.cashAmount || 0);
     const lastWeight = toNumber(billDoc.totalIssueWeight || billDoc.issuePure || 0);
     const lastPure = toNumber(billDoc.issuePure || billDoc.totalIssueWeight || 0);
@@ -381,7 +409,28 @@ const createBillSummary = async (req, res) => {
             ? await BillSummary.findOne({ billNo: requestedBillNo })
             : null;
 
-        // Always create a new bill number for each save.
+        const existingMatchesCustomer = existingForRequestedNo &&
+            toIdString(existingForRequestedNo.customerId) === toIdString(payload.customerId);
+
+        if (existingMatchesCustomer) {
+            payload.billNo = requestedBillNo;
+            payload.invoiceNo = requestedBillNo;
+            const updatedExisting = await BillSummary.findByIdAndUpdate(
+                existingForRequestedNo._id,
+                { $set: payload },
+                { new: true, runValidators: true }
+            );
+
+            await findCustomerAndUpdateOverview(updatedExisting);
+            try {
+                await syncDealerImageFromBill(updatedExisting);
+            } catch (syncErr) {
+                console.warn("Dealer image sync from bill failed:", syncErr?.message || syncErr);
+            }
+
+            return res.status(200).json(serializeBillForClient(updatedExisting));
+        }
+
         // If the client already reserved a billNo (via /nextBillNo) and it's unused, keep it.
         if (requestedBillNo && !existingForRequestedNo) {
             payload.billNo = requestedBillNo;
