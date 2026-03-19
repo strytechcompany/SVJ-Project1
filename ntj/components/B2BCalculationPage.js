@@ -18,6 +18,10 @@ import * as Print from "expo-print";
 import * as FileSystem from "expo-file-system";
 import { styles } from "./B2BCalculationPageStyles";
 import CommonHeader from "./CommonHeader";
+import {
+  buildBalanceSummary,
+  deriveBalanceStateFromNet,
+} from "./balanceUtils";
 
 /**
  * CreateTransaction (Full)
@@ -338,8 +342,64 @@ export default function CreateTransaction({ navigation }) {
   const fetchCustomers = async () => {
     try {
       setLoadingCustomers(true);
-      const b2bResponse = await fetch(`${base_url}/customers`);
+      const [b2bResponse, billResponse] = await Promise.all([
+        fetch(`${base_url}/customers`),
+        fetch(`${base_url}/billSummary?billType=B2B`),
+      ]);
       const b2bData = await b2bResponse.json();
+      const billRows = billResponse.ok ? await billResponse.json() : [];
+      const normalizeId = (value) => String(value || "").trim().toLowerCase();
+      const normalizeName = (value) => String(value || "").trim().toLowerCase();
+      const getRowTs = (row) =>
+        new Date(row?.updatedAt || row?.createdAt || row?.date || 0).getTime() || 0;
+      const latestBillRows = [...(Array.isArray(billRows) ? billRows : [])]
+        .filter((row) => {
+          const dealerType = String(row?.dealerType || "").toUpperCase();
+          return dealerType !== "DEALER" && dealerType !== "SUPPLIER";
+        })
+        .sort((a, b) => getRowTs(b) - getRowTs(a));
+      const resolveLatestBalanceState = (customer) => {
+        const customerIds = new Set(
+          [customer?._id, customer?.customerId, customer?.id]
+            .map((value) => normalizeId(value))
+            .filter(Boolean),
+        );
+        const customerName = normalizeName(customer?.customerName || customer?.name);
+        const latestBill = latestBillRows.find((row) => {
+          const billCustomerId = normalizeId(row?.customerId);
+          const billCustomerName = normalizeName(row?.customerName);
+          return customerIds.has(billCustomerId) || (customerName && billCustomerName === customerName);
+        });
+        if (!latestBill) {
+          return {
+            oldBalance: Number(customer?.oldBalance || 0),
+            advanceBalance: Number(customer?.advanceBalance || 0),
+          };
+        }
+        const latestBalanceType = String(
+          latestBill.balanceType || latestBill.summary?.balanceType || "",
+        ).toUpperCase();
+        const latestBalanceValue = Number(
+          latestBill.balanceValue ?? latestBill.summary?.balanceValue ?? latestBill.finalBalance,
+        );
+        if (Number.isFinite(latestBalanceValue) && latestBalanceType) {
+          return {
+            oldBalance: latestBalanceType === "OB" ? latestBalanceValue : 0,
+            advanceBalance: latestBalanceType === "AB" ? latestBalanceValue : 0,
+          };
+        }
+        const currentBalance = Number(
+          latestBill.currentBalance ?? latestBill.availableBalance ?? latestBill.summary?.current,
+        );
+        return Number.isFinite(currentBalance)
+          ? deriveBalanceStateFromNet(currentBalance)
+          : {
+              oldBalance: Number(latestBill.oldBalance ?? latestBill.ob ?? customer?.oldBalance ?? 0),
+              advanceBalance: Number(
+                latestBill.advanceBalance ?? latestBill.advBal ?? customer?.advanceBalance ?? 0,
+              ),
+            };
+      };
 
       const b2bCustomers = b2bData
         .filter((customer) => {
@@ -347,29 +407,33 @@ export default function CreateTransaction({ navigation }) {
           const normalizedType = normalizeCustomerType(customer.customerType, "B2B");
           return normalizedType === "B2B";
         })
-        .map((customer) => ({
-          ...customer,
-          customerType: normalizeCustomerType(customer.customerType, "B2B"),
-          customerNumber: customer.phoneNumber,
-          customerId: customer.customerId,
-          id: customer._id, // ✅ MongoDB _id for API calls
-          // ✅ These are what the UI uses in filteredCartCustomers & display
-          name: customer.customerName,
-          ob: customer.oldBalance || 0,
-          ab: customer.advanceBalance || 0,
-          company: customer.shopName || "",
-          phone: customer.phoneNumber || "",
-          email: customer.emailId || "",
-          address: customer.address || "",
-          gst: customer.gstin || "",
-          // ✅ Keep these too for CustomerMasterList
-          customerName: customer.customerName,
-          shopName: customer.shopName || customer.companyName || "No Shop Name",
-          oldBalance: customer.oldBalance || 0,
-          advanceBalance: customer.advanceBalance || 0,
-          billCurrentBalance: customer.billCurrentBalance || 0,
-          updatedAt: customer.updatedAt || new Date().toISOString(),
-        }));
+        .map((customer) => {
+          const latestBalanceState = resolveLatestBalanceState(customer);
+          return {
+            ...customer,
+            customerType: normalizeCustomerType(customer.customerType, "B2B"),
+            customerNumber: customer.phoneNumber,
+            customerId: customer.customerId,
+            id: customer._id, // ✅ MongoDB _id for API calls
+            // ✅ These are what the UI uses in filteredCartCustomers & display
+            name: customer.customerName,
+            ob: latestBalanceState.oldBalance,
+            ab: latestBalanceState.advanceBalance,
+            company: customer.shopName || "",
+            phone: customer.phoneNumber || "",
+            email: customer.emailId || "",
+            address: customer.address || "",
+            gst: customer.gstin || "",
+            // ✅ Keep these too for CustomerMasterList
+            customerName: customer.customerName,
+            shopName: customer.shopName || customer.companyName || "No Shop Name",
+            oldBalance: latestBalanceState.oldBalance,
+            advanceBalance: latestBalanceState.advanceBalance,
+            billCurrentBalance:
+              latestBalanceState.oldBalance - latestBalanceState.advanceBalance,
+            updatedAt: customer.updatedAt || new Date().toISOString(),
+          };
+        });
 
       setCustomers(b2bCustomers);
     } catch (error) {
@@ -1171,28 +1235,26 @@ export default function CreateTransaction({ navigation }) {
     setCashTable((prev) => prev.filter((p) => p.id !== id));
   };
 
-  let oldBalance = selectedCustomer ? Number(parseNum(selectedCustomer.ob)) : 0;
-
-  let advBalance = selectedCustomer ? Number(parseNum(selectedCustomer.ab)) : 0;
-
-  // Convert negative old balance to advance balance
-  if (oldBalance < 0) {
-    advBalance += Math.abs(oldBalance);
-    oldBalance = 0;
-  }
+  const customerOldBalance = selectedCustomer
+    ? Number(parseNum(selectedCustomer.ob ?? selectedCustomer.oldBalance))
+    : 0;
+  const customerAdvanceBalance = selectedCustomer
+    ? Number(parseNum(selectedCustomer.ab ?? selectedCustomer.advanceBalance))
+    : 0;
 
   const gstPureValue = gstEnabled
     ? (totalIssuePure * (parseFloat(gstPercentage) || 0)) / 100
     : 0;
 
-  const balance = Number(
-    (
-      oldBalance +
-      totalIssuePure +
-      gstPureValue -
-      (totalReceiptPure + totalCashPure)
-    ).toFixed(3),
-  );
+  const liveBalanceSummary = buildBalanceSummary({
+    oldBalance: customerOldBalance,
+    advanceBalance: customerAdvanceBalance,
+    issue: totalIssuePure,
+    receipt: totalReceiptPure,
+    cash: totalCashPure,
+  });
+  const liveAdvanceBalance = liveBalanceSummary.advanceBalance;
+  const balance = liveBalanceSummary.netBalance;
 
   // Save stock to AsyncStorage
   const saveStock = async () => {
@@ -1299,17 +1361,7 @@ export default function CreateTransaction({ navigation }) {
     }
 
     // ✅ FIX 1: Remove - advBalance from formula
-    const finalDistinctBalance = Number(
-      (
-        oldBalance +
-        totalIssuePure +
-        (gstEnabled ? gstPureValue : 0) -
-        totalReceiptPure -
-        totalCashPure
-      )
-        // ✅ NO - advBalance here
-        .toFixed(3),
-    );
+    const finalDistinctBalance = liveBalanceSummary.netBalance;
 
     const transactionData = {
       customerName: selectedCustomer.name,
@@ -1318,11 +1370,11 @@ export default function CreateTransaction({ navigation }) {
       type: normalizeCustomerType(selectedCustomer.customerType, "B2B"),
       issueTotal: Number(totalIssueWeight.toFixed(3)),
       issuePure: Number(totalIssuePure.toFixed(3)),
-      oldBalance: Number(oldBalance.toFixed(3)),
+      oldBalance: Number(customerOldBalance.toFixed(3)),
       receiptPure: Number(totalReceiptPure.toFixed(3)),
       cashPure: Number(totalCashPure.toFixed(3)),
       balance: finalDistinctBalance,
-      advBal: Number(advBalance.toFixed(3)),
+      advBal: Number(customerAdvanceBalance.toFixed(3)),
     };
 
     try {
@@ -1353,28 +1405,10 @@ export default function CreateTransaction({ navigation }) {
         ? `${base_url}/customersB2C/${selectedCustomer.id || selectedCustomer._id}`
         : `${base_url}/customers/${selectedCustomer.id || selectedCustomer._id}`;
 
-      // Calculate updated balances to save back to master record
-      const currentNet = oldBalance - advBalance;
-      const newNet = Number(
-        (
-          currentNet +
-          totalIssuePure +
-          (gstEnabled ? gstPureValue : 0) -
-          totalReceiptPure -
-          totalCashPure
-        ).toFixed(3),
-      );
-
-      let final_OB = 0;
-      let final_AB = 0;
-
-      if (newNet >= 0) {
-        final_OB = newNet;
-        final_AB = 0;
-      } else {
-        final_OB = 0;
-        final_AB = Math.abs(newNet);
-      }
+      const newNet = liveBalanceSummary.netBalance;
+      const finalState = deriveBalanceStateFromNet(newNet);
+      const final_OB = finalState.oldBalance;
+      const final_AB = finalState.advanceBalance;
 
       if (!selectedCustomer.isGstCustomer) {
         const customerUpdateRes = await fetch(updateEndpoint, {
@@ -1407,13 +1441,13 @@ export default function CreateTransaction({ navigation }) {
         billType: customerType === "B2C" ? "B2C" : "B2B",
         date: date,
         oldBalance: Number(final_OB.toFixed(3)),
-        ob: Number(oldBalance.toFixed(3)),
+        ob: Number(customerOldBalance.toFixed(3)),
         issuePure: Number(totalIssuePure.toFixed(3)),
         receiptPure: Number(totalReceiptPure.toFixed(3)),
         cashPure: Number(totalCashPure.toFixed(3)),
         gstPure: Number((gstEnabled ? gstPureValue : 0).toFixed(3)),
         advanceBalance: Number(final_AB.toFixed(3)),
-        advBal: Number(advBalance.toFixed(3)),
+        advBal: Number(customerAdvanceBalance.toFixed(3)),
         currentBalance: newNet,
         issueItems: issueItems.map((item) => ({
           name: item.item,
@@ -1488,8 +1522,8 @@ export default function CreateTransaction({ navigation }) {
           address: selectedCustomer.address || "",
           gstin: selectedCustomer.gst || "",
           date,
-          oldBalance: fmt(oldBalance),
-          advanceBalance: fmt(advBalance),
+          oldBalance: fmt(customerOldBalance),
+          advanceBalance: fmt(customerAdvanceBalance),
           transactionId: savedTransaction?._id || "",
           autoShare: true,
         },
@@ -1531,13 +1565,13 @@ export default function CreateTransaction({ navigation }) {
             igst: "0"
           },
         summary: {
-          ob: fmt(oldBalance),
+          ob: fmt(customerOldBalance),
           issue: fmt(totalIssuePure),
           gstPure: fmt(gstPureValue),
           receipt: fmt(totalReceiptPure),
           cash: fmt(totalCashPure),
           current: fmt(newNet),
-          obPlusIssue: fmt(oldBalance + totalIssuePure + gstPureValue),
+          obPlusIssue: fmt(customerOldBalance + totalIssuePure + gstPureValue),
           receiptPlusCash: fmt(totalReceiptPure + totalCashPure),
         },
       });
@@ -1769,8 +1803,8 @@ export default function CreateTransaction({ navigation }) {
               </View>
 
               <View style={styles.balanceContainer}>
-                <Text style={styles.balanceText}>Old: {fmt(oldBalance)}g</Text>
-                <Text style={styles.balanceText}>Adv: {fmt(advBalance)}g</Text>
+                <Text style={styles.balanceText}>Old: {fmt(customerOldBalance)}g</Text>
+                <Text style={styles.balanceText}>Adv: {fmt(customerAdvanceBalance)}g</Text>
               </View>
             </View>
           </View>
@@ -2453,13 +2487,13 @@ export default function CreateTransaction({ navigation }) {
                   {gstEnabled && (
                     <Text style={styles.summaryCell}>{fmt(gstPureValue)}</Text>
                   )}
-                  <Text style={styles.summaryCell}>{fmt(oldBalance)}</Text>
+                  <Text style={styles.summaryCell}>{fmt(customerOldBalance)}</Text>
                   <Text style={styles.summaryCell}>
                     {fmt(totalReceiptPure)}
                   </Text>
                   <Text style={styles.summaryCell}>{fmt(totalCashPure)}</Text>
                   <Text style={styles.summaryCell}>{fmt(balance)}</Text>
-                  <Text style={styles.summaryCell}>{fmt(advBalance)}</Text>
+                  <Text style={styles.summaryCell}>{fmt(liveAdvanceBalance)}</Text>
                 </View>
               </View>
             </ScrollView>
