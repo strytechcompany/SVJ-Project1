@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import {
   View,
   Text,
   StyleSheet,
+  ActivityIndicator,
   FlatList,
   TouchableOpacity,
   TextInput,
@@ -20,7 +21,6 @@ import { base_url } from "./config";
 import { buildReminderAlerts, loadReminderSettings } from "./reminderService";
 
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback } from "react";
 import CommonHeader from "./CommonHeader";
 
 const readImageField = (value) => {
@@ -161,7 +161,7 @@ const getRowImageRaw = (row) =>
   pickFirstImageFromList(row?.items) ||
   "";
 
-const CustomerCard = ({
+const CustomerCard = memo(({
     item,
     handleViewBill,
     handlePhonePress,
@@ -430,26 +430,74 @@ const CustomerCard = ({
       </TouchableOpacity>
     </View>
   );
-};
+});
 
 export default function CustomerMasterList({ navigation, route }) {
   const [customers, setCustomers] = useState([]);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ALL");
   const [reminderCount, setReminderCount] = useState(0);
   const [selectedImage, setSelectedImage] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const cacheRef = useRef({ data: [], ts: 0 });
+  const isFetchingRef = useRef(false);
+
+  const PAGE_SIZE = 20;
+  const CACHE_TTL_MS = 2 * 60 * 1000;
+
+  const toTs = (value) => {
+    if (!value) return 0;
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    const raw = String(value).trim();
+    if (!raw) return 0;
+    const direct = new Date(raw).getTime();
+    if (Number.isFinite(direct)) return direct;
+    const m = raw.match(
+      /^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(?:\s+(.*))?$/
+    );
+    if (m) {
+      const dd = m[1].padStart(2, "0");
+      const mm = m[2].padStart(2, "0");
+      const yyyy = m[3].length === 2 ? `20${m[3]}` : m[3];
+      const hhmmss = (m[4] || "00:00:00").trim();
+      const parsed = new Date(`${yyyy}-${mm}-${dd}T${hhmmss}`).getTime();
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  };
 
   const handleImageClick = (uri) => {
     setSelectedImage(uri);
   };
 
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setSearch(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, filter, customers.length]);
+
   useFocusEffect(
     useCallback(() => {
+      const now = Date.now();
+      if (cacheRef.current.data.length > 0) {
+        setCustomers(cacheRef.current.data);
+        if (now - cacheRef.current.ts < CACHE_TTL_MS) return;
+      }
       fetchCustomers();
     }, []),
   );
 
   const fetchCustomers = async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    setLoading(true);
     try {
       const toArray = (value) => {
         if (Array.isArray(value)) return value;
@@ -460,24 +508,6 @@ export default function CustomerMasterList({ navigation, route }) {
         if (Array.isArray(value.transactions)) return value.transactions;
         if (Array.isArray(value.bills)) return value.bills;
         return [];
-      };
-      const toTs = (value) => {
-        if (!value) return 0;
-        if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-        const raw = String(value).trim();
-        if (!raw) return 0;
-        const direct = new Date(raw).getTime();
-        if (Number.isFinite(direct)) return direct;
-        const m = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(?:\s+(.*))?$/);
-        if (m) {
-          const dd = m[1].padStart(2, "0");
-          const mm = m[2].padStart(2, "0");
-          const yyyy = m[3].length === 2 ? `20${m[3]}` : m[3];
-          const hhmmss = (m[4] || "00:00:00").trim();
-          const parsed = new Date(`${yyyy}-${mm}-${dd}T${hhmmss}`).getTime();
-          return Number.isFinite(parsed) ? parsed : 0;
-        }
-        return 0;
       };
       const normalizeId = (value) => {
         if (value === null || value === undefined) return "";
@@ -742,29 +772,45 @@ export default function CustomerMasterList({ navigation, route }) {
       );
       setReminderCount(reminders.length);
       setCustomers(sortedCustomers);
+      cacheRef.current = { data: sortedCustomers, ts: Date.now() };
     } catch (error) {
       console.error("Error fetching customers:", error);
+    } finally {
+      isFetchingRef.current = false;
+      setLoading(false);
     }
   };
 
-  const filteredData = customers
-    .filter((item) => {
-    const custName = (item.customerName || item.name || "").toLowerCase();
-    const matchesSearch = custName.includes(search.toLowerCase());
-    const normalizedType = String(item.customerType || "").toUpperCase();
+  const filteredData = useMemo(() => {
+    const lowered = search.toLowerCase();
+    const filtered = customers.filter((item) => {
+      const custName = (item.customerName || item.name || "").toLowerCase();
+      const matchesSearch = custName.includes(lowered);
+      const normalizedType = String(item.customerType || "").toUpperCase();
 
-    const matchesType =
-      filter === "ALL" ||
-      normalizedType === filter ||
-      (filter === "Supplier" && (normalizedType === "DEALER" || normalizedType === "SUPPLIER"));
+      const matchesType =
+        filter === "ALL" ||
+        normalizedType === filter ||
+        (filter === "Supplier" &&
+          (normalizedType === "DEALER" || normalizedType === "SUPPLIER"));
 
-    return matchesSearch && matchesType;
-    })
-    .sort((a, b) => toTs(b.updatedAt || b.createdAt || 0) - toTs(a.updatedAt || a.createdAt || 0));
-  const displayData =
-    filter === "ALL" && !search.trim() && filteredData.length === 0 && customers.length > 0
-      ? customers
-      : filteredData;
+      return matchesSearch && matchesType;
+    });
+    return filtered.sort(
+      (a, b) => toTs(b.updatedAt || b.createdAt || 0) - toTs(a.updatedAt || a.createdAt || 0),
+    );
+  }, [customers, filter, search]);
+
+  const displayData = useMemo(() => {
+    if (filter === "ALL" && !search.trim() && filteredData.length === 0 && customers.length > 0) {
+      return customers;
+    }
+    return filteredData;
+  }, [customers, filteredData, filter, search]);
+
+  const pagedData = useMemo(() => {
+    return displayData.slice(0, page * PAGE_SIZE);
+  }, [displayData, page]);
 
   const handleEdit = (customer) => {
     navigation.navigate("EditCustomerMaster", { customer });
@@ -886,8 +932,8 @@ export default function CustomerMasterList({ navigation, route }) {
     navigation.navigate("BillHistory", { customer });
   };
 
-  const renderItem = ({ item }) => {
-    return (
+  const renderItem = useCallback(
+    ({ item }) => (
       <CustomerCard
         item={item}
         handleViewBill={handleViewBill}
@@ -898,8 +944,18 @@ export default function CustomerMasterList({ navigation, route }) {
         isOverdue={Boolean(item.isOverdueReminder)}
         handleImageClick={handleImageClick}
       />
-    );
-  };
+    ),
+    [handleViewBill, handlePhonePress, handleWhatsApp, handleEdit, handleDelete, handleImageClick],
+  );
+
+  const keyExtractor = useCallback((item, index) => {
+    return String(item.customerId || item._id || item.id || item.customerNumber || index);
+  }, []);
+
+  const handleLoadMore = useCallback(() => {
+    if (page * PAGE_SIZE >= displayData.length) return;
+    setPage((p) => p + 1);
+  }, [displayData.length, page]);
 
 
   return (
@@ -935,8 +991,8 @@ export default function CustomerMasterList({ navigation, route }) {
           <TextInput
             placeholder="Search Customer..."
             style={styles.search}
-            value={search}
-            onChangeText={setSearch}
+            value={searchInput}
+            onChangeText={setSearchInput}
           />
         </View>
       </CommonHeader>
@@ -979,9 +1035,27 @@ export default function CustomerMasterList({ navigation, route }) {
       </View>
 
       <FlatList
-        data={displayData}
-        keyExtractor={(item, index) => index.toString()}
+        data={pagedData}
+        keyExtractor={keyExtractor}
         renderItem={renderItem}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        updateCellsBatchingPeriod={50}
+        windowSize={7}
+        removeClippedSubviews
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.4}
+        ListEmptyComponent={
+          loading ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="large" color="#2E7D32" />
+            </View>
+          ) : (
+            <View style={styles.emptyWrap}>
+              <Text style={styles.emptyText}>No customers found</Text>
+            </View>
+          )
+        }
       />
 
       {/* FLOATING ADD BUTTON */}
@@ -1050,6 +1124,20 @@ const styles = StyleSheet.create({
   },
 
   search: { marginLeft: 10, flex: 1 },
+  loadingWrap: {
+    paddingVertical: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyWrap: {
+    paddingVertical: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyText: {
+    color: "#888",
+    fontSize: 14,
+  },
 
   filterRow: {
     flexDirection: "row",
