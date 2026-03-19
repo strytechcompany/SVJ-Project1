@@ -118,17 +118,8 @@ export default function HomeScreen({ route }) {
   };
 
   useEffect(() => {
-    fetchData();
-    loadRates();
     loadSession();
   }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      fetchData();
-      loadRates();
-    }, [fetchData]),
-  );
 
   const loadSession = async () => {
     try {
@@ -141,7 +132,7 @@ export default function HomeScreen({ route }) {
     }
   };
 
-  const loadRates = async () => {
+  const loadRates = useCallback(async () => {
     try {
       console.log("Fetching rates from:", `${base_url}/rates`);
       const response = await fetch(`${base_url}/rates`);
@@ -171,7 +162,7 @@ export default function HomeScreen({ route }) {
     } catch (error) {
       console.error("AsyncStorage error:", error);
     }
-  };
+  }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -402,7 +393,7 @@ export default function HomeScreen({ route }) {
   useEffect(() => {
     fetchData();
     loadRates();
-  }, [fetchData]);
+  }, [fetchData, loadRates]);
 
   const normalizeWhatsAppPhone = (value) => {
     const digits = String(value || "").replace(/\D/g, "");
@@ -635,7 +626,7 @@ export default function HomeScreen({ route }) {
       fetchData();
       loadRates();
       checkOldBalanceReminders();
-    }, [fetchData, checkOldBalanceReminders])
+    }, [fetchData, loadRates, checkOldBalanceReminders])
   );
 
   useEffect(() => {
@@ -700,7 +691,7 @@ export default function HomeScreen({ route }) {
         style: "destructive",
         onPress: async () => {
           try {
-            await AsyncStorage.removeItem("userSession");
+            await AsyncStorage.multiRemove(["adminLoggedIn", "adminData", "userSession"]);
             navigation.reset({
               index: 0,
               routes: [{ name: "Login" }],
