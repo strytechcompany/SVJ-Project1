@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, memo } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Platform,
   SafeAreaView,
   StatusBar,
+  ActivityIndicator,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -20,6 +21,41 @@ import { base_url } from "./config";
 import { useFocusEffect } from "@react-navigation/native";
 import { styles } from "./B2CCalculationpageStyles";
 import CommonHeader from "./CommonHeader";
+
+const CustomerListItem = memo(({ item, onPress, highlight }) => {
+  let currentBalance = Number(item.oldBalance || 0);
+  let advanceBalance = Number(item.advanceBalance || 0);
+  if (currentBalance < 0) {
+    advanceBalance += Math.abs(currentBalance);
+    currentBalance = 0;
+  }
+
+  return (
+    <TouchableOpacity
+      onPress={() => onPress(item)}
+      style={[
+        styles.listItem,
+        highlight && { borderLeftWidth: 4, borderLeftColor: "#2E7D32" },
+      ]}
+    >
+      <View>
+        <Text style={styles.listItemText}>
+          <Text style={{ fontWeight: "bold", color: "#000" }}>
+            {item.customerName}
+          </Text>{" "}
+          | P : {item.phone}
+        </Text>
+        <Text style={styles.balanceText}>
+          Inv: {item.lastBillNo || "None"} | OB:{" "}
+          {Number(currentBalance || 0).toFixed(3)}g{" "}
+          {advanceBalance > 0
+            ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g`
+            : ""}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
 
 export default function CreateTransaction({ navigation, route }) {
   const transactionType = route?.params?.type || "B2C";
@@ -82,6 +118,7 @@ export default function CreateTransaction({ navigation, route }) {
   };
 
   const [b2cCustomers, setB2cCustomers] = useState([]);
+  const [loadingCustomers, setLoadingCustomers] = useState(true);
 
   // ---------------- CUSTOMER STATES ----------------
   const [customerName, setCustomerName] = useState("");
@@ -102,11 +139,20 @@ export default function CreateTransaction({ navigation, route }) {
   const [recentNames, setRecentNames] = useState([]);
   const [loadingRecent, setLoadingRecent] = useState(false);
 
-  const filteredCartCustomers = b2cCustomers.filter(
-    (c) =>
-      (c.customerName && c.customerName.toLowerCase().includes(cartSearch.toLowerCase())) ||
-      (c.phone && String(c.phone).includes(cartSearch))
-  );
+  const filteredCartCustomers = useMemo(() => {
+    const search = cartSearch.toLowerCase();
+    return b2cCustomers.filter(
+      (c) =>
+        (c.customerName && c.customerName.toLowerCase().includes(search)) ||
+        (c.phone && String(c.phone).includes(search))
+    );
+  }, [b2cCustomers, cartSearch]);
+
+  const recentCustomers = useMemo(() => {
+    if (!recentNames.length) return [];
+    const recentSet = new Set(recentNames);
+    return b2cCustomers.filter((c) => recentSet.has(c.customerName));
+  }, [b2cCustomers, recentNames]);
 
   // ---------------- RECEIPT ENTRY STATES ----------------
   const [receiptWeight, setReceiptWeight] = useState("");
@@ -435,6 +481,7 @@ export default function CreateTransaction({ navigation, route }) {
   }, [navigation, route.params]);
 
   const fetchB2CCustomers = async () => {
+    setLoadingCustomers(true);
     try {
       console.log("ðŸ” Fetching from:", `${base_url}/customersB2C`);
 
@@ -446,16 +493,23 @@ export default function CreateTransaction({ navigation, route }) {
 
       const data = await response.json();
 
-      const formattedCustomers = data.map((customer) => ({
-        id: customer._id || customer.id,
-        customerName: customer.customerName,
-        phone: customer.phoneNumber || customer.phone,
-        address: customer.address || "",
-        oldBalance: parseFloat(customer.oldBalance || 0),
-        advanceBalance: parseFloat(customer.advanceBalance || 0),
-        gstin: customer.gstin || "",
-        lastBillNo: customer.lastBillNo || customer.billNo || customer.invoiceNo || "",
-      }));
+      const formattedCustomers = data
+        .filter((customer) => {
+          if (!customer.customerName) return false;
+          const normalizedType = String(customer.customerType || "B2C").toUpperCase();
+          return normalizedType === "B2C";
+        })
+        .map((customer) => ({
+          id: customer._id || customer.id,
+          customerName: customer.customerName,
+          customerType: "B2C",
+          phone: customer.phoneNumber || customer.phone,
+          address: customer.address || "",
+          oldBalance: parseFloat(customer.oldBalance || 0),
+          advanceBalance: parseFloat(customer.advanceBalance || 0),
+          gstin: customer.gstin || "",
+          lastBillNo: customer.lastBillNo || customer.billNo || customer.invoiceNo || "",
+        }));
 
       setB2cCustomers(formattedCustomers);
       console.log("âœ… Fetched B2C Customers:", formattedCustomers);
@@ -466,6 +520,7 @@ export default function CreateTransaction({ navigation, route }) {
         `Failed to load customers: ${error.message}\n\nMake sure:\n1. Backend server is running\n2. Check base_url in config.js`
       );
     }
+    setLoadingCustomers(false);
   };
 
   const fetchRecentNames = async () => {
@@ -1381,6 +1436,15 @@ export default function CreateTransaction({ navigation, route }) {
       const receiptPureValue = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
       const cashPureVal = cashTable.reduce((sum, row) => sum + parseFloat(row.pure || 0), 0);
       const cashReceivedAmount = cashTable.reduce((sum, row) => sum + parseFloat(row.rupees || 0), 0);
+      const goldRateForBalance = parseFloat(rate || 0);
+      const totalItemFinal = items.reduce((sum, it) => sum + parseFloat(it.final || 0), 0);
+      const totalOldGoldAmount = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.amount || 0), 0);
+      const b2cTotalCashAmount = totalItemFinal - totalOldGoldAmount;
+      const openingBalanceRupees = (ob - ab) * (goldRateForBalance || 0);
+      const b2cFinalPayableAmount = b2cTotalCashAmount + openingBalanceRupees;
+      const b2cBalanceRupees = b2cFinalPayableAmount - cashReceivedAmount;
+      const b2cBalanceGrams =
+        goldRateForBalance > 0 ? (b2cBalanceRupees / goldRateForBalance) : 0;
       let finalBalanceForRecord = 0;
       const savedCustomerId =
         resolvedCustomer?.id ||
@@ -1390,8 +1454,7 @@ export default function CreateTransaction({ navigation, route }) {
 
       // 1. Update Customer Balance
       if (resolvedCustomer?.id) {
-        const currentNet = ob - ab;
-        const newNet = currentNet + issuePureTotal - receiptPureValue - cashPureVal;
+        const newNet = b2cBalanceGrams;
 
         let newCustomerOB = 0, newCustomerAB = 0;
         if (newNet >= 0) { newCustomerOB = newNet; newCustomerAB = 0; }
@@ -1467,11 +1530,7 @@ export default function CreateTransaction({ navigation, route }) {
         issuePure: parseFloat(reportData.totalReceiptPure),
         receiptPure: b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0),
         cashPure: cashPureVal,
-        currentBalance: (() => {
-          const issue = parseFloat(reportData.totalReceiptPure);
-          const receipt = b2cReceiptItems.reduce((sum, item) => sum + parseFloat(item.netWeight || 0), 0);
-          return (ob - ab) + issue - receipt - cashPureVal;
-        })(),
+        currentBalance: b2cBalanceGrams,
         issueItems: items.map(it => ({
           name: it.displayItemName || it.itemName,
           itemName: it.itemName,
@@ -1549,6 +1608,7 @@ export default function CreateTransaction({ navigation, route }) {
         shop: "Easy-gold",
         id: currentCustomer?.id || currentCustomer?._id || "-",
         customerId: currentCustomer?.id || currentCustomer?._id || "-",
+        customerType: "B2C",
         billNo: generatedBillNo || "-",
         invoiceNo: generatedBillNo || "-",
         phone,
@@ -1675,70 +1735,62 @@ export default function CreateTransaction({ navigation, route }) {
                 />
               </View>
 
-              <ScrollView style={{ maxHeight: 200, marginBottom: 20 }}>
-                {!cartSearch && recentNames.length > 0 && (
-                  <View>
-                    <Text style={{ fontSize: 13, color: '#888', marginBottom: 10, marginLeft: 5, fontWeight: 'bold' }}>RECENT TRANSACTIONS</Text>
-                    {b2cCustomers
-                      .filter(c => recentNames.includes(c.customerName))
-                      .map((cust, index) => {
-                        let currentBalance = Number(cust.oldBalance || 0);
-                        let advanceBalance = Number(cust.advanceBalance || 0);
-                        if (currentBalance < 0) {
-                          advanceBalance += Math.abs(currentBalance);
-                          currentBalance = 0;
-                        }
-                        return (
-                          <TouchableOpacity
-                            key={`recent-${cust.id || index}`}
-                            onPress={() => selectCustomer(cust)}
-                            style={[styles.listItem, { borderLeftWidth: 4, borderLeftColor: '#2E7D32' }]}
-                          >
-                            <View>
-                              <Text style={styles.listItemText}>
-                                <Text style={{ fontWeight: 'bold', color: '#000' }}>{cust.customerName}</Text> | P : {cust.phone}
-                              </Text>
-                              <Text style={styles.balanceText}>
-                                Inv: {cust.lastBillNo || 'None'} | OB: {Number(currentBalance || 0).toFixed(3)}g {advanceBalance > 0 ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g` : ''}
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    <Text style={{ fontSize: 13, color: '#888', marginVertical: 10, marginLeft: 5, fontWeight: 'bold' }}>ALL CUSTOMERS</Text>
+              <View style={{ maxHeight: 200, marginBottom: 20 }}>
+                {loadingCustomers ? (
+                  <View style={{ paddingVertical: 12, alignItems: "center" }}>
+                    <ActivityIndicator size="small" color="#2E7D32" />
                   </View>
-                )}
-                {filteredCartCustomers.length > 0 ? (
-                  filteredCartCustomers.map((cust, index) => {
-                    let currentBalance = Number(cust.oldBalance || 0);
-                    let advanceBalance = Number(cust.advanceBalance || 0);
-
-                    if (currentBalance < 0) {
-                      advanceBalance += Math.abs(currentBalance);
-                      currentBalance = 0;
-                    }
-
-                    return (
-                      <TouchableOpacity
-                        key={cust.id || index}
-                        onPress={() => selectCustomer(cust)}
-                        style={styles.listItem}
-                      >
-                        <View>
-                          <Text style={styles.listItemText}>
-                            <Text style={{ fontWeight: 'bold', color: '#000' }}>{cust.customerName}</Text> | P : {cust.phone}
-                          </Text>
-                          <Text style={styles.balanceText}>
-                            Inv: {cust.lastBillNo || 'None'} | OB: {Number(currentBalance || 0).toFixed(3)}g {advanceBalance > 0 ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g` : ''}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })
                 ) : (
-                  <Text style={styles.infoText}>No customers found</Text>
+                  <>
+                    {!cartSearch && recentCustomers.length > 0 && (
+                      <View>
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            color: "#888",
+                            marginBottom: 10,
+                            marginLeft: 5,
+                            fontWeight: "bold",
+                          }}
+                        >
+                          RECENT TRANSACTIONS
+                        </Text>
+                        {recentCustomers.map((cust, index) => (
+                          <CustomerListItem
+                            key={`recent-${cust.id || index}`}
+                            item={cust}
+                            onPress={selectCustomer}
+                            highlight
+                          />
+                        ))}
+                        <Text
+                          style={{
+                            fontSize: 13,
+                            color: "#888",
+                            marginVertical: 10,
+                            marginLeft: 5,
+                            fontWeight: "bold",
+                          }}
+                        >
+                          ALL CUSTOMERS
+                        </Text>
+                      </View>
+                    )}
+                    {filteredCartCustomers.length > 0 ? (
+                      filteredCartCustomers.map((cust, index) => (
+                        <CustomerListItem
+                          key={cust.id || index}
+                          item={cust}
+                          onPress={selectCustomer}
+                          highlight={false}
+                        />
+                      ))
+                    ) : !cartSearch && recentCustomers.length > 0 ? null : (
+                      <Text style={styles.infoText}>No customers found</Text>
+                    )}
+                  </>
                 )}
-              </ScrollView>
+              </View>
             </View>
           )}
 
@@ -2444,3 +2496,4 @@ export default function CreateTransaction({ navigation, route }) {
     </SafeAreaView >
   );
 }
+
