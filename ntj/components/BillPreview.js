@@ -10,6 +10,11 @@ import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from "axios";
 import { base_url } from "./config";
+import {
+  buildBalanceSummary,
+  deriveBalanceStateFromNet,
+  toBalanceNumber,
+} from "./balanceUtils";
 
 // `react-native-share` requires a native module ("RNShare"). In Expo Go (and any build
 // where that native module isn't included), importing it crashes at startup.
@@ -96,10 +101,7 @@ export default function BillPreview({ route, navigation }) {
   const summary = rawSummary || {};
   const customer = route.params?.customer || {};
   const isFromHistory = Boolean(route.params?.fromHistory);
-const toNum = (value, fallback = 0) => {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-};
+const toNum = (value, fallback = 0) => toBalanceNumber(value, fallback);
 
 const normalizeImageUri = (rawValue, baseUrl = "") => {
   const isInvalidImageToken = (raw) => {
@@ -227,6 +229,17 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const hasAutoSavedRef = useRef(false);
   const lastAutoSaveKeyRef = useRef("");
   const preparedPdfUriRef = useRef("");
+  const savedBillIdRef = useRef(
+    route.params?.savedBillId ||
+    route.params?.billId ||
+    transactions?.[0]?._id ||
+    transactions?.[0]?.id ||
+    ""
+  );
+  const lastSavedSignatureRef = useRef("");
+  const isSavingBillRef = useRef(false);
+  const savePromiseRef = useRef(null);
+  const allowNextBeforeRemoveRef = useRef(false);
 
   const [upiId, setUpiId] = useState("kaliyamoorthirengaraj@okaxis");
   const [additionalPhone, setAdditionalPhone] = useState('');
@@ -338,11 +351,14 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const summaryReceipt = Math.abs(summaryReceiptRaw) < 0.0001 && Math.abs(receiptFromRows) > 0.0001 ? receiptFromRows : summaryReceiptRaw;
   const summaryCash = Math.abs(summaryCashRaw) < 0.0001 && Math.abs(cashFromRows) > 0.0001 ? cashFromRows : summaryCashRaw;
   const summaryGstPure = summaryGstPureRaw;
-  const isB2BPreview = String(customer?.type || customer?.customerType || "").toUpperCase() === "B2B";
-  const isAdvanceBalanceCase = summaryOB === 0 && summaryAB > 0;
-  const computedCurrent = isB2BPreview && isAdvanceBalanceCase
-    ? (summaryAB + summaryIssue - summaryReceipt - summaryCash)
-    : (summaryOB - summaryAB) + summaryIssue + summaryGstPure - summaryReceipt - summaryCash;
+  const calculatedSummary = buildBalanceSummary({
+    oldBalance: summaryOB,
+    advanceBalance: summaryAB,
+    issue: summaryIssue,
+    receipt: summaryReceipt,
+    cash: summaryCash,
+  });
+  const computedCurrent = calculatedSummary.netBalance;
   const displaySummary = {
     issue: summaryIssue.toFixed(3),
     receipt: summaryReceipt.toFixed(3),
@@ -353,37 +369,46 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     ab: summaryAB.toFixed(3),
     current: toNum(summary?.current, computedCurrent).toFixed(3),
   };
-  const summaryStartLabel = summaryOB !== 0 ? "Old Balance" : (summaryAB !== 0 ? "Advance Balance" : "Old Balance");
-  const summaryStartValue = summaryOB !== 0 ? summaryOB : summaryAB;
-  const summaryLeftSum = isAdvanceBalanceCase
-    ? summaryStartValue + toNum(displaySummary.issue, 0)
-    : summaryStartValue + toNum(displaySummary.issue, 0) + toNum(displaySummary.gstPure, 0);
-  const summaryRightSum =
-    toNum(displaySummary.receipt, 0) +
-    toNum(displaySummary.cash, 0);
+  const summaryStartLabel = calculatedSummary.startLabel;
+  const summaryStartValue = calculatedSummary.startValue;
+  const summaryLeftSum = calculatedSummary.leftSum;
+  const summaryRightSum = calculatedSummary.rightSum;
   const summaryFinal = (isFromHistory && hasSummaryCurrent)
     ? summaryCurrent
-    : (summaryLeftSum - summaryRightSum);
-  const summaryFinalLabel = summaryFinal >= 0 ? "Old Balance" : "Advance Balance";
+    : calculatedSummary.netBalance;
+  const summaryFinalState = deriveBalanceStateFromNet(summaryFinal);
+  const summaryFinalLabel = summaryFinalState.oldBalance > 0 ? "Old Balance" : "Advance Balance";
   const summaryFinalValue = Math.abs(summaryFinal);
-  const dealerOldBalanceValue = toNum(summaryStartValue, 0);
-  const dealerReceiptValue = toNum(displaySummary.receipt, 0);
-  const dealerIssueValue = toNum(displaySummary.issue, 0);
-  const dealerCashValue = toNum(displaySummary.cash, 0);
-  const dealerFinalBalanceRaw = dealerOldBalanceValue + dealerReceiptValue - (dealerIssueValue + dealerCashValue);
-  const dealerFinalIsOldBalance = dealerFinalBalanceRaw >= 0;
-  const dealerFinalBalanceValue = Math.abs(dealerFinalBalanceRaw);
+  const dealerBalanceSummary = buildBalanceSummary({
+    oldBalance: summaryOB,
+    advanceBalance: summaryAB,
+    issue: toNum(displaySummary.issue, 0),
+    receipt: toNum(displaySummary.receipt, 0),
+    cash: toNum(displaySummary.cash, 0),
+  });
+  const dealerOldBalanceValue = dealerBalanceSummary.startValue;
+  const dealerReceiptValue = dealerBalanceSummary.receipt;
+  const dealerIssueValue = dealerBalanceSummary.issue;
+  const dealerCashValue = dealerBalanceSummary.cash;
+  const dealerFinalBalanceRaw = dealerBalanceSummary.netBalance;
+  const dealerFinalIsOldBalance = dealerBalanceSummary.oldBalance > 0;
+  const dealerFinalBalanceValue = dealerBalanceSummary.finalValue;
   const dealerFinalBalanceLabel = dealerFinalIsOldBalance ? "Old Balance" : "Advance Balance";
-  const dealerActiveBalanceLabel = summaryStartLabel;
+  const dealerActiveBalanceLabel = dealerBalanceSummary.startLabel;
   const formatB2BSummaryValue = (value) => toNum(value, 0).toFixed(3);
   const hasB2BAdvanceBalance = customer?.type === "B2B" && toNum(summaryAB, 0) > 0;
   const b2bAdvanceBalance = toNum(summaryAB, 0);
   const b2bTotalIssuePure = toNum(totalIssuePure, 0);
   const b2bTotalReceiptPure = toNum(totalReceiptPure, 0);
   const b2bTotalCashPure = toNum(cashFromRows, 0);
-  const b2bFinalAdvanceBalance =
-    b2bAdvanceBalance + b2bTotalIssuePure - b2bTotalReceiptPure - b2bTotalCashPure;
-  const b2bGstPureValue = formatB2BSummaryValue(displaySummary.gstPure);
+  const b2bAdvanceOnlySummary = buildBalanceSummary({
+    oldBalance: 0,
+    advanceBalance: b2bAdvanceBalance,
+    issue: b2bTotalIssuePure,
+    receipt: b2bTotalReceiptPure,
+    cash: b2bTotalCashPure,
+  });
+  const b2bFinalAdvanceBalance = b2bAdvanceOnlySummary.finalValue;
   const b2bSummaryValues = {
     oldBalance: formatB2BSummaryValue(summaryStartValue),
     issue: formatB2BSummaryValue(displaySummary.issue),
@@ -402,53 +427,22 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     finalLabel: dealerFinalBalanceLabel,
     activeLabel: dealerActiveBalanceLabel,
     finalIsOldBalance: dealerFinalIsOldBalance,
+    startsWithAdvance: dealerBalanceSummary.startsWithAdvance,
+    expression: dealerBalanceSummary.startsWithAdvance
+      ? `${formatB2BSummaryValue(dealerIssueValue)} - (${formatB2BSummaryValue(dealerOldBalanceValue)} + ${formatB2BSummaryValue(dealerReceiptValue)} + ${formatB2BSummaryValue(dealerCashValue)})`
+      : `(${formatB2BSummaryValue(dealerOldBalanceValue)} + ${formatB2BSummaryValue(dealerIssueValue)}) - (${formatB2BSummaryValue(dealerReceiptValue)} + ${formatB2BSummaryValue(dealerCashValue)})`,
   };
 
-  useEffect(() => {
-    if (!isDealerPreview) return;
-    if (hasAutoSavedRef.current) return;
-    const customerId = getCustomerIdForLookup();
-    if (!customerId) return;
-    const issueKey = safeIssueItems.length;
-    const receiptKey = safeReceiptItems.length;
-    const cashKey = safeCashTable.length;
-    const totalsKey = [
-      summaryStartValue,
-      displaySummary.issue,
-      displaySummary.receipt,
-      displaySummary.cash,
-      dealerFinalBalanceRaw,
-      currentBillNo || "",
-      customer?.date || "",
-    ].join("|");
-    const autoSaveKey = `${customerId}|${issueKey}|${receiptKey}|${cashKey}|${totalsKey}`;
-    if (lastAutoSaveKeyRef.current === autoSaveKey) return;
-    lastAutoSaveKeyRef.current = autoSaveKey;
-    hasAutoSavedRef.current = true;
-    const timer = setTimeout(() => {
-      handleSaveBill();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [
-    isDealerPreview,
-    safeIssueItems.length,
-    safeReceiptItems.length,
-    safeCashTable.length,
-    summaryStartValue,
-    displaySummary.issue,
-    displaySummary.receipt,
-    displaySummary.cash,
-    dealerFinalBalanceRaw,
-    currentBillNo,
-    customer?.date,
-  ]);
+  const shouldAutoSavePreview =
+    !isFromHistory && !order && !estimate && !suspense && !isB2CPreview;
   const b2bAdvanceSummaryValues = {
     issue: formatB2BSummaryValue(b2bTotalIssuePure),
     advanceBalance: formatB2BSummaryValue(b2bAdvanceBalance),
     receipt: formatB2BSummaryValue(b2bTotalReceiptPure),
     cash: formatB2BSummaryValue(b2bTotalCashPure),
     finalAdvanceBalance: formatB2BSummaryValue(b2bFinalAdvanceBalance),
-    expression: `${formatB2BSummaryValue(b2bTotalIssuePure)} + ${formatB2BSummaryValue(b2bAdvanceBalance)} - (${formatB2BSummaryValue(b2bTotalReceiptPure)} + ${formatB2BSummaryValue(b2bTotalCashPure)})`,
+    finalLabel: summaryFinalLabel,
+    expression: `${formatB2BSummaryValue(b2bAdvanceBalance)} + ${formatB2BSummaryValue(b2bTotalReceiptPure)} + ${formatB2BSummaryValue(b2bTotalCashPure)} - ${formatB2BSummaryValue(b2bTotalIssuePure)}`,
   };
   const b2cRateFallback =
     toNum(safeCashTable?.[0]?.goldRate, 0) ||
@@ -1336,78 +1330,68 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
             <h2>SUMMARY:</h2>
             <table>
-              ${isDealerPreview ? `
-                <tr>
-                  <th>${dealerSummaryValues.activeLabel}</th>
-                  <th>RECEIPT</th>
-                  <th>ISSUE</th>
-                  <th>CASH</th>
-                  <th>${dealerSummaryValues.activeLabel}</th>
-                </tr>
-                <tr>
-                  <td>${dealerSummaryValues.oldBalance}</td>
-                  <td>${dealerSummaryValues.receipt}</td>
+	              ${isDealerPreview ? `
+	                <tr>
+	                  <th>${dealerSummaryValues.activeLabel}</th>
+	                  <th>RECEIPT</th>
+	                  <th>ISSUE</th>
+	                  <th>CASH</th>
+	                  <th>${dealerSummaryValues.finalLabel}</th>
+	                </tr>
+	                <tr>
+	                  <td>${dealerSummaryValues.oldBalance}</td>
+	                  <td>${dealerSummaryValues.receipt}</td>
                   <td>${dealerSummaryValues.issue}</td>
                   <td>${dealerSummaryValues.cash}</td>
                   <td>${dealerSummaryValues.finalBalance}</td>
-                </tr>
-                <tr>
-                  <td>${dealerSummaryValues.oldBalance}</td>
-                  <td>+ ${dealerSummaryValues.receipt}</td>
-                  <td>- ${dealerSummaryValues.issue}</td>
-                  <td>- ${dealerSummaryValues.cash}</td>
-                  <td><strong>= ${dealerSummaryValues.finalBalance}</strong></td>
-                </tr>
-              ` : summaryOB !== 0 ? `
-                <!-- OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | Old Balance -->
-                <tr>
-                  <th>Old Balance</th>
-                  <th>ISSUE</th>
-                  <th>GST (g)</th>
-                  <th>RECEIPT</th>
-                  <th>CASH</th>
-                  <th>Old Balance</th>
-                </tr>
-                <tr>
-                  <td>${summaryOB.toFixed(3)}</td>
-                  <td>${displaySummary.issue}</td>
-                  <td>${displaySummary.gstPure}</td>
-                  <td>${displaySummary.receipt}</td>
-                  <td>${displaySummary.cash}</td>
-                  <td>${displaySummary.current}</td>
-                </tr>
-                <tr>
-                  <td>${(summaryOB + toNum(displaySummary.issue) + toNum(displaySummary.gstPure)).toFixed(3)}</td>
-                  <td>-</td>
-                  <td>-</td>
-                  <td>${displaySummary.receiptPlusCash}</td>
-                  <td>=</td>
-                  <td><strong>${toNum(displaySummary.current).toFixed(3)}</strong></td>
-                </tr>
-              ` : `
-                <!-- AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | Advance Balance -->
-                <tr>
-                  <th>ISSUE</th>
-                  <th>GST (g)</th>
-                  <th>Advance Balance</th>
-                  <th>RECEIPT</th>
-                  <th>CASH</th>
-                  <th>Advance Balance</th>
-                </tr>
-                <tr>
-                  <td>${displaySummary.issue}</td>
-                  <td>${displaySummary.gstPure}</td>
-                  <td>${summaryAB.toFixed(3)}</td>
-                  <td>${displaySummary.receipt}</td>
-                  <td>${displaySummary.cash}</td>
-                  <td>${(summaryAB + toNum(displaySummary.receipt) + toNum(displaySummary.cash) - (toNum(displaySummary.issue) + toNum(displaySummary.gstPure))).toFixed(3)}</td>
-                </tr>
-                <tr>
-                  <td colspan="4" style="text-align: right; padding-right: 10px;">${summaryAB.toFixed(3)} + ${displaySummary.receipt} + ${displaySummary.cash} - (${displaySummary.issue} + ${displaySummary.gstPure})</td>
-                  <td>=</td>
-                  <td><strong>${(summaryAB + toNum(displaySummary.receipt) + toNum(displaySummary.cash) - (toNum(displaySummary.issue) + toNum(displaySummary.gstPure))).toFixed(3)}</strong></td>
-                </tr>
-              `}
+	                </tr>
+	                <tr>
+	                  <td colspan="4">${dealerSummaryValues.expression}</td>
+	                  <td><strong>= ${dealerSummaryValues.finalBalance}</strong></td>
+	                </tr>
+	              ` : summaryOB !== 0 ? `
+	                <!-- OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | Old Balance -->
+	                <tr>
+	                  <th>Old Balance</th>
+	                  <th>ISSUE</th>
+	                  <th>RECEIPT</th>
+	                  <th>CASH</th>
+	                  <th>Old Balance</th>
+	                </tr>
+	                <tr>
+	                  <td>${summaryOB.toFixed(3)}</td>
+	                  <td>${displaySummary.issue}</td>
+	                  <td>${displaySummary.receipt}</td>
+	                  <td>${displaySummary.cash}</td>
+	                  <td>${displaySummary.current}</td>
+	                </tr>
+	                <tr>
+	                  <td colspan="4">${summaryOB.toFixed(3)} + ${displaySummary.issue} - (${displaySummary.receipt} + ${displaySummary.cash})</td>
+	                  <td>=</td>
+	                  <td><strong>${toNum(displaySummary.current).toFixed(3)}</strong></td>
+	                </tr>
+	              ` : `
+	                <!-- AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | Advance Balance -->
+	                <tr>
+	                  <th>ISSUE</th>
+	                  <th>Advance Balance</th>
+	                  <th>RECEIPT</th>
+	                  <th>CASH</th>
+	                  <th>${b2bAdvanceSummaryValues.finalLabel}</th>
+	                </tr>
+	                <tr>
+	                  <td>${displaySummary.issue}</td>
+	                  <td>${summaryAB.toFixed(3)}</td>
+	                  <td>${displaySummary.receipt}</td>
+	                  <td>${displaySummary.cash}</td>
+	                  <td>${summaryFinalValue.toFixed(3)}</td>
+	                </tr>
+	                <tr>
+	                  <td colspan="4" style="text-align: right; padding-right: 10px;">${summaryAB.toFixed(3)} + ${displaySummary.receipt} + ${displaySummary.cash} - ${displaySummary.issue}</td>
+	                  <td>=</td>
+	                  <td><strong>${summaryFinalValue.toFixed(3)}</strong></td>
+	                </tr>
+	              `}
             </table>
             ${cashAmount ? `<p><strong>Cash Amount:</strong> â‚¹${cashAmount}</p>` : ''}
           </body>
@@ -2013,16 +1997,16 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   <!-- Summary -->
   <div class="section-title">SUMMARY</div>
   <div class="summary-box">
-    ${isDealerPreview ? `
-      <div class="summary-row"><span class="summary-label">${dealerSummaryValues.activeLabel}</span><span class="summary-value">${dealerSummaryValues.oldBalance} g</span></div>
-      <div class="summary-row"><span class="summary-label">Receipt</span><span class="summary-value">${dealerSummaryValues.receipt} g</span></div>
-      <div class="summary-row"><span class="summary-label">Issue</span><span class="summary-value">${dealerSummaryValues.issue} g</span></div>
-      <div class="summary-row"><span class="summary-label">Cash</span><span class="summary-value">${dealerSummaryValues.cash} g</span></div>
-      <div class="summary-total">
-        <span>${dealerSummaryValues.activeLabel}</span>
-        <span>${dealerSummaryValues.finalBalance} g</span>
-      </div>
-    ` : `
+	    ${isDealerPreview ? `
+	      <div class="summary-row"><span class="summary-label">${dealerSummaryValues.activeLabel}</span><span class="summary-value">${dealerSummaryValues.oldBalance} g</span></div>
+	      <div class="summary-row"><span class="summary-label">Receipt</span><span class="summary-value">${dealerSummaryValues.receipt} g</span></div>
+	      <div class="summary-row"><span class="summary-label">Issue</span><span class="summary-value">${dealerSummaryValues.issue} g</span></div>
+	      <div class="summary-row"><span class="summary-label">Cash</span><span class="summary-value">${dealerSummaryValues.cash} g</span></div>
+	      <div class="summary-total">
+	        <span>${dealerSummaryValues.finalLabel}</span>
+	        <span>${dealerSummaryValues.finalBalance} g</span>
+	      </div>
+	    ` : `
       ${summaryOB !== 0 ? `
       <div class="summary-row"><span class="summary-label">Old Balance (OB)</span><span class="summary-value">${summaryOB.toFixed(3)} g</span></div>` : ''}
       ${summaryAB !== 0 ? `
@@ -2751,18 +2735,28 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   };
 
   const handleSaveBill = async (options = {}) => {
-    try {
-      const { b2cSaveBalance = false, b2cForceZero = false } = options || {};
-      const billType = String(customer?.type || customer?.customerType || "B2B").toUpperCase() === "B2C" ? "B2C" : "B2B";
-      const isB2BBill = billType === "B2B";
-      const isB2CBill = billType === "B2C";
-      const forceZeroBalance = isB2CBill && b2cForceZero;
-      const customerId = getCustomerIdForSave();
+    if (isSavingBillRef.current && savePromiseRef.current) {
+      return savePromiseRef.current;
+    }
+    const {
+      b2cSaveBalance = false,
+      b2cForceZero = false,
+      silent = false,
+      force = false,
+    } = options || {};
+    const saveTask = (async () => {
+      try {
+        isSavingBillRef.current = true;
+        const billType = String(customer?.type || customer?.customerType || "B2B").toUpperCase() === "B2C" ? "B2C" : "B2B";
+        const isB2BBill = billType === "B2B";
+        const isB2CBill = billType === "B2C";
+        const forceZeroBalance = isB2CBill && b2cForceZero;
+        const customerId = getCustomerIdForSave();
 
-      if (!customerId) {
-        Alert.alert("Error", "Customer ID is missing. Please select a valid customer and try again.");
-        return;
-      }
+        if (!customerId) {
+          Alert.alert("Error", "Customer ID is missing. Please select a valid customer and try again.");
+          return;
+        }
 
       const billNo = currentBillNo;
       const allowBillNoForSave = Boolean(billNo);
@@ -2834,6 +2828,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       const finalNetBalanceForSave = isB2CBill
         ? (forceZeroBalance ? 0 : (b2cSaveBalance ? b2cFinalBalanceGrams : (toNum(oldBalanceForSave, 0) - toNum(advanceBalanceForSave, 0))))
         : toNum(isDealerPreview ? dealerFinalNetBalance : b2bFinalNetBalance, 0);
+      const finalSavedBalanceState = deriveBalanceStateFromNet(finalNetBalanceForSave);
+      const finalBalanceTypeCode = finalSavedBalanceState.advanceBalance > 0 ? "AB" : "OB";
+      const finalBalanceValue = finalSavedBalanceState.advanceBalance > 0
+        ? finalSavedBalanceState.advanceBalance
+        : finalSavedBalanceState.oldBalance;
       const availableBalanceForSave = finalNetBalanceForSave;
       const finalB2BOldBalance = isB2BBill
         ? (availableBalanceForSave > 0 ? availableBalanceForSave : 0)
@@ -2850,8 +2849,22 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
       const previousOldBalance = isB2CBill && b2cSaveBalance && !forceZeroBalance ? b2cOldBalanceForSave : toNum(summaryOB, 0);
       const previousAdvanceBalance = isB2CBill && b2cSaveBalance && !forceZeroBalance ? b2cAdvanceBalanceForSave : toNum(summaryAB, 0);
-      const balanceType = summaryStartLabel;
-      const finalBalance = isB2CBill && b2cSaveBalance && !forceZeroBalance ? b2cFinalBalanceGrams : (forceZeroBalance ? 0 : toNum(summaryFinalValue, 0));
+      const balanceType = finalBalanceTypeCode;
+      const finalBalance = finalBalanceValue;
+      const customerRecordType = isDealerPreview ? previewType : billType;
+      const saveSignature = [
+        customerId,
+        currentBillNo || "",
+        customerRecordType,
+        Number(displayedIssue).toFixed(3),
+        Number(displayedReceipt).toFixed(3),
+        Number(displayedCash).toFixed(3),
+        Number(finalBalanceValue).toFixed(3),
+        finalBalanceTypeCode,
+      ].join("|");
+      if (!force && lastSavedSignatureRef.current === saveSignature && savedBillIdRef.current) {
+        return { _id: savedBillIdRef.current, skipped: true };
+      }
       const saveSummary = {
         ...summary,
         ob: previousOldBalance,
@@ -2861,6 +2874,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         cash: displayedCash,
         gstPure: displayedGstPure,
         current: finalNetBalanceForSave,
+        balanceType: finalBalanceTypeCode,
+        balanceValue: finalBalanceValue,
       };
 
       const normalizedBillDate = (() => {
@@ -2928,8 +2943,9 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
           previousOldBalance,
           previousAdvanceBalance,
           finalBalance,
-          finalLabel: summaryFinalLabel,
+          finalLabel: finalBalanceTypeCode === "AB" ? "Advance Balance" : "Old Balance",
           balanceType,
+          balanceValue: finalBalanceValue,
         },
         displaySummary: {
           issue: displaySummary?.issue ?? displayedIssue,
@@ -2957,6 +2973,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         gstin: customer?.gstin || customer?.gst || "",
         ...(allowBillNoForSave ? { billNo: String(billNo) } : {}),
         billType,
+        customerType: customerRecordType,
         dealerType: isDealerPreview ? (customer?.type || customer?.customerType || previewTx?.dealerType || "Dealer") : "",
         receiptImage: dealerProofImageUri || null,
         proofImage: dealerProofImageUri || null,
@@ -2990,6 +3007,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         previousAdvanceBalance,
         finalBalance,
         balanceType,
+        balanceValue: finalBalanceValue,
         totals: {
           issuePure: toNum(displayedIssue, 0),
           receiptPure: toNum(displayedReceipt, 0),
@@ -3019,8 +3037,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         }
       }
 
-      const res = await fetch(`${base_url}/billSummary`, {
-        method: "POST",
+      const existingBillId = savedBillIdRef.current || route.params?.savedBillId || route.params?.billId || "";
+      const saveUrl = existingBillId
+        ? `${base_url}/billSummary/${existingBillId}?billType=${billType}`
+        : `${base_url}/billSummary`;
+      const res = await fetch(saveUrl, {
+        method: existingBillId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -3030,12 +3052,84 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         throw new Error(err || "Failed to save bill");
       }
 
-      console.log("Success", "Bill saved successfully");
-    } catch (error) {
+      const savedBill = await res.json();
+      savedBillIdRef.current = savedBill?._id || savedBill?.id || existingBillId || "";
+      lastSavedSignatureRef.current = saveSignature;
+      hasAutoSavedRef.current = true;
+      if (!silent) {
+        Alert.alert("Success", "Bill saved successfully");
+      }
+      return savedBill;
+      } catch (error) {
       console.error("Save Bill error:", error);
-      Alert.alert("Error", `Failed to save bill: ${error.message}`);
-    }
+        if (!silent) {
+          Alert.alert("Error", `Failed to save bill: ${error.message}`);
+        }
+        return null;
+      } finally {
+        isSavingBillRef.current = false;
+        savePromiseRef.current = null;
+      }
+    })();
+    savePromiseRef.current = saveTask;
+    return saveTask;
   };
+
+  useEffect(() => {
+    if (!shouldAutoSavePreview) return;
+    const customerId = getCustomerIdForLookup();
+    if (!customerId) return;
+    const issueKey = safeIssueItems.length;
+    const receiptKey = safeReceiptItems.length;
+    const cashKey = safeCashTable.length;
+    const totalsKey = [
+      summaryStartValue,
+      displaySummary.issue,
+      displaySummary.receipt,
+      displaySummary.cash,
+      isDealerPreview ? dealerFinalBalanceRaw : summaryFinal,
+      currentBillNo || "",
+      customer?.date || "",
+    ].join("|");
+    const autoSaveKey = `${customerId}|${issueKey}|${receiptKey}|${cashKey}|${totalsKey}`;
+    if (lastAutoSaveKeyRef.current === autoSaveKey) return;
+    lastAutoSaveKeyRef.current = autoSaveKey;
+    const timer = setTimeout(() => {
+      handleSaveBill({ silent: true });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [
+    shouldAutoSavePreview,
+    isDealerPreview,
+    safeIssueItems.length,
+    safeReceiptItems.length,
+    safeCashTable.length,
+    summaryStartValue,
+    displaySummary.issue,
+    displaySummary.receipt,
+    displaySummary.cash,
+    dealerFinalBalanceRaw,
+    summaryFinal,
+    currentBillNo,
+    customer?.date,
+  ]);
+
+  useEffect(() => {
+    if (!shouldAutoSavePreview) return;
+    const unsubscribe = navigation.addListener("beforeRemove", (event) => {
+      if (allowNextBeforeRemoveRef.current) {
+        allowNextBeforeRemoveRef.current = false;
+        return;
+      }
+      event.preventDefault();
+      handleSaveBill({ silent: true })
+        .finally(() => {
+          allowNextBeforeRemoveRef.current = true;
+          navigation.dispatch(event.data.action);
+        });
+    });
+    return unsubscribe;
+  }, [navigation, shouldAutoSavePreview]);
 
   return (
     <KeyboardAvoidingView
@@ -3916,13 +4010,13 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                 {customer?.type === "B2B" ? (
                   hasB2BAdvanceBalance ? (
                     <View style={styles.b2bSummaryTable}>
-                      <View style={styles.b2bSummaryHeaderRow}>
-                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>ISSUE</Text>
-                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>Advance Balance</Text>
-                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>RECEIPT</Text>
-                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>CASH</Text>
-                        <Text style={styles.b2bSummaryHeaderCell}>Advance Balance</Text>
-                      </View>
+	                      <View style={styles.b2bSummaryHeaderRow}>
+	                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>ISSUE</Text>
+	                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>Advance Balance</Text>
+	                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>RECEIPT</Text>
+	                        <Text style={[styles.b2bSummaryHeaderCell, { borderRightWidth: 1 }]}>CASH</Text>
+	                        <Text style={styles.b2bSummaryHeaderCell}>{b2bAdvanceSummaryValues.finalLabel}</Text>
+	                      </View>
 
                       <View style={styles.b2bSummaryRow}>
                         <Text style={[styles.b2bSummaryCell, { borderRightWidth: 1 }]}>{b2bAdvanceSummaryValues.issue}</Text>
@@ -3956,22 +4050,22 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                         <Text style={styles.b2bSummaryCell}>{b2bSummaryValues.finalBalance}</Text>
                       </View>
 
-                      <View style={styles.b2bSummaryEquationRow}>
-                        <Text style={[styles.b2bSummaryCell, { flex: 1 }]}>
-                          {`${b2bSummaryValues.oldBalance} + ${b2bSummaryValues.issue} + ${b2bGstPureValue} - (${b2bSummaryValues.receipt} + ${b2bSummaryValues.cash}) = ${b2bSummaryValues.finalBalance}`}
-                        </Text>
-                      </View>
+	                      <View style={styles.b2bSummaryEquationRow}>
+	                        <Text style={[styles.b2bSummaryCell, { flex: 1 }]}>
+	                          {`${b2bSummaryValues.oldBalance} + ${b2bSummaryValues.issue} - (${b2bSummaryValues.receipt} + ${b2bSummaryValues.cash}) = ${b2bSummaryValues.finalBalance}`}
+	                        </Text>
+	                      </View>
                     </View>
                   )
                 ) : (
-                  <View style={styles.dealerSummaryTable}>
-                    <View style={styles.dealerSummaryHeaderRow}>
-                      <Text style={styles.dealerSummaryHeaderCell}>{dealerSummaryValues.activeLabel}</Text>
-                      <Text style={styles.dealerSummaryHeaderCell}>RECEIPT</Text>
-                      <Text style={styles.dealerSummaryHeaderCell}>ISSUE</Text>
-                      <Text style={styles.dealerSummaryHeaderCell}>CASH</Text>
-                      <Text style={styles.dealerSummaryHeaderCell}>{dealerSummaryValues.activeLabel}</Text>
-                    </View>
+	                  <View style={styles.dealerSummaryTable}>
+	                    <View style={styles.dealerSummaryHeaderRow}>
+	                      <Text style={styles.dealerSummaryHeaderCell}>{dealerSummaryValues.activeLabel}</Text>
+	                      <Text style={styles.dealerSummaryHeaderCell}>RECEIPT</Text>
+	                      <Text style={styles.dealerSummaryHeaderCell}>ISSUE</Text>
+	                      <Text style={styles.dealerSummaryHeaderCell}>CASH</Text>
+	                      <Text style={styles.dealerSummaryHeaderCell}>{dealerSummaryValues.finalLabel}</Text>
+	                    </View>
 
                     <View style={styles.dealerSummaryRow}>
                       <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.oldBalance}</Text>
@@ -3981,14 +4075,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                       <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.finalBalance}</Text>
                     </View>
 
-                    <View style={styles.dealerSummaryRow}>
-                      <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.oldBalance}</Text>
-                      <Text style={styles.dealerSummaryCell}>{`+ ${dealerSummaryValues.receipt}`}</Text>
-                      <Text style={styles.dealerSummaryCell}>{`- ${dealerSummaryValues.issue}`}</Text>
-                      <Text style={styles.dealerSummaryCell}>{`- ${dealerSummaryValues.cash}`}</Text>
-                      <Text style={styles.dealerSummaryCell}>{`= ${dealerSummaryValues.finalBalance}`}</Text>
-                    </View>
-                  </View>
+	                    <View style={styles.dealerSummaryRow}>
+	                      <Text style={[styles.dealerSummaryCell, { flex: 4 }]}>{dealerSummaryValues.expression}</Text>
+	                      <Text style={styles.dealerSummaryCell}>{`= ${dealerSummaryValues.finalBalance}`}</Text>
+	                    </View>
+	                  </View>
                 )}
               </View>
             </>
