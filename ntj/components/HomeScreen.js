@@ -33,7 +33,6 @@ const REMINDER_AUTO_HIDE_MS = 5000; // 5 seconds
 export default function HomeScreen({ route }) {
   const navigation = useNavigation();
   const user = route?.params?.user || null;
-  const [isLoading, setIsLoading] = useState(true);
 
   const getCurrentDate = () => {
     const d = new Date();
@@ -66,6 +65,16 @@ export default function HomeScreen({ route }) {
   const reminderOpacity = useRef(new Animated.Value(0)).current;
   const reminderDragX = useRef(new Animated.Value(0)).current;
 
+  const extractCustomerName = (row = {}) => {
+    const direct = row?.displayName || row?.customerName || row?.name;
+    if (direct) return direct;
+    const nested =
+      row?.customer?.name ||
+      row?.customer?.customerName ||
+      row?.customer?.fullName;
+    return nested || "";
+  };
+
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentDateTime(new Date());
@@ -73,12 +82,6 @@ export default function HomeScreen({ route }) {
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    const delay = setTimeout(() => {
-      setIsLoading(false);
-    }, 2500);
-    return () => clearTimeout(delay);
-  }, []);
 
   const formatDateTime = (date) => {
     const d = date || new Date();
@@ -285,9 +288,9 @@ export default function HomeScreen({ route }) {
       };
 
       const b2bMapped = (Array.isArray(b2bData) ? b2bData : [])
-        .filter((t) => t.customerName || t.name)
+        .filter((t) => extractCustomerName(t))
         .map((t) => {
-          const name = t.customerName || t.name;
+          const name = extractCustomerName(t);
           const derivedType = normalizeType({ ...t, customerType: t.customerType || customerMap[name] || t.type });
           const dealerHit = isDealerRecord(t);
           return {
@@ -301,17 +304,17 @@ export default function HomeScreen({ route }) {
         });
 
       const b2cMapped = (Array.isArray(b2cData) ? b2cData : [])
-        .filter((t) => t.customerName || t.name)
+        .filter((t) => extractCustomerName(t))
         .map((t) => ({
           ...t,
           type: "B2C",
-          displayName: t.customerName || t.name,
+          displayName: extractCustomerName(t),
           _sourcePriority: 1,
           _sortTs: toTs(t.updatedAt || t.createdAt || t.date || 0),
         }));
 
       const billMapped = (Array.isArray(billRows) ? billRows : [])
-        .filter((t) => t.customerName || t.name)
+        .filter((t) => extractCustomerName(t))
         .map((t) => {
           const dealerHit = isDealerRecord(t);
           const summaryCurrent = Number(t?.summary?.current);
@@ -322,7 +325,7 @@ export default function HomeScreen({ route }) {
             ...t,
             type: dealerHit ? "DEALER" : normalizeType(t),
             isDealer: dealerHit,
-            displayName: t.customerName || t.name,
+            displayName: extractCustomerName(t),
             _sourcePriority: 3,
             _sortTs: toTs(t.updatedAt || t.createdAt || t.date || 0),
             currentBalance: hasSummaryCurrent ? summaryCurrent : (t.currentBalance ?? t.availableBalance),
@@ -758,8 +761,10 @@ export default function HomeScreen({ route }) {
     return "B2B";
   };
 
-  const resolveDisplayName = (txn = {}) =>
-    txn.displayName || txn.customerName || txn.name || "Unknown";
+  const resolveDisplayName = (txn = {}) => {
+    const name = extractCustomerName(txn);
+    return name || "Unknown";
+  };
 
   const filteredTransactions = transactions.filter((txn) => {
     const name = resolveDisplayName(txn);
@@ -780,6 +785,9 @@ export default function HomeScreen({ route }) {
       item.id,
       item.customerName,
       item.displayName,
+      item?.customer?.name,
+      item?.customer?.customerName,
+      item?.customer?.fullName,
       item.phone,
       item.phoneNumber,
       item.customerNumber,
@@ -814,7 +822,7 @@ export default function HomeScreen({ route }) {
   };
 
   const buildCustomerForHistory = (item = {}) => {
-    const name = item.customerName || item.name || item.displayName || "";
+    const name = extractCustomerName(item) || "";
     const rawType = String(item.customerType || item.type || "").toUpperCase();
     let customerType = "B2B";
     if (rawType === "B2C") customerType = "B2C";
@@ -831,14 +839,6 @@ export default function HomeScreen({ route }) {
       customerId: item.customerId || item._id || item.id || "",
     };
   };
-
-  if (isLoading) {
-    return (
-      <View style={styles.loaderContainer}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
 
   return (
     <View style={{ flex: 1, backgroundColor: "#fff" }}>
@@ -1163,6 +1163,7 @@ export default function HomeScreen({ route }) {
             </Text>
           }
           renderItem={({ item }) => {
+            if (!item || typeof item !== "object") return null;
             const displayType = resolveDisplayType(item);
             const isB2C = displayType === "B2C";
             const name = resolveDisplayName(item);
