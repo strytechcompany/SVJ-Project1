@@ -12,6 +12,11 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { base_url } from "./config";
 import CommonHeader from "./CommonHeader";
+import {
+  computeNetBalance,
+  deriveBalanceStateFromNet,
+  normalizeBalanceState,
+} from "./balanceUtils";
 
 export default function Dealer({ navigation, route }) {
   const [dealers, setDealers] = useState([]);
@@ -96,12 +101,19 @@ export default function Dealer({ navigation, route }) {
         throw new Error('Invalid data format: expected an array');
       }
 
-      const dealerList = data.map(dealer => ({
-        ...dealer,
-        customerType: 'Dealer',
-        customerNumber: dealer.phoneNumber,
-        workerName: dealer.workerName || ""
-      }));
+      const dealerList = data.map((dealer) => {
+        const normalizedBalance = normalizeBalanceState({
+          oldBalance: dealer.oldBalance,
+          advanceBalance: dealer.advanceBalance,
+        });
+        return {
+          ...dealer,
+          ...normalizedBalance,
+          customerType: 'Dealer',
+          customerNumber: dealer.phoneNumber,
+          workerName: dealer.workerName || ""
+        };
+      });
 
       setDealers(dealerList);
     } catch (error) {
@@ -196,21 +208,14 @@ export default function Dealer({ navigation, route }) {
 
       // 3. Update Dealer Balance
       // Logic for Issue: Shop Gold decreases (-), Dealer Debt increases (+)
-      let ob = parseFloat(item.oldBalance || 0);
-      let ab = parseFloat(item.advanceBalance || 0);
-      let currentNetBalance = ob - ab;
-
-      let newNetBalance = currentNetBalance + w;
-
-      let newOb = 0;
-      let newAb = 0;
-      if (newNetBalance >= 0) {
-        newOb = newNetBalance;
-        newAb = 0;
-      } else {
-        newOb = 0;
-        newAb = Math.abs(newNetBalance);
-      }
+      const newNetBalance = computeNetBalance({
+        oldBalance: item.oldBalance,
+        advanceBalance: item.advanceBalance,
+        issue: w,
+      });
+      const finalState = deriveBalanceStateFromNet(newNetBalance);
+      const newOb = finalState.oldBalance;
+      const newAb = finalState.advanceBalance;
 
       const updateResponse = await fetch(`${base_url}/customersDealer/${dealerId}`, {
         method: "PUT",
@@ -281,6 +286,12 @@ export default function Dealer({ navigation, route }) {
           const dealerTransfers = transfers.filter(t => t.selectedDealer === item.customerName);
           // Calculate total transferred weight
           const totalTransferred = dealerTransfers.reduce((sum, t) => sum + (t.transferWeight || 0), 0);
+          const cardBalance = normalizeBalanceState({
+            oldBalance: item.oldBalance,
+            advanceBalance: item.advanceBalance,
+          });
+          const activeBalance =
+            cardBalance.oldBalance > 0 ? cardBalance.oldBalance : cardBalance.advanceBalance;
 
           return (
             <View style={[styles.card, { zIndex: dropdownOpen[item._id || item.id] ? 10 : 1 }]}>
@@ -318,7 +329,7 @@ export default function Dealer({ navigation, route }) {
               <View style={styles.balanceInfo}>
                 <Text style={styles.balanceLabel}>Current Balance: </Text>
                 <Text style={styles.balanceValue}>
-                  {((item.oldBalance || 0) + (item.advanceBalance || 0)).toFixed(3)} g
+                  {activeBalance.toFixed(3)} g
                 </Text>
               </View>
 
