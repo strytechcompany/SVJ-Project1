@@ -99,9 +99,14 @@ export default function App() {
 
   const checkSession = async () => {
     try {
-      const session = await AsyncStorage.getItem("userSession");
-      if (session) {
-        setPersistedUser(JSON.parse(session));
+      const [adminLoggedIn, adminData, session] = await Promise.all([
+        AsyncStorage.getItem("adminLoggedIn"),
+        AsyncStorage.getItem("adminData"),
+        AsyncStorage.getItem("userSession"),
+      ]);
+      const storedUser = adminData || session;
+      if (adminLoggedIn === "true" && storedUser) {
+        setPersistedUser(JSON.parse(storedUser));
         setInitialRoute("Home");
       }
     } catch (e) {
