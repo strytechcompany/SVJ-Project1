@@ -3,18 +3,23 @@
     "name": "ntj",
     "slug": "ntj",
     "version": "1.0.0",
+
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+
+    "newArchEnabled": false,
+
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+
     "ios": {
       "supportsTablet": true
     },
+
     "android": {
       "package": "com.ntj.app",
       "adaptiveIcon": {
@@ -31,9 +36,11 @@
         "android.permission.ACCESS_COARSE_LOCATION"
       ]
     },
+
     "web": {
       "favicon": "./assets/favicon.png"
     },
+
     "plugins": [
       [
         "expo-image-picker",
@@ -43,11 +50,13 @@
       ],
       "expo-mail-composer"
     ],
+
+    "owner": "sudhar6424",
+
     "extra": {
       "eas": {
-        "projectId": "63908080-204a-4b41-904e-949e45da6a97"
+        "projectId": "10ef5148-146a-416d-8814-6a4e5edc588e"
       }
-    },
-    "owner": "sudhar2330"
+    }
   }
 }
