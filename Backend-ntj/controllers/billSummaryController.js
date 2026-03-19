@@ -531,8 +531,15 @@ const updateBillSummary = async (req, res) => {
         payload.billNo = lockedBillNo;
         payload.invoiceNo = lockedBillNo;
 
+        const duplicateBill = await BillSummary.findOne({
+            customerId: payload.customerId,
+            billNo: lockedBillNo,
+            _id: { $ne: existingBill._id },
+        });
+        const targetBillId = duplicateBill?._id || existingBill._id;
+
         const updated = await BillSummary.findByIdAndUpdate(
-            req.params.id,
+            targetBillId,
             { $set: payload },
             { new: true, runValidators: true }
         );
