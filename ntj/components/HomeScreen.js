@@ -25,6 +25,11 @@ import { AntDesign } from "@expo/vector-icons";
 import { base_url } from "./config";
 import CommonHeader from "./CommonHeader";
 import { buildReminderAlerts } from "./reminderService";
+import {
+  deriveBalanceStateFromNet,
+  normalizeBalanceState,
+  toBalanceNumber,
+} from "./balanceUtils";
 
 const OLD_BALANCE_REMINDER_SHOWN_KEY = "old_balance_reminder_shown_v2";
 const REMINDER_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
@@ -224,9 +229,13 @@ export default function HomeScreen({ route }) {
       const lookup = {};
       const setBal = (key, ob, ab) => {
         if (!key) return;
+        const normalized = normalizeBalanceState({
+          oldBalance: ob,
+          advanceBalance: ab,
+        });
         lookup[String(key).toLowerCase()] = {
-          ob: parseFloat(ob || 0),
-          ab: parseFloat(ab || 0),
+          ob: normalized.oldBalance,
+          ab: normalized.advanceBalance,
         };
       };
 
@@ -328,10 +337,16 @@ export default function HomeScreen({ route }) {
         .filter((t) => extractCustomerName(t))
         .map((t) => {
           const dealerHit = isDealerRecord(t);
-          const summaryCurrent = Number(t?.summary?.current);
-          const summaryOb = Number(t?.summary?.ob);
-          const summaryAb = Number(t?.summary?.ab);
+          const summaryCurrent = toBalanceNumber(t?.summary?.current, NaN);
+          const summaryOb = toBalanceNumber(t?.summary?.ob, NaN);
+          const summaryAb = toBalanceNumber(t?.summary?.ab, NaN);
           const hasSummaryCurrent = Number.isFinite(summaryCurrent);
+          const balanceStateFromSummary = hasSummaryCurrent
+            ? deriveBalanceStateFromNet(summaryCurrent)
+            : normalizeBalanceState({
+                oldBalance: summaryOb,
+                advanceBalance: summaryAb,
+              });
           return {
             ...t,
             type: dealerHit ? "DEALER" : normalizeType(t),
@@ -341,9 +356,9 @@ export default function HomeScreen({ route }) {
             _sortTs: toTs(t.updatedAt || t.createdAt || t.date || 0),
             currentBalance: hasSummaryCurrent ? summaryCurrent : (t.currentBalance ?? t.availableBalance),
             availableBalance: hasSummaryCurrent ? summaryCurrent : (t.availableBalance ?? t.currentBalance),
-            oldBalance: t.oldBalance ?? t.ob ?? summaryOb ?? 0,
-            advanceBalance: t.advanceBalance ?? t.advBal ?? summaryAb ?? 0,
-            advBal: t.advBal ?? t.advanceBalance ?? summaryAb ?? 0,
+            oldBalance: t.oldBalance ?? t.ob ?? balanceStateFromSummary.oldBalance ?? 0,
+            advanceBalance: t.advanceBalance ?? t.advBal ?? balanceStateFromSummary.advanceBalance ?? 0,
+            advBal: t.advBal ?? t.advanceBalance ?? balanceStateFromSummary.advanceBalance ?? 0,
             balance: hasSummaryCurrent ? summaryCurrent : (t.currentBalance ?? t.availableBalance ?? t.balance),
           };
         });
@@ -790,6 +805,18 @@ export default function HomeScreen({ route }) {
   });
 
   const resolveBalance = (item) => {
+    const savedBalanceType = String(item.balanceType ?? item.summary?.balanceType ?? "").toUpperCase();
+    const savedBalanceValue = toBalanceNumber(
+      item.balanceValue ?? item.summary?.balanceValue ?? item.finalBalance,
+      NaN,
+    );
+    if (Number.isFinite(savedBalanceValue) && savedBalanceType) {
+      return {
+        ob: savedBalanceType === "OB" ? savedBalanceValue : 0,
+        ab: savedBalanceType === "AB" ? savedBalanceValue : 0,
+      };
+    }
+
     const keys = [
       item.customerId,
       item._id,
@@ -813,23 +840,46 @@ export default function HomeScreen({ route }) {
     }
 
     // Priority 2: Fallback to embedded balance only when lookup is missing
-    const itemCurrent = Number(item.currentBalance ?? item.availableBalance ?? item.balance);
-    const itemOb = Number(item.oldBalance ?? item.ob);
-    const itemAb = Number(item.advBal ?? item.advanceBalance);
+    const itemCurrent = toBalanceNumber(
+      item.currentBalance ?? item.availableBalance ?? item.balance,
+      NaN,
+    );
+    const itemOb = toBalanceNumber(item.oldBalance ?? item.ob, NaN);
+    const itemAb = toBalanceNumber(item.advBal ?? item.advanceBalance, NaN);
     if (Number.isFinite(itemCurrent)) {
+      const normalized = deriveBalanceStateFromNet(itemCurrent);
       return {
-        ob: itemCurrent > 0 ? itemCurrent : 0,
-        ab: itemCurrent < 0 ? Math.abs(itemCurrent) : (Number.isFinite(itemAb) ? itemAb : 0),
+        ob: normalized.oldBalance,
+        ab: normalized.advanceBalance,
       };
     }
     if (Number.isFinite(itemOb) || Number.isFinite(itemAb)) {
+      const normalized = normalizeBalanceState({
+        oldBalance: itemOb,
+        advanceBalance: itemAb,
+      });
       return {
-        ob: Number.isFinite(itemOb) ? itemOb : 0,
-        ab: Number.isFinite(itemAb) ? itemAb : 0,
+        ob: normalized.oldBalance,
+        ab: normalized.advanceBalance,
       };
     }
 
     return { ob: 0, ab: 0 };
+  };
+
+  const formatRecentTransactionDate = (value) => {
+    if (!value) return "";
+    const raw = String(value).trim();
+    if (!raw) return "";
+    if (/^\d{2}[/-]\d{2}[/-]\d{4}$/.test(raw)) {
+      return raw.replace(/\//g, "-");
+    }
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    const day = String(parsed.getDate()).padStart(2, "0");
+    const month = String(parsed.getMonth() + 1).padStart(2, "0");
+    const year = parsed.getFullYear();
+    return `${day}-${month}-${year}`;
   };
 
   const buildCustomerForHistory = (item = {}) => {
@@ -1168,7 +1218,7 @@ export default function HomeScreen({ route }) {
           scrollEnabled={false}
           ListEmptyComponent={
             <Text
-              style={{ textAlign: "center", marginTop: 20, color: "#999" }}
+              style={{ textAlign: "center", marginTop: 20, color: "#000000" }}
             >
               {loading ? "Loading transactions..." : "No transactions found"}
             </Text>
@@ -1179,6 +1229,9 @@ export default function HomeScreen({ route }) {
             const isB2C = displayType === "B2C";
             const name = resolveDisplayName(item);
             const { ob, ab } = resolveBalance(item);
+            const displayDate = formatRecentTransactionDate(
+              item.date || item.createdAt || item.updatedAt || item.lastTransactionDate
+            );
 
             let balanceLabel = "OB";
             let balanceValue = 0;
@@ -1208,6 +1261,9 @@ export default function HomeScreen({ route }) {
               >
                 <View style={{ flex: 1 }}>
                   <Text style={styles.txnName}>{name}</Text>
+                  {displayDate ? (
+                    <Text style={styles.txnDate}>{displayDate}</Text>
+                  ) : null}
                   <Text
                     style={[
                       styles.txnWeight,
@@ -1547,6 +1603,11 @@ const styles = StyleSheet.create({
   txnName: {
     fontSize: 16,
     fontWeight: "bold",
+  },
+  txnDate: {
+    color: "#666",
+    marginTop: 3,
+    fontSize: 12,
   },
   txnWeight: {
     color: "#444",
