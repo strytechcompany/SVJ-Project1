@@ -20,6 +20,10 @@ import * as Print from "expo-print";
 import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import CommonHeader from "./CommonHeader";
+import {
+  buildBalanceSummary,
+  deriveBalanceStateFromNet,
+} from "./balanceUtils";
 
 /**
  * CreateTransaction (Full)
@@ -128,6 +132,15 @@ export default function CreateTransaction({ navigation }) {
     (acc, it) => acc + Number(it.pure || 0),
     0,
   );
+
+  const findItemConfigByName = (itemName) => {
+    const normalizedName = String(itemName || "").trim().toLowerCase();
+    if (!normalizedName) return null;
+    return itemsList.find((item) => {
+      const candidateName = String(item?.itemName || item?.stockName || "").trim().toLowerCase();
+      return candidateName === normalizedName;
+    }) || null;
+  };
 
   // ── useEffects AFTER totals ──────────────────────────────────
   useEffect(() => {
@@ -321,8 +334,64 @@ export default function CreateTransaction({ navigation }) {
   const fetchCustomers = async () => {
     try {
       setLoadingCustomers(true);
-      const dealerResponse = await fetch(`${base_url}/customersDealer`);
+      const [dealerResponse, billResponse] = await Promise.all([
+        fetch(`${base_url}/customersDealer`),
+        fetch(`${base_url}/billSummary?billType=B2B`),
+      ]);
       const dealerData = await dealerResponse.json();
+      const billRows = billResponse.ok ? await billResponse.json() : [];
+      const normalizeId = (value) => String(value || "").trim().toLowerCase();
+      const normalizeName = (value) => String(value || "").trim().toLowerCase();
+      const getRowTs = (row) =>
+        new Date(row?.updatedAt || row?.createdAt || row?.date || 0).getTime() || 0;
+      const latestDealerBillRows = [...(Array.isArray(billRows) ? billRows : [])]
+        .filter((row) => {
+          const dealerType = String(row?.dealerType || row?.customerType || "").toUpperCase();
+          return dealerType === "DEALER" || dealerType === "SUPPLIER";
+        })
+        .sort((a, b) => getRowTs(b) - getRowTs(a));
+      const resolveLatestBalanceState = (customer) => {
+        const dealerIds = new Set(
+          [customer?._id, customer?.customerId, customer?.id]
+            .map((value) => normalizeId(value))
+            .filter(Boolean),
+        );
+        const dealerName = normalizeName(customer?.customerName || customer?.name);
+        const latestBill = latestDealerBillRows.find((row) => {
+          const billCustomerId = normalizeId(row?.customerId);
+          const billCustomerName = normalizeName(row?.customerName);
+          return dealerIds.has(billCustomerId) || (dealerName && billCustomerName === dealerName);
+        });
+        if (!latestBill) {
+          return {
+            oldBalance: Number(customer?.oldBalance || 0),
+            advanceBalance: Number(customer?.advanceBalance || 0),
+          };
+        }
+        const latestBalanceType = String(
+          latestBill.balanceType || latestBill.summary?.balanceType || "",
+        ).toUpperCase();
+        const latestBalanceValue = Number(
+          latestBill.balanceValue ?? latestBill.summary?.balanceValue ?? latestBill.finalBalance,
+        );
+        if (Number.isFinite(latestBalanceValue) && latestBalanceType) {
+          return {
+            oldBalance: latestBalanceType === "OB" ? latestBalanceValue : 0,
+            advanceBalance: latestBalanceType === "AB" ? latestBalanceValue : 0,
+          };
+        }
+        const currentBalance = Number(
+          latestBill.currentBalance ?? latestBill.availableBalance ?? latestBill.summary?.current,
+        );
+        return Number.isFinite(currentBalance)
+          ? deriveBalanceStateFromNet(currentBalance)
+          : {
+              oldBalance: Number(latestBill.oldBalance ?? latestBill.ob ?? customer?.oldBalance ?? 0),
+              advanceBalance: Number(
+                latestBill.advanceBalance ?? latestBill.advBal ?? customer?.advanceBalance ?? 0,
+              ),
+            };
+      };
 
       const dealerCustomers = dealerData
         .filter((customer) => {
@@ -331,6 +400,7 @@ export default function CreateTransaction({ navigation }) {
           return normalizedType === "DEALER";
         })
         .map((customer) => {
+          const latestBalanceState = resolveLatestBalanceState(customer);
           // Resolve the best available image from the dealer record
           // (the backend /customersDealer GET already merges latestTransactionImage)
           const resolvedImage =
@@ -349,17 +419,18 @@ export default function CreateTransaction({ navigation }) {
             customerId: customer.customerId || customer._id,
             id: customer._id || customer.id,
             name: customer.customerName,
-            ob: customer.oldBalance || 0,
-            ab: customer.advanceBalance || 0,
+            ob: latestBalanceState.oldBalance,
+            ab: latestBalanceState.advanceBalance,
             company: customer.shopName || customer.companyName || "",
             phone: customer.phoneNumber || "",
             address: customer.address || "",
             gst: customer.gstin || "",
             customerName: customer.customerName,
             shopName: customer.shopName || customer.companyName || "No Shop Name",
-            oldBalance: customer.oldBalance || 0,
-            advanceBalance: customer.advanceBalance || 0,
-            billCurrentBalance: customer.billCurrentBalance || 0,
+            oldBalance: latestBalanceState.oldBalance,
+            advanceBalance: latestBalanceState.advanceBalance,
+            billCurrentBalance:
+              latestBalanceState.oldBalance - latestBalanceState.advanceBalance,
             updatedAt: customer.updatedAt || new Date().toISOString(),
             // ✅ Image fields — required for proofImage pre-fill & saveCompleteTransaction fallback
             image: resolvedImage,
@@ -774,8 +845,8 @@ export default function CreateTransaction({ navigation }) {
     return isNaN(n) ? 0 : n;
   };
 
-  // Pure calculation for Issue Table entries
-  const calcIssuePure = (w, s, t) => {
+  // Pure calculation for Receipt Table entries
+  const calcReceiptPure  = (w, s, t) => {
     const W = parseNum(w);
     const S = parseNum(s);
     const T = parseNum(t);
@@ -784,8 +855,8 @@ export default function CreateTransaction({ navigation }) {
     return Number(pure.toFixed(3));
   };
 
-  // Pure calculation for Receipt Table entries
-  const calcReceiptPure = (w, s, t) => {
+  // Pure calculation for Issue Table entries
+  const calcIssuePure = (w,s,t) => {
     const W = parseNum(w);
     const S = parseNum(s);
     const T = parseNum(t);
@@ -838,7 +909,7 @@ export default function CreateTransaction({ navigation }) {
       return;
     }
 
-    const purity = calcIssuePure(weight, stone, touch);
+    const purity = calcReceiptPure(weight, stone, touch);
 
     console.log("📊 Calculated purity:", purity);
 
@@ -970,15 +1041,20 @@ export default function CreateTransaction({ navigation }) {
       return;
     }
 
-    const purity = calcReceiptPure(receiptWeight, receiptStone, receiptTouch);
+    const latestReceiptItem = findItemConfigByName(selectedReceiptItem);
+    const resolvedReceiptTouch = parseNum(
+      latestReceiptItem?.buyingTouch,
+      receiptTouch,
+    );
+    const purity = calcReceiptPure(receiptWeight, 0, resolvedReceiptTouch);
 
     console.log("📊 Calculated purity:", purity);
 
-    const receiptEntryData = {
+      const receiptEntryData = {
       itemName: selectedReceiptItem,
       weight: receiptW,
-      stone: parseNum(receiptStone),
-      touch: parseNum(receiptTouch),
+      stone: 0,
+      touch: resolvedReceiptTouch,
       purity: purity,
     };
 
@@ -1058,8 +1134,8 @@ export default function CreateTransaction({ navigation }) {
           id: Date.now() + Math.random(),
           item: selectedReceiptItem,
           weight: Number(receiptW.toFixed(3)),
-          stone: Number(parseNum(receiptStone).toFixed(3)),
-          touch: Number(parseNum(receiptTouch).toFixed(3)),
+          stone: 0,
+          touch: Number(resolvedReceiptTouch.toFixed(3)),
           purity,
           type: "receipt",
         },
@@ -1193,28 +1269,27 @@ export default function CreateTransaction({ navigation }) {
     setCashTable((prev) => prev.filter((p) => p.id !== id));
   };
 
-  let oldBalance = selectedCustomer ? Number(parseNum(selectedCustomer.ob)) : 0;
+  const customerOldBalance = selectedCustomer
+    ? Number(parseNum(selectedCustomer.ob ?? selectedCustomer.oldBalance))
+    : 0;
 
-  let advBalance = selectedCustomer ? Number(parseNum(selectedCustomer.ab)) : 0;
-
-  // Convert negative old balance to advance balance
-  if (oldBalance < 0) {
-    advBalance += Math.abs(oldBalance);
-    oldBalance = 0;
-  }
+  const customerAdvanceBalance = selectedCustomer
+    ? Number(parseNum(selectedCustomer.ab ?? selectedCustomer.advanceBalance))
+    : 0;
 
   const gstPureValue = gstEnabled
     ? (totalIssuePure * (parseFloat(gstPercentage) || 0)) / 100
     : 0;
 
-  const balance = Number(
-    (
-      oldBalance +
-      totalIssuePure +
-      gstPureValue -
-      (totalReceiptPure + totalCashPure)
-    ).toFixed(3),
-  );
+  const liveBalanceSummary = buildBalanceSummary({
+    oldBalance: customerOldBalance,
+    advanceBalance: customerAdvanceBalance,
+    issue: totalIssuePure,
+    receipt: totalReceiptPure,
+    cash: totalCashPure,
+  });
+  const liveAdvanceBalance = liveBalanceSummary.advanceBalance;
+  const balance = liveBalanceSummary.netBalance;
 
   // Save stock to AsyncStorage
   const saveStock = async () => {
@@ -1349,17 +1424,7 @@ export default function CreateTransaction({ navigation }) {
     }
 
     // ✅ FIX 1: Remove - advBalance from formula
-    const finalDistinctBalance = Number(
-      (
-        oldBalance +
-        totalIssuePure +
-        (gstEnabled ? gstPureValue : 0) -
-        totalReceiptPure -
-        totalCashPure
-      )
-        // ✅ NO - advBalance here
-        .toFixed(3),
-    );
+    const finalDistinctBalance = liveBalanceSummary.netBalance;
 
     const customerType = String(selectedCustomer.customerType || "DEALER").toUpperCase();
     const normalizedCustomerType = customerType;
@@ -1437,11 +1502,11 @@ export default function CreateTransaction({ navigation }) {
       receiptImageShowInBill: showProofImageInBill,
       issueTotal: Number(totalIssueWeight.toFixed(3)),
       issuePure: Number(totalIssuePure.toFixed(3)),
-      oldBalance: Number(oldBalance.toFixed(3)),
+      oldBalance: Number(customerOldBalance.toFixed(3)),
       receiptPure: Number(totalReceiptPure.toFixed(3)),
       cashPure: Number(totalCashPure.toFixed(3)),
       balance: finalDistinctBalance,
-      advBal: Number(advBalance.toFixed(3)),
+      advBal: Number(customerAdvanceBalance.toFixed(3)),
     };
 
     console.log("📤 Sending /transactions POST Payload:", JSON.stringify(transactionData, null, 2));
@@ -1493,28 +1558,10 @@ export default function CreateTransaction({ navigation }) {
         updateEndpoint = `${base_url}/customers/${customerRecordId}`;
       }
 
-      // Calculate updated balances to save back to master record
-      const currentNet = oldBalance - advBalance;
-      const newNet = Number(
-        (
-          currentNet +
-          totalIssuePure +
-          (gstEnabled ? gstPureValue : 0) -
-          totalReceiptPure -
-          totalCashPure
-        ).toFixed(3),
-      );
-
-      let final_OB = 0;
-      let final_AB = 0;
-
-      if (newNet >= 0) {
-        final_OB = newNet;
-        final_AB = 0;
-      } else {
-        final_OB = 0;
-        final_AB = Math.abs(newNet);
-      }
+      const newNet = liveBalanceSummary.netBalance;
+      const finalState = deriveBalanceStateFromNet(newNet);
+      const final_OB = finalState.oldBalance;
+      const final_AB = finalState.advanceBalance;
 
       let customerUpdateRes = await fetch(updateEndpoint, {
         method: "PUT",
@@ -1595,12 +1642,12 @@ export default function CreateTransaction({ navigation }) {
         dealerType: normalizedCustomerType,        // preserve Dealer/Supplier label
         billType: billStorageType,       // redundant but explicit
         date: (date && typeof date === 'string' && !date.toLowerCase().includes('invalid')) ? date.split("/").reverse().join("-") : new Date().toISOString().split('T')[0],
-        ob: Number(oldBalance.toFixed(3)),
+        ob: Number(customerOldBalance.toFixed(3)),
         issuePure: Number(totalIssuePure.toFixed(3)),
         receiptPure: Number(totalReceiptPure.toFixed(3)),
         cashPure: Number(totalCashPure.toFixed(3)),
         gstPure: Number((gstEnabled ? gstPureValue : 0).toFixed(3)),
-        advBal: Number(advBalance.toFixed(3)),
+        advBal: Number(customerAdvanceBalance.toFixed(3)),
         currentBalance: newNet,
         receiptImage: persistedDealerImage || null,
         proofImage: persistedDealerImage || null,
@@ -1684,8 +1731,8 @@ export default function CreateTransaction({ navigation }) {
           address: selectedCustomer.address || "",
           gstin: selectedCustomer.gst || "",
           date,
-          oldBalance: fmt(oldBalance),
-          advanceBalance: fmt(advBalance),
+          oldBalance: fmt(customerOldBalance),
+          advanceBalance: fmt(customerAdvanceBalance),
           image: persistedDealerImage || "",
           receiptImage: persistedDealerImage || "",
           proofImage: persistedDealerImage || "",
@@ -1725,13 +1772,13 @@ export default function CreateTransaction({ navigation }) {
           }
           : null,
         summary: {
-          ob: fmt(oldBalance),
+          ob: fmt(customerOldBalance),
           issue: fmt(totalIssuePure),
           gstPure: fmt(gstPureValue),
           receipt: fmt(totalReceiptPure),
           cash: fmt(totalCashPure),
           current: fmt(newNet),
-          obPlusIssue: fmt(oldBalance + totalIssuePure + gstPureValue),
+          obPlusIssue: fmt(customerOldBalance + totalIssuePure + gstPureValue),
           receiptPlusCash: fmt(totalReceiptPure + totalCashPure),
         },
         transactions: [
@@ -1897,8 +1944,8 @@ export default function CreateTransaction({ navigation }) {
               </View>
 
               <View style={styles.balanceContainer}>
-                <Text style={styles.balanceText}>Old: {fmt(oldBalance)}g</Text>
-                <Text style={styles.balanceText}>Adv: {fmt(advBalance)}g</Text>
+                <Text style={styles.balanceText}>Old: {fmt(customerOldBalance)}g</Text>
+                <Text style={styles.balanceText}>Adv: {fmt(customerAdvanceBalance)}g</Text>
               </View>
             </View>
           </View>
@@ -1949,11 +1996,12 @@ export default function CreateTransaction({ navigation }) {
                           styles.dropdownItemContentReceipt,
                         ]}
                         onPress={() => {
+                          const buyingTouchValue = parseNum(it.buyingTouch, 0);
                           setSelectedReceiptItem(it.itemName);
                           setReceiptItemDropdownOpen(false);
                           setReceiptItemSearch(it.itemName);
-                          setReceiptStone(it.buyingTouch?.toString() || ""); // Buying Touch -> Result
-                          setReceiptTouch(it.sellingTouch?.toString() || ""); // Auto-fill touch
+                          setReceiptStone("0");
+                          setReceiptTouch(buyingTouchValue ? buyingTouchValue.toString() : "0");
                         }}
                       >
                         <Text style={styles.dropdownItemTextReceipt}>
@@ -1987,8 +2035,8 @@ export default function CreateTransaction({ navigation }) {
                 <Text style={styles.subLabel}>Result (g)</Text>
                 <TextInput
                   style={styles.input}
-                  value={receiptStone}
-                  onChangeText={setReceiptStone}
+                  value="0"
+                  editable={false}
                   keyboardType="decimal-pad"
                   placeholder="0.000"
                 />
@@ -2014,7 +2062,7 @@ export default function CreateTransaction({ navigation }) {
                     {fmt(
                       calcReceiptPure(
                         receiptWeight || 0,
-                        receiptStone || 0,
+                        0,
                         receiptTouch || 0,
                       ),
                     )}{" "}
@@ -2190,7 +2238,7 @@ export default function CreateTransaction({ navigation }) {
                 <Text style={styles.subLabel}>Purity</Text>
                 <View style={styles.purityBox}>
                   <Text style={styles.purityText}>
-                    {fmt(calcIssuePure(weight || 0, stone || 0, touch || 0))} g
+                    {fmt(calcReceiptPure(weight || 0, stone || 0, touch || 0))} g
                   </Text>
                 </View>
               </View>
@@ -2551,13 +2599,13 @@ export default function CreateTransaction({ navigation }) {
                   {gstEnabled && (
                     <Text style={styles.summaryCell}>{fmt(gstPureValue)}</Text>
                   )}
-                  <Text style={styles.summaryCell}>{fmt(oldBalance)}</Text>
+                  <Text style={styles.summaryCell}>{fmt(customerOldBalance)}</Text>
                   <Text style={styles.summaryCell}>
                     {fmt(totalReceiptPure)}
                   </Text>
                   <Text style={styles.summaryCell}>{fmt(totalCashPure)}</Text>
                   <Text style={styles.summaryCell}>{fmt(balance)}</Text>
-                  <Text style={styles.summaryCell}>{fmt(advBalance)}</Text>
+                  <Text style={styles.summaryCell}>{fmt(liveAdvanceBalance)}</Text>
                 </View>
               </View>
             </ScrollView>
