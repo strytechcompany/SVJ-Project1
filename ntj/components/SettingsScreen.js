@@ -12,7 +12,7 @@ export default function SettingsScreen({ navigation, route }) {
 
   const handleLogout = async () => {
     try {
-      await AsyncStorage.removeItem("userSession");
+      await AsyncStorage.multiRemove(["adminLoggedIn", "adminData", "userSession"]);
       navigation.reset({
         index: 0,
         routes: [{ name: "Login" }],
