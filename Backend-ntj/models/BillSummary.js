@@ -85,6 +85,7 @@ const billSummarySchema = new mongoose.Schema(
     previousAdvanceBalance: { type: Number, default: 0 },
     finalBalance: { type: Number, default: 0 },
     balanceType: { type: String, default: '' },
+    balanceValue: { type: Number, default: 0 },
     totals: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: true, strict: true },
