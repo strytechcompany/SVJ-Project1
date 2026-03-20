@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const CustomerB2C = require('../models/CustomerB2C');
 
 const { getBillSummaryModel } = require('../models/BillSummary');
@@ -5,6 +6,34 @@ const { getBillSummaryModel } = require('../models/BillSummary');
 const toSafeNumber = (value, fallback = 0) => {
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
+};
+
+const buildCustomerB2CQuery = (rawId) => {
+    const value = String(rawId || '').trim();
+    if (!value) return null;
+
+    const numericId = Number(value);
+    const orConditions = [];
+
+    if (mongoose.Types.ObjectId.isValid(value)) {
+        orConditions.push({ _id: value });
+    }
+
+    if (Number.isFinite(numericId)) {
+        orConditions.push({ customerId: numericId });
+    }
+
+    if (orConditions.length === 0) {
+        return null;
+    }
+
+    return orConditions.length === 1 ? orConditions[0] : { $or: orConditions };
+};
+
+const findCustomerB2CByAnyId = (rawId) => {
+    const query = buildCustomerB2CQuery(rawId);
+    if (!query) return Promise.resolve(null);
+    return CustomerB2C.findOne(query);
 };
 
 // Dedicated endpoint for B2C Convert-to-Gold balance update
@@ -21,22 +50,17 @@ const patchB2CBalances = async (req, res) => {
         const safeOB = Math.max(0, newOB);
         const safeAB = Math.max(0, newAB);
 
-        const updated = await CustomerB2C.findByIdAndUpdate(
-            req.params.id,
-            {
-                $set: {
-                    oldBalance: safeOB,
-                    advanceBalance: safeAB,
-                    availableBalance: safeOB - safeAB,
-                    billCurrentBalance: safeOB - safeAB,
-                    lastTransactionDate: new Date(),
-                    lastTransactionType: 'B2C',
-                }
-            },
-            { new: true, runValidators: false }
-        );
+        const customer = await findCustomerB2CByAnyId(req.params.id);
+        if (!customer) return res.status(404).json({ message: 'Customer not found' });
 
-        if (!updated) return res.status(404).json({ message: 'Customer not found' });
+        customer.oldBalance = safeOB;
+        customer.advanceBalance = safeAB;
+        customer.availableBalance = safeOB - safeAB;
+        customer.billCurrentBalance = safeOB - safeAB;
+        customer.lastTransactionDate = new Date();
+        customer.lastTransactionType = 'B2C';
+
+        const updated = await customer.save();
 
         // If a billId is provided, also atomically mark the bill as converted
         if (billId) {
@@ -73,7 +97,7 @@ const getCustomersB2C = async (req, res) => {
 
 const getCustomerB2CById = async (req, res) => {
     try {
-        const customer = await CustomerB2C.findById(req.params.id);
+        const customer = await findCustomerB2CByAnyId(req.params.id);
         if (!customer) return res.status(404).json({ message: 'Customer not found' });
         res.json(customer);
     } catch (err) {
@@ -83,8 +107,11 @@ const getCustomerB2CById = async (req, res) => {
 
 const updateCustomerB2C = async (req, res) => {
     try {
-        const updatedCustomer = await CustomerB2C.findByIdAndUpdate(req.params.id, req.body, { new: true });
-        if (!updatedCustomer) return res.status(404).json({ message: 'Customer not found' });
+        const customer = await findCustomerB2CByAnyId(req.params.id);
+        if (!customer) return res.status(404).json({ message: 'Customer not found' });
+
+        Object.assign(customer, req.body);
+        const updatedCustomer = await customer.save();
         res.json(updatedCustomer);
     } catch (err) {
         res.status(400).json({ message: err.message });
@@ -93,8 +120,10 @@ const updateCustomerB2C = async (req, res) => {
 
 const deleteCustomerB2C = async (req, res) => {
     try {
-        const deletedCustomer = await CustomerB2C.findByIdAndDelete(req.params.id);
-        if (!deletedCustomer) return res.status(404).json({ message: 'Customer not found' });
+        const customer = await findCustomerB2CByAnyId(req.params.id);
+        if (!customer) return res.status(404).json({ message: 'Customer not found' });
+
+        await customer.deleteOne();
         res.json({ message: 'Customer deleted successfully' });
     } catch (err) {
         res.status(500).json({ message: err.message });
