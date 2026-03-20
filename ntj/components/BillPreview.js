@@ -392,7 +392,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       ? dealerOpeningAdvanceBalance
       : 0;
   const dealerFinalBalanceRaw = dealerStartsWithAdvance
-    ? dealerIssueTotal - (dealerStartValue + dealerReceiptTotal + dealerCashTotal)
+    ? dealerReceiptTotal - (dealerStartValue + dealerIssueTotal + dealerCashTotal)
     : (dealerStartValue + dealerReceiptTotal) - (dealerIssueTotal + dealerCashTotal);
   const dealerFinalBalanceState = deriveBalanceStateFromNet(dealerFinalBalanceRaw);
   const dealerBalanceSummary = {
@@ -449,7 +449,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     finalIsOldBalance: dealerFinalIsOldBalance,
     startsWithAdvance: dealerBalanceSummary.startsWithAdvance,
     expression: dealerBalanceSummary.startsWithAdvance
-      ? `${formatB2BSummaryValue(dealerIssueValue)} - (${formatB2BSummaryValue(dealerOldBalanceValue)} + ${formatB2BSummaryValue(dealerReceiptValue)} + ${formatB2BSummaryValue(dealerCashValue)})`
+      ? `${formatB2BSummaryValue(dealerReceiptValue)} - (${formatB2BSummaryValue(dealerOldBalanceValue)} + ${formatB2BSummaryValue(dealerIssueValue)} + ${formatB2BSummaryValue(dealerCashValue)})`
       : `(${formatB2BSummaryValue(dealerOldBalanceValue)} + ${formatB2BSummaryValue(dealerReceiptValue)}) - (${formatB2BSummaryValue(dealerIssueValue)} + ${formatB2BSummaryValue(dealerCashValue)})`,
   };
 
