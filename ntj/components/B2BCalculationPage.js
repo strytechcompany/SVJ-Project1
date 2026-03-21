@@ -21,6 +21,7 @@ import CommonHeader from "./CommonHeader";
 import {
   buildBalanceSummary,
   deriveBalanceStateFromNet,
+  normalizeBalanceState,
 } from "./balanceUtils";
 
 /**
@@ -55,6 +56,7 @@ export default function CreateTransaction({ navigation }) {
   const [cashPureInput, setCashPureInput] = useState("0.000");
 
   const [gstEnabled, setGstEnabled] = useState(false);
+  const [description, setDescription] = useState("");
   const [sgst, setSgst] = useState("");
   const [cgst, setCgst] = useState("");
   const [igst, setIgst] = useState("");
@@ -75,6 +77,8 @@ export default function CreateTransaction({ navigation }) {
   const [selectedReceiptItem, setSelectedReceiptItem] = useState(null);
   const [receiptItemDropdownOpen, setReceiptItemDropdownOpen] = useState(false);
   const [customReceiptItem, setCustomReceiptItem] = useState("");
+  const [editingIssueId, setEditingIssueId] = useState(null);
+  const [editingReceiptId, setEditingReceiptId] = useState(null);
   const [issueItemSearch, setIssueItemSearch] = useState("");
   const [receiptItemSearch, setReceiptItemSearch] = useState("");
   const [issueDetails, setIssueDetails] = useState("");
@@ -142,10 +146,18 @@ export default function CreateTransaction({ navigation }) {
   const totalCartItems = issueItems.length + receiptItems.length;
   const totalCartPure = totalIssuePure + totalReceiptPure;
   const totalCashPure = cashTable.reduce(
-    (acc, it) => acc + Number(it.pure || 0),
+    (acc, it) => acc + Math.abs(Number(it.pure || 0)),
     0,
   );
-  const netBillPure = Math.max(0, totalIssuePure - totalReceiptPure - totalCashPure);
+  const positiveCashPureTotal = cashTable.reduce((acc, it) => {
+    const pure = Math.abs(Number(it.pure || 0));
+    return Number(it.rupees || 0) >= 0 ? acc + pure : acc;
+  }, 0);
+  const negativeCashPureTotal = cashTable.reduce((acc, it) => {
+    const pure = Math.abs(Number(it.pure || 0));
+    return Number(it.rupees || 0) < 0 ? acc - pure : acc;
+  }, 0);
+  const netBillPure = Math.max(0, totalIssuePure - totalReceiptPure - positiveCashPureTotal);
   const taxableBillAmount = netBillPure * ftRateValue;
   const sgstPercentValue = gstEnabled && isSgstEnabled ? (Number(sgst) || 0) : 0;
   const cgstPercentValue = gstEnabled && isCgstEnabled ? (Number(cgst) || 0) : 0;
@@ -333,11 +345,15 @@ export default function CreateTransaction({ navigation }) {
     setPreviousReceiptWeight(newWeight);
   };
 
-  const filteredCartCustomers = customers.filter(
-    (c) =>
-      (c.name && c.name.toLowerCase().includes(cartSearch.toLowerCase())) ||
-      (c.phone && String(c.phone).includes(cartSearch)),
-  );
+  const recentCustomerSet = new Set(recentNames);
+  const recentCustomers = customers.filter((c) => recentCustomerSet.has(c.name));
+  const filteredCartCustomers = cartSearch.trim()
+    ? customers.filter(
+        (c) =>
+          (c.name && c.name.toLowerCase().includes(cartSearch.toLowerCase())) ||
+          (c.phone && String(c.phone).includes(cartSearch)),
+      )
+    : recentCustomers;
 
   const fetchCustomers = async () => {
     try {
@@ -376,6 +392,20 @@ export default function CreateTransaction({ navigation }) {
             advanceBalance: Number(customer?.advanceBalance || 0),
           };
         }
+
+        const customerUpdatedTs =
+          new Date(customer?.updatedAt || customer?.createdAt || 0).getTime() || 0;
+        const latestBillTs =
+          new Date(latestBill?.updatedAt || latestBill?.createdAt || latestBill?.date || 0).getTime() || 0;
+
+        // If customer master was updated after the latest bill, keep the fresh DB balance.
+        if (customerUpdatedTs && latestBillTs && customerUpdatedTs >= latestBillTs) {
+          return {
+            oldBalance: Number(customer?.oldBalance || 0),
+            advanceBalance: Number(customer?.advanceBalance || 0),
+          };
+        }
+
         const latestBalanceType = String(
           latestBill.balanceType || latestBill.summary?.balanceType || "",
         ).toUpperCase();
@@ -450,7 +480,7 @@ export default function CreateTransaction({ navigation }) {
       const resp = await fetch(`${base_url}/transactions`);
       if (resp.ok) {
         const data = await resp.json();
-        // Extract last 5 unique customer names
+        // Extract last 15 unique customer names
         const names = [
           ...new Set(
             data
@@ -461,7 +491,7 @@ export default function CreateTransaction({ navigation }) {
               .map((t) => t.customerName)
               .filter(Boolean),
           ),
-        ].slice(0, 5);
+        ].slice(0, 15);
         setRecentNames(names);
       }
     } catch (err) {
@@ -568,11 +598,55 @@ export default function CreateTransaction({ navigation }) {
     fetchRecentNames();
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchCustomers();
+    }, []),
+  );
+
   useEffect(() => {
     if (!selectedCustomer?.isGstCustomer) {
       setBillTypeLabel("");
     }
   }, [selectedCustomer]);
+
+  useEffect(() => {
+    const selectedPhone = String(
+      selectedCustomer?.phone || selectedCustomer?.customerNumber || selectedCustomer?.phoneNumber || ""
+    ).trim();
+
+    if (!selectedPhone || !Array.isArray(customers) || customers.length === 0) return;
+
+    const latestCustomer = customers.find(
+      (item) =>
+        String(item?.phone || item?.customerNumber || item?.phoneNumber || "").trim() ===
+        selectedPhone
+    );
+
+    if (!latestCustomer) return;
+
+    const prevOb = Number(parseNum(selectedCustomer?.ob ?? selectedCustomer?.oldBalance));
+    const prevAb = Number(parseNum(selectedCustomer?.ab ?? selectedCustomer?.advanceBalance));
+    const nextOb = Number(parseNum(latestCustomer?.ob ?? latestCustomer?.oldBalance));
+    const nextAb = Number(parseNum(latestCustomer?.ab ?? latestCustomer?.advanceBalance));
+
+    if (prevOb === nextOb && prevAb === nextAb) return;
+
+    setSelectedCustomer((prev) => ({
+      ...prev,
+      ...latestCustomer,
+      phone:
+        latestCustomer?.phone ||
+        latestCustomer?.customerNumber ||
+        latestCustomer?.phoneNumber ||
+        prev?.phone ||
+        "",
+      ob: nextOb,
+      ab: nextAb,
+      oldBalance: nextOb,
+      advanceBalance: nextAb,
+    }));
+  }, [customers, selectedCustomer]);
 
   // Handle new customer from CreateCustomerMaster
   useFocusEffect(
@@ -797,6 +871,7 @@ export default function CreateTransaction({ navigation }) {
         pure: Number(item.pure ?? 0),
       }))
     );
+    setDescription(String(t.description || ""));
   }, [route.params?.editTransaction, route.params?.editCustomer, customers]);
 
   // Function to refresh FT rate
@@ -844,12 +919,42 @@ export default function CreateTransaction({ navigation }) {
     const R = parseNum(r);
     const G = parseNum(rate);
     if (G <= 0) return 0;
-    return Number((R / G).toFixed(3));
+    return Number((Math.abs(R) / G).toFixed(3));
   };
 
   // Format helper
   const fmt = (n) => Number(n || 0).toFixed(3);
   const fmt2 = (n) => Number(n || 0).toFixed(2);
+
+  const clearIssueEntryInputs = () => {
+    setWeight("");
+    setStone("0");
+    setTouch("");
+    setIssueDetails("");
+    setSelectedIssueItem(null);
+    setIssueItemSearch("");
+    setEditingIssueId(null);
+  };
+
+  const clearReceiptEntryInputs = () => {
+    setReceiptWeight("");
+    setReceiptStone("0");
+    setReceiptTouch("");
+    setSelectedReceiptItem(null);
+    setReceiptItemSearch("");
+    setEditingReceiptId(null);
+  };
+
+  const adjustLocalStock = (itemName, delta) => {
+    if (!itemName || !Number.isFinite(Number(delta))) return;
+    setItemsStock((prev) => ({
+      ...prev,
+      [itemName]: {
+        ...prev[itemName],
+        weight: Number((((prev[itemName]?.weight || 0) + Number(delta))).toFixed(3)),
+      },
+    }));
+  };
 
   // -----------------------
   // Add / Remove operations
@@ -878,6 +983,34 @@ export default function CreateTransaction({ navigation }) {
     }
 
     const purity = calcIssuePure(weight, stone, touch);
+
+    if (editingIssueId) {
+      const existingItem = issueItems.find((item) => item.id === editingIssueId);
+      if (!existingItem) {
+        setEditingIssueId(null);
+      } else {
+        adjustLocalStock(existingItem.item, existingItem.weight);
+        adjustLocalStock(selectedIssueItem, -issueWeight);
+        setIssueItems((prev) =>
+          prev.map((item) =>
+            item.id === editingIssueId
+              ? {
+                  ...item,
+                  item: selectedIssueItem,
+                  weight: issueWeight,
+                  stone: parseNum(stone),
+                  touch: parseNum(touch),
+                  purity,
+                  details: issueDetails,
+                  type: "issue",
+                }
+              : item,
+          ),
+        );
+        clearIssueEntryInputs();
+        return;
+      }
+    }
 
     console.log("📊 Calculated purity:", purity);
 
@@ -946,15 +1079,7 @@ export default function CreateTransaction({ navigation }) {
       }
 
       // Update local stock
-      setItemsStock((prev) => ({
-        ...prev,
-        [selectedIssueItem]: {
-          ...prev[selectedIssueItem],
-          weight: Number(
-            ((prev[selectedIssueItem]?.weight || 0) - issueWeight).toFixed(3),
-          ),
-        },
-      }));
+      adjustLocalStock(selectedIssueItem, -issueWeight);
 
       // Add to issue items
       setIssueItems((prev) => [
@@ -972,12 +1097,7 @@ export default function CreateTransaction({ navigation }) {
       ]);
 
       // Clear inputs
-      setWeight("");
-      setStone("0");
-      setTouch("");
-      setIssueDetails("");
-      setSelectedIssueItem(null);
-      setIssueItemSearch("");
+      clearIssueEntryInputs();
 
       // Success message removed as per user request
     } catch (error) {
@@ -1010,6 +1130,33 @@ export default function CreateTransaction({ navigation }) {
     }
 
     const purity = calcReceiptPure(receiptWeight, receiptStone, receiptTouch);
+
+    if (editingReceiptId) {
+      const existingItem = receiptItems.find((item) => item.id === editingReceiptId);
+      if (!existingItem) {
+        setEditingReceiptId(null);
+      } else {
+        adjustLocalStock(existingItem.item, -existingItem.weight);
+        adjustLocalStock(selectedReceiptItem, receiptW);
+        setReceiptItems((prev) =>
+          prev.map((item) =>
+            item.id === editingReceiptId
+              ? {
+                  ...item,
+                  item: selectedReceiptItem,
+                  weight: Number(receiptW.toFixed(3)),
+                  stone: Number(parseNum(receiptStone).toFixed(3)),
+                  touch: Number(parseNum(receiptTouch).toFixed(3)),
+                  purity,
+                  type: "receipt",
+                }
+              : item,
+          ),
+        );
+        clearReceiptEntryInputs();
+        return;
+      }
+    }
 
     console.log("📊 Calculated purity:", purity);
 
@@ -1080,15 +1227,7 @@ export default function CreateTransaction({ navigation }) {
       }
 
       // ➕ Increase item stock locally
-      setItemsStock((prev) => ({
-        ...prev,
-        [selectedReceiptItem]: {
-          ...prev[selectedReceiptItem],
-          weight: (
-            Number(prev[selectedReceiptItem]?.weight || 0) + receiptW
-          ).toFixed(3),
-        },
-      }));
+      adjustLocalStock(selectedReceiptItem, receiptW);
 
       // Add to receipt items
       setReceiptItems((prev) => [
@@ -1105,11 +1244,7 @@ export default function CreateTransaction({ navigation }) {
       ]);
 
       // Clear inputs
-      setReceiptWeight("");
-      setReceiptStone("0");
-      setReceiptTouch("");
-      setSelectedReceiptItem(null);
-      setReceiptItemSearch("");
+      clearReceiptEntryInputs();
 
       // Success message removed as per user request
     } catch (error) {
@@ -1124,8 +1259,8 @@ export default function CreateTransaction({ navigation }) {
     const r = rupees || "0";
     const rate = goldRate || "0";
 
-    if (parseNum(r) <= 0) {
-      Alert.alert("Invalid Amount", "Please enter rupees greater than 0");
+    if (parseNum(r) === 0) {
+      Alert.alert("Invalid Amount", "Please enter a value other than 0");
       return;
     }
 
@@ -1196,39 +1331,42 @@ export default function CreateTransaction({ navigation }) {
   const removeIssueItem = (id) => {
     const itemToRemove = issueItems.find((item) => item.id === id);
     if (itemToRemove) {
-      // ➕ Add back the weight to stock
-      setItemsStock((prev) => ({
-        ...prev,
-        [itemToRemove.item]: {
-          ...prev[itemToRemove.item],
-          weight: Number(
-            (
-              (prev[itemToRemove.item]?.weight || 0) + itemToRemove.weight
-            ).toFixed(3),
-          ),
-        },
-      }));
+      adjustLocalStock(itemToRemove.item, itemToRemove.weight);
     }
     setIssueItems((prev) => prev.filter((p) => p.id !== id));
+    if (editingIssueId === id) {
+      clearIssueEntryInputs();
+    }
   };
 
   const removeReceiptItem = (id) => {
     const itemToRemove = receiptItems.find((item) => item.id === id);
     if (itemToRemove) {
-      // 🔻 Subtract the weight from stock
-      setItemsStock((prev) => ({
-        ...prev,
-        [itemToRemove.item]: {
-          ...prev[itemToRemove.item],
-          weight: Number(
-            (
-              (prev[itemToRemove.item]?.weight || 0) - itemToRemove.weight
-            ).toFixed(3),
-          ),
-        },
-      }));
+      adjustLocalStock(itemToRemove.item, -itemToRemove.weight);
     }
     setReceiptItems((prev) => prev.filter((p) => p.id !== id));
+    if (editingReceiptId === id) {
+      clearReceiptEntryInputs();
+    }
+  };
+
+  const editIssueItem = (row) => {
+    setEditingIssueId(row.id);
+    setSelectedIssueItem(row.item);
+    setIssueItemSearch(row.item || "");
+    setWeight(String(row.weight ?? ""));
+    setStone(String(row.stone ?? "0"));
+    setTouch(String(row.touch ?? ""));
+    setIssueDetails(row.details || "");
+  };
+
+  const editReceiptItem = (row) => {
+    setEditingReceiptId(row.id);
+    setSelectedReceiptItem(row.item);
+    setReceiptItemSearch(row.item || "");
+    setReceiptWeight(String(row.weight ?? ""));
+    setReceiptStone(String(row.stone ?? "0"));
+    setReceiptTouch(String(row.touch ?? ""));
   };
 
   const removeCashEntry = (id) => {
@@ -1241,6 +1379,33 @@ export default function CreateTransaction({ navigation }) {
   const customerAdvanceBalance = selectedCustomer
     ? Number(parseNum(selectedCustomer.ab ?? selectedCustomer.advanceBalance))
     : 0;
+  const saveAdjustedOpeningBalanceState = (() => {
+    const normalizedState = normalizeBalanceState({
+      oldBalance: customerOldBalance,
+      advanceBalance: customerAdvanceBalance,
+    });
+    if (negativeCashPureTotal >= 0) {
+      return normalizedState;
+    }
+
+    let nextOld = normalizedState.oldBalance;
+    let nextAdvance = normalizedState.advanceBalance;
+
+    if (nextOld > 0) {
+      nextOld += negativeCashPureTotal;
+    } else if (nextAdvance > 0) {
+      nextAdvance -= negativeCashPureTotal;
+    } else {
+      nextOld += negativeCashPureTotal;
+    }
+
+    return normalizeBalanceState({
+      oldBalance: nextOld,
+      advanceBalance: nextAdvance,
+    });
+  })();
+  const saveEffectiveOldBalance = saveAdjustedOpeningBalanceState.oldBalance;
+  const saveEffectiveAdvanceBalance = saveAdjustedOpeningBalanceState.advanceBalance;
 
   const gstPureValue = gstEnabled
     ? (totalIssuePure * (parseFloat(gstPercentage) || 0)) / 100
@@ -1251,7 +1416,14 @@ export default function CreateTransaction({ navigation }) {
     advanceBalance: customerAdvanceBalance,
     issue: totalIssuePure,
     receipt: totalReceiptPure,
-    cash: totalCashPure,
+    cash: 0,
+  });
+  const saveBalanceSummary = buildBalanceSummary({
+    oldBalance: saveEffectiveOldBalance,
+    advanceBalance: saveEffectiveAdvanceBalance,
+    issue: totalIssuePure,
+    receipt: totalReceiptPure,
+    cash: positiveCashPureTotal,
   });
   const liveAdvanceBalance = liveBalanceSummary.advanceBalance;
   const balance = liveBalanceSummary.netBalance;
@@ -1361,7 +1533,7 @@ export default function CreateTransaction({ navigation }) {
     }
 
     // ✅ FIX 1: Remove - advBalance from formula
-    const finalDistinctBalance = liveBalanceSummary.netBalance;
+    const finalDistinctBalance = saveBalanceSummary.netBalance;
 
     const transactionData = {
       customerName: selectedCustomer.name,
@@ -1375,6 +1547,7 @@ export default function CreateTransaction({ navigation }) {
       cashPure: Number(totalCashPure.toFixed(3)),
       balance: finalDistinctBalance,
       advBal: Number(customerAdvanceBalance.toFixed(3)),
+      description: String(description || "").trim(),
     };
 
     try {
@@ -1405,10 +1578,12 @@ export default function CreateTransaction({ navigation }) {
         ? `${base_url}/customersB2C/${selectedCustomer.id || selectedCustomer._id}`
         : `${base_url}/customers/${selectedCustomer.id || selectedCustomer._id}`;
 
-      const newNet = liveBalanceSummary.netBalance;
+      const newNet = saveBalanceSummary.netBalance;
       const finalState = deriveBalanceStateFromNet(newNet);
       const final_OB = finalState.oldBalance;
       const final_AB = finalState.advanceBalance;
+      const finalBalanceType = final_AB > 0 ? "AB" : "OB";
+      const finalBalanceValue = final_AB > 0 ? final_AB : final_OB;
 
       if (!selectedCustomer.isGstCustomer) {
         const customerUpdateRes = await fetch(updateEndpoint, {
@@ -1449,6 +1624,12 @@ export default function CreateTransaction({ navigation }) {
         advanceBalance: Number(final_AB.toFixed(3)),
         advBal: Number(customerAdvanceBalance.toFixed(3)),
         currentBalance: newNet,
+        finalBalance: newNet,
+        balanceType: finalBalanceType,
+        balanceValue: Number(finalBalanceValue.toFixed(3)),
+        previousOldBalance: Number(customerOldBalance.toFixed(3)),
+        previousAdvanceBalance: Number(customerAdvanceBalance.toFixed(3)),
+        description: String(description || "").trim(),
         issueItems: issueItems.map((item) => ({
           name: item.item,
           gross: fmt(item.weight),
@@ -1510,6 +1691,7 @@ export default function CreateTransaction({ navigation }) {
       console.log("✅ Entire bill saved successfully");
 
       navigation.navigate("BillPreview", {
+        description: String(description || "").trim(),
         customer: {
           name: selectedCustomer.name,
           id: selectedCustomer.id || selectedCustomer._id,
@@ -1524,6 +1706,7 @@ export default function CreateTransaction({ navigation }) {
           date,
           oldBalance: fmt(customerOldBalance),
           advanceBalance: fmt(customerAdvanceBalance),
+          description: String(description || "").trim(),
           transactionId: savedTransaction?._id || "",
           autoShare: true,
         },
@@ -1668,8 +1851,7 @@ export default function CreateTransaction({ navigation }) {
                   >
                     RECENT TRANSACTIONS
                   </Text>
-                  {customers
-                    .filter((c) => recentNames.includes(c.name))
+                  {recentCustomers
                     .map((cust, index) => {
                       let currentBalance = Number(cust.ob || 0);
                       let advanceBalance = Number(cust.ab || 0);
@@ -1705,20 +1887,9 @@ export default function CreateTransaction({ navigation }) {
                         </TouchableOpacity>
                       );
                     })}
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: "#888",
-                      marginVertical: 10,
-                      marginLeft: 5,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    ALL CUSTOMERS
-                  </Text>
                 </View>
               )}
-              {filteredCartCustomers.length > 0 ? (
+              {(cartSearch.trim() || recentNames.length === 0) && filteredCartCustomers.length > 0 ? (
                 filteredCartCustomers.map((cust, index) => {
                   // Calculate balances: if old balance (ob) is negative, convert to advance balance
                   let currentBalance = Number(cust.ob || 0);
@@ -1752,9 +1923,9 @@ export default function CreateTransaction({ navigation }) {
                     </TouchableOpacity>
                   );
                 })
-              ) : (
+              ) : cartSearch.trim() ? (
                 <Text style={styles.infoText}>No customers found</Text>
-              )}
+              ) : null}
             </ScrollView>
           </View>
         )}
@@ -1803,8 +1974,8 @@ export default function CreateTransaction({ navigation }) {
               </View>
 
               <View style={styles.balanceContainer}>
-                <Text style={styles.balanceText}>Old: {fmt(customerOldBalance)}g</Text>
-                <Text style={styles.balanceText}>Adv: {fmt(customerAdvanceBalance)}g</Text>
+                <Text style={[styles.balanceText, { color: "#455A64" }]}>Old: {fmt(customerOldBalance)}g</Text>
+                <Text style={[styles.balanceText, { color: "#455A64" }]}>Adv: {fmt(customerAdvanceBalance)}g</Text>
               </View>
             </View>
           </View>
@@ -1836,6 +2007,7 @@ export default function CreateTransaction({ navigation }) {
             {/* SEARCH BOX */}
             <TextInput
               placeholder="Search items..."
+              placeholderTextColor="#9E9E9E"
               style={styles.searchBox}
               value={issueItemSearch}
               onChangeText={(text) => {
@@ -1900,6 +2072,7 @@ export default function CreateTransaction({ navigation }) {
                   onChangeText={setWeight}
                   keyboardType="decimal-pad"
                   placeholder="0.000"
+                  placeholderTextColor="#9E9E9E"
                 />
               </View>
 
@@ -1911,6 +2084,7 @@ export default function CreateTransaction({ navigation }) {
                   onChangeText={setStone}
                   keyboardType="decimal-pad"
                   placeholder="0.000"
+                  placeholderTextColor="#9E9E9E"
                 />
               </View>
             </View>
@@ -1924,6 +2098,7 @@ export default function CreateTransaction({ navigation }) {
                   onChangeText={setTouch}
                   keyboardType="decimal-pad"
                   placeholder="0.0"
+                  placeholderTextColor="#9E9E9E"
                 />
               </View>
 
@@ -1938,7 +2113,9 @@ export default function CreateTransaction({ navigation }) {
             </View>
 
             <TouchableOpacity style={styles.addBtn} onPress={addIssueItem}>
-              <Text style={styles.addBtnText}>+ Add New Item (Issue)</Text>
+              <Text style={styles.addBtnText}>
+                {editingIssueId ? "Update Issue Item" : "+ Add New Item (Issue)"}
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1951,6 +2128,7 @@ export default function CreateTransaction({ navigation }) {
             <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
               <View style={styles.productTable}>
                 <View style={styles.productTableHeader}>
+                  <Text style={styles.productHeaderCell}>Action</Text>
                   <Text style={styles.productHeaderCell}>#</Text>
                   <Text style={styles.productHeaderCell}>Kind</Text>
                   <Text style={styles.productHeaderCell}>Item</Text>
@@ -1958,11 +2136,30 @@ export default function CreateTransaction({ navigation }) {
                   <Text style={styles.productHeaderCell}>Stone (g)</Text>
                   <Text style={styles.productHeaderCell}>Touch (%)</Text>
                   <Text style={styles.productHeaderCell}>Pure (g)</Text>
-                  <Text style={styles.productHeaderCell}>Action</Text>
                 </View>
 
                 {issueItems.map((row, idx) => (
                   <View key={row.id} style={styles.productTableRow}>
+                    <View
+                      style={{
+                        width: 86,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                        paddingHorizontal: 4,
+                      }}
+                    >
+                      <TouchableOpacity onPress={() => editIssueItem(row)}>
+                        <Text style={[styles.actionText, { color: "#2E7D32" }]}>
+                          Edit
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => removeIssueItem(row.id)}>
+                        <Text style={[styles.actionText, { color: "#d9534f" }]}>
+                          Delete
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                     <Text style={styles.productCell}>{idx + 1}</Text>
                     <Text style={styles.productCell}>Issue</Text>
                     <Text style={styles.productCell}>{row.item}</Text>
@@ -1978,11 +2175,6 @@ export default function CreateTransaction({ navigation }) {
                     <Text style={styles.productCell}>
                       {Number(row.purity).toFixed(3)}
                     </Text>
-                    <TouchableOpacity onPress={() => removeIssueItem(row.id)}>
-                      <Text style={[styles.actionText, { color: "#d9534f" }]}>
-                        Remove
-                      </Text>
-                    </TouchableOpacity>
                   </View>
                 ))}
               </View>
@@ -2016,6 +2208,7 @@ export default function CreateTransaction({ navigation }) {
             {/* SEARCH BOX */}
             <TextInput
               placeholder="Search items..."
+              placeholderTextColor="#9E9E9E"
               style={styles.searchBox}
               value={receiptItemSearch}
               onChangeText={(text) => {
@@ -2096,6 +2289,7 @@ export default function CreateTransaction({ navigation }) {
                   onChangeText={setReceiptWeight}
                   keyboardType="decimal-pad"
                   placeholder="0.000"
+                  placeholderTextColor="#9E9E9E"
                 />
               </View>
 
@@ -2107,6 +2301,7 @@ export default function CreateTransaction({ navigation }) {
                   onChangeText={setReceiptStone}
                   keyboardType="decimal-pad"
                   placeholder="0.000"
+                  placeholderTextColor="#9E9E9E"
                 />
               </View>
             </View>
@@ -2120,6 +2315,7 @@ export default function CreateTransaction({ navigation }) {
                   onChangeText={setReceiptTouch}
                   keyboardType="decimal-pad"
                   placeholder="0.0"
+                  placeholderTextColor="#9E9E9E"
                 />
               </View>
 
@@ -2145,7 +2341,7 @@ export default function CreateTransaction({ navigation }) {
               onPress={addReceiptItem}
             >
               <Text style={[styles.addBtnText, { color: "#135F25" }]}>
-                + Add Receipt Item
+                {editingReceiptId ? "Update Receipt Item" : "+ Add Receipt Item"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -2159,6 +2355,7 @@ export default function CreateTransaction({ navigation }) {
             <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
               <View style={styles.productTable}>
                 <View style={styles.productTableHeader}>
+                  <Text style={styles.productHeaderCell}>Action</Text>
                   <Text style={styles.productHeaderCell}>#</Text>
                   <Text style={styles.productHeaderCell}>Kind</Text>
                   <Text style={styles.productHeaderCell}>Item</Text>
@@ -2166,11 +2363,30 @@ export default function CreateTransaction({ navigation }) {
                   <Text style={styles.productHeaderCell}>Result (g)</Text>
                   <Text style={styles.productHeaderCell}>Touch (%)</Text>
                   <Text style={styles.productHeaderCell}>Pure (g)</Text>
-                  <Text style={styles.productHeaderCell}>Action</Text>
                 </View>
 
                 {receiptItems.map((row, idx) => (
                   <View key={row.id} style={styles.productTableRow}>
+                    <View
+                      style={{
+                        width: 86,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                        paddingHorizontal: 4,
+                      }}
+                    >
+                      <TouchableOpacity onPress={() => editReceiptItem(row)}>
+                        <Text style={[styles.actionText, { color: "#2E7D32" }]}>
+                          Edit
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => removeReceiptItem(row.id)}>
+                        <Text style={[styles.actionText, { color: "#d9534f" }]}>
+                          Delete
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                     <Text style={styles.productCell}>{idx + 1}</Text>
                     <Text style={styles.productCell}>Receipt</Text>
                     <Text style={styles.productCell}>{row.item}</Text>
@@ -2186,11 +2402,6 @@ export default function CreateTransaction({ navigation }) {
                     <Text style={styles.productCell}>
                       {Number(row.purity).toFixed(3)}
                     </Text>
-                    <TouchableOpacity onPress={() => removeReceiptItem(row.id)}>
-                      <Text style={[styles.actionText, { color: "#d9534f" }]}>
-                        Remove
-                      </Text>
-                    </TouchableOpacity>
                   </View>
                 ))}
               </View>
@@ -2265,6 +2476,7 @@ export default function CreateTransaction({ navigation }) {
               }}
               keyboardType="decimal-pad"
               placeholder="0"
+              placeholderTextColor="#9E9E9E"
             />
 
             <Text style={[styles.subLabel, { marginTop: 12 }]}>FT Rate ₹</Text>
@@ -2278,6 +2490,7 @@ export default function CreateTransaction({ navigation }) {
               }}
               keyboardType="decimal-pad"
               placeholder="0"
+              placeholderTextColor="#9E9E9E"
             />
 
             <Text style={[styles.subLabel, { marginTop: 12 }]}>Pure (g)</Text>
@@ -2321,6 +2534,16 @@ export default function CreateTransaction({ navigation }) {
         {/* GST ENTRY */}
         {selectedCustomer && (
           <View style={styles.card}>
+            <Text style={styles.subLabel}>Description</Text>
+            <TextInput
+              style={[styles.input, { minHeight: 80, textAlignVertical: "top" }]}
+              value={description}
+              onChangeText={setDescription}
+              placeholder="Enter description"
+              placeholderTextColor="#9E9E9E"
+              multiline
+            />
+
             <View style={styles.checkboxRow}>
               <TouchableOpacity
                 style={styles.checkboxContainer}
