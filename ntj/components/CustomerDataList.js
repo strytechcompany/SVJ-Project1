@@ -15,6 +15,7 @@ import {
   Image,
   Modal,
 } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { base_url } from "./config";
@@ -165,6 +166,35 @@ const getRowImageRaw = (row) =>
   pickFirstImageFromList(row?.items) ||
   "";
 
+const getSafeCustomerName = (value) => {
+  if (value === null || value === undefined) return "";
+  const normalized = String(value).trim();
+  return normalized || "";
+};
+
+const extractCustomerDisplayName = (row = {}) =>
+  getSafeCustomerName(row?.displayName) ||
+  getSafeCustomerName(row?.customerName) ||
+  getSafeCustomerName(row?.customer_name) ||
+  getSafeCustomerName(row?.partyName) ||
+  getSafeCustomerName(row?.party_name) ||
+  getSafeCustomerName(row?.userName) ||
+  getSafeCustomerName(row?.user_name) ||
+  getSafeCustomerName(row?.fullName) ||
+  getSafeCustomerName(row?.full_name) ||
+  getSafeCustomerName(row?.selectedCustomer) ||
+  getSafeCustomerName(row?.selectedDealer) ||
+  getSafeCustomerName(row?.name) ||
+  getSafeCustomerName(row?.customer?.name) ||
+  getSafeCustomerName(row?.customer?.customerName) ||
+  getSafeCustomerName(row?.customer?.customer_name) ||
+  getSafeCustomerName(row?.customer?.fullName) ||
+  getSafeCustomerName(row?.customer?.full_name) ||
+  getSafeCustomerName(row?.dealer?.name) ||
+  getSafeCustomerName(row?.dealer?.customerName) ||
+  getSafeCustomerName(row?.dealer?.customer_name) ||
+  "Unknown";
+
 const CustomerCard = memo(({
     item,
     handleViewBill,
@@ -180,7 +210,7 @@ const CustomerCard = memo(({
 
   const oldBalance = Number(item.oldBalance || 0);
   const advanceBalance = Number(item.advanceBalance || 0);
-  const updatedAt = item.updatedAt;
+  const updatedAt = item.__latestVisibleActivityTs || item.updatedAt;
 
   const getBalanceInfo = () => {
     if (advanceBalance > 0) return { color: "#2E7D32", blinking: false }; // Green for Advance
@@ -235,7 +265,7 @@ const CustomerCard = memo(({
 
   // 🔍 Debug: show imageUri for dealer card
   if (isDealerCard) {
-    console.log(`📷 CustomerCard "${item.customerName || item.name}" imageUri length: ${imageUri?.length || 0}`);
+    console.log(`📷 CustomerCard "${extractCustomerDisplayName(item)}" imageUri length: ${imageUri?.length || 0}`);
   }
 
   if (isDealerCard) {
@@ -247,7 +277,7 @@ const CustomerCard = memo(({
             onPress={() => handleViewBill(item)}
           >
             <View style={styles.customerDataCardHeader}>
-              <Text style={styles.customerDataName}>{item.customerName || item.name}</Text>
+              <Text style={styles.customerDataName}>{extractCustomerDisplayName(item)}</Text>
               <View style={styles.customerDataIconRow}>
                 <TouchableOpacity onPress={() => handlePhonePress(phoneNumber)}>
                   <Icon name="phone" size={22} color="#000000" />
@@ -327,10 +357,10 @@ const CustomerCard = memo(({
               </View>
             </View>
 
-            <Text style={styles.lastPaidText}>
-              Last Activity: {new Date(item.updatedAt).toLocaleDateString()}{" "}
-              {new Date(item.updatedAt).toLocaleTimeString()}
-            </Text>
+	            <Text style={styles.lastPaidText}>
+	              Last Activity: {new Date(updatedAt).toLocaleDateString()}{" "}
+	              {new Date(updatedAt).toLocaleTimeString()}
+	            </Text>
           </TouchableOpacity>
         </View>
       </>
@@ -356,7 +386,7 @@ const CustomerCard = memo(({
           )}
 
           <Text style={[styles.name, isOverdue && styles.overdueName]}>
-            {item.customerName || item.name}
+            {extractCustomerDisplayName(item)}
           </Text>
 
           <View style={styles.iconRow}>
@@ -427,10 +457,10 @@ const CustomerCard = memo(({
           </View>
         ) : null}
 
-        <Text style={styles.lastPaidText}>
-          Last Activity: {new Date(item.updatedAt).toLocaleDateString()}{" "}
-          {new Date(item.updatedAt).toLocaleTimeString()}
-        </Text>
+	        <Text style={styles.lastPaidText}>
+	          Last Activity: {new Date(updatedAt).toLocaleDateString()}{" "}
+	          {new Date(updatedAt).toLocaleTimeString()}
+	        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -438,6 +468,7 @@ const CustomerCard = memo(({
 
 export default function CustomerMasterList({ navigation, route }) {
   const [customers, setCustomers] = useState([]);
+  const [activityRows, setActivityRows] = useState([]);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("ALL");
@@ -445,7 +476,11 @@ export default function CustomerMasterList({ navigation, route }) {
   const [selectedImage, setSelectedImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
-  const cacheRef = useRef({ data: [], ts: 0 });
+  const [fromDateObj, setFromDateObj] = useState(null);
+  const [toDateObj, setToDateObj] = useState(null);
+  const [showFromDatePicker, setShowFromDatePicker] = useState(false);
+  const [showToDatePicker, setShowToDatePicker] = useState(false);
+  const cacheRef = useRef({ data: [], activityRows: [], ts: 0 });
   const isFetchingRef = useRef(false);
 
   const PAGE_SIZE = 20;
@@ -472,6 +507,22 @@ export default function CustomerMasterList({ navigation, route }) {
     return 0;
   };
 
+  const formatDateLabel = (value) => {
+    if (!value) return "Select Date";
+    return new Date(value).toLocaleDateString();
+  };
+
+  const getDayBounds = (value) => {
+    const date = new Date(value);
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(date);
+    end.setHours(23, 59, 59, 999);
+    return { start: start.getTime(), end: end.getTime() };
+  };
+
+  const getTodayBounds = () => getDayBounds(new Date());
+
   const handleImageClick = (uri) => {
     setSelectedImage(uri);
   };
@@ -485,17 +536,12 @@ export default function CustomerMasterList({ navigation, route }) {
 
   useEffect(() => {
     setPage(1);
-  }, [search, filter, customers.length]);
+  }, [search, filter, customers.length, fromDateObj, toDateObj]);
 
   useFocusEffect(
     useCallback(() => {
-      const now = Date.now();
-      if (cacheRef.current.data.length > 0) {
-        setCustomers(cacheRef.current.data);
-        if (now - cacheRef.current.ts < CACHE_TTL_MS) return;
-      }
       fetchCustomers();
-    }, []),
+    }, [route?.params?.refresh]),
   );
 
   const fetchCustomers = async () => {
@@ -717,16 +763,24 @@ export default function CustomerMasterList({ navigation, route }) {
         const ids = new Set(
           [customer.customerId, customer._id, customer.id].map((v) => normalizeId(v)).filter(Boolean),
         );
-        const name = normalizeName(customer.customerName || customer.name || "");
+        const name = normalizeName(extractCustomerDisplayName(customer));
         
         // allBillRows is already sorted descending by date/createdAt
         const latestBill = allBillRows.find((bill) => {
           const billCustId = normalizeId(bill.customerId);
-          const billCustName = normalizeName(bill.customerName);
+          const billCustName = normalizeName(extractCustomerDisplayName(bill));
           return ids.has(billCustId) || (name && billCustName === name);
         });
 
         if (!latestBill) return customer;
+
+        const customerUpdatedTs = toTs(customer.updatedAt || customer.createdAt || 0);
+        const latestBillTs = toTs(latestBill.updatedAt || latestBill.createdAt || latestBill.date || 0);
+
+        // If the customer master row was updated after the latest bill, prefer the DB balance.
+        if (customerUpdatedTs && latestBillTs && customerUpdatedTs >= latestBillTs) {
+          return customer;
+        }
 
         const latestBillBalanceType = String(
           latestBill.balanceType || latestBill.summary?.balanceType || "",
@@ -841,7 +895,8 @@ export default function CustomerMasterList({ navigation, route }) {
       );
       setReminderCount(reminders.length);
       setCustomers(sortedCustomers);
-      cacheRef.current = { data: sortedCustomers, ts: Date.now() };
+      setActivityRows([...allTxRows, ...allBillRows]);
+      cacheRef.current = { data: sortedCustomers, activityRows: [...allTxRows, ...allBillRows], ts: Date.now() };
     } catch (error) {
       console.error("Error fetching customers:", error);
     } finally {
@@ -850,10 +905,109 @@ export default function CustomerMasterList({ navigation, route }) {
     }
   };
 
+  const visibleCustomers = useMemo(() => {
+    const normalizeId = (value) => {
+      if (value === null || value === undefined) return "";
+      if (typeof value === "string" || typeof value === "number") return String(value).trim();
+      if (typeof value === "object") {
+        if (value.$oid) return String(value.$oid).trim();
+        if (value._id) return normalizeId(value._id);
+        if (value.id) return normalizeId(value.id);
+      }
+      return String(value).trim();
+    };
+    const normalizeName = (value) => String(value || "").trim().toLowerCase();
+    const normalizePhone = (value) => String(value || "").replace(/\D/g, "");
+
+    const getCustomerLatestActivityTs = (customer) => {
+      const customerIds = new Set(
+        [customer.customerId, customer._id, customer.id].map((value) => normalizeId(value)).filter(Boolean),
+      );
+      const customerName = normalizeName(extractCustomerDisplayName(customer));
+      const customerPhone = normalizePhone(customer.customerNumber || customer.phoneNumber || customer.phone || "");
+
+      const matchedTs = activityRows
+        .filter((row) => {
+          const rowType = String(row.customerType || row.dealerType || row.type || "").toUpperCase();
+          const customerType = String(customer.customerType || "").toUpperCase();
+          if (customerType === "B2B" && rowType === "B2C") return false;
+          if (customerType === "B2C" && rowType === "B2B") return false;
+          if (
+            (customerType === "DEALER" || customerType === "SUPPLIER") &&
+            rowType &&
+            rowType !== "DEALER" &&
+            rowType !== "SUPPLIER"
+          ) {
+            return false;
+          }
+
+          const rowIds = [
+            normalizeId(row.customerId),
+            normalizeId(row.customer?._id),
+            normalizeId(row.customer?.id),
+            normalizeId(row.customer?.customerId),
+          ].filter(Boolean);
+          const rowName = normalizeName(
+            row.customerName || row.name || row.customer?.customerName || row.customer?.name || "",
+          );
+          const rowPhone = normalizePhone(
+            row.phone ||
+              row.phoneNumber ||
+              row.customerNumber ||
+              row.customer?.phone ||
+              row.customer?.phoneNumber ||
+              row.customer?.customerNumber ||
+              "",
+          );
+
+          const idMatch = rowIds.some((id) => customerIds.has(id));
+          const nameMatch = customerName && rowName && customerName === rowName;
+          const phoneMatch = customerPhone && rowPhone && customerPhone === rowPhone;
+          return idMatch || nameMatch || phoneMatch;
+        })
+        .map((row) => toTs(row.updatedAt || row.createdAt || row.date || 0))
+        .filter((value) => Number.isFinite(value) && value > 0);
+
+      return matchedTs.length > 0 ? Math.max(...matchedTs) : 0;
+    };
+
+    const hasSearch = Boolean(search.trim());
+    if (hasSearch) {
+      return customers;
+    }
+
+    const hasCustomRange = Boolean(fromDateObj && toDateObj);
+    const bounds = hasCustomRange
+      ? {
+          start: getDayBounds(fromDateObj).start,
+          end: getDayBounds(toDateObj).end,
+        }
+      : getTodayBounds();
+
+    return customers
+      .map((customer) => {
+        const latestActivityTs = getCustomerLatestActivityTs(customer);
+        return {
+          ...customer,
+          __latestVisibleActivityTs: latestActivityTs,
+        };
+      })
+      .filter((customer) => {
+        const latestActivityTs = Number(customer.__latestVisibleActivityTs || 0);
+        return latestActivityTs >= bounds.start && latestActivityTs <= bounds.end;
+      })
+      .sort((a, b) => {
+        const activityDiff =
+          Number(b.__latestVisibleActivityTs || 0) - Number(a.__latestVisibleActivityTs || 0);
+        if (activityDiff !== 0) return activityDiff;
+        return toTs(b.updatedAt || b.createdAt || 0) - toTs(a.updatedAt || a.createdAt || 0);
+      });
+  }, [activityRows, customers, fromDateObj, search, toDateObj]);
+
   const filteredData = useMemo(() => {
-    const lowered = search.toLowerCase();
-    const filtered = customers.filter((item) => {
-      const custName = (item.customerName || item.name || "").toLowerCase();
+      const lowered = search.toLowerCase();
+      const filtered = visibleCustomers.filter((item) => {
+      const custName = extractCustomerDisplayName(item).toLowerCase();
       const matchesSearch = custName.includes(lowered);
       const normalizedType = String(item.customerType || "").toUpperCase();
 
@@ -866,16 +1020,15 @@ export default function CustomerMasterList({ navigation, route }) {
       return matchesSearch && matchesType;
     });
     return filtered.sort(
-      (a, b) => toTs(b.updatedAt || b.createdAt || 0) - toTs(a.updatedAt || a.createdAt || 0),
+      (a, b) =>
+        Number(b.__latestVisibleActivityTs || 0) - Number(a.__latestVisibleActivityTs || 0) ||
+        toTs(b.updatedAt || b.createdAt || 0) - toTs(a.updatedAt || a.createdAt || 0),
     );
-  }, [customers, filter, search]);
+  }, [filter, search, toTs, visibleCustomers]);
 
   const displayData = useMemo(() => {
-    if (filter === "ALL" && !search.trim() && filteredData.length === 0 && customers.length > 0) {
-      return customers;
-    }
     return filteredData;
-  }, [customers, filteredData, filter, search]);
+  }, [filteredData]);
 
   const pagedData = useMemo(() => {
     return displayData.slice(0, page * PAGE_SIZE);
@@ -886,7 +1039,7 @@ export default function CustomerMasterList({ navigation, route }) {
   };
 
   const handleDelete = async (customer) => {
-    const displayName = customer.customerName || customer.name || "this customer";
+    const displayName = extractCustomerDisplayName(customer) || "this customer";
     Alert.alert("Delete Customer", `Delete ${displayName}?`, [
       { text: "Cancel", style: "cancel" },
       {
@@ -920,14 +1073,17 @@ export default function CustomerMasterList({ navigation, route }) {
               },
             );
 
-            if (response.ok) {
-              setCustomers(
-                customers.filter(
-                  (c) =>
-                    (c.customerId || c.id || c._id) !== customerId,
-                ),
-              );
-              Alert.alert("Success", "Customer deleted successfully");
+	            if (response.ok) {
+	              const nextCustomers = customers.filter(
+	                (c) =>
+	                  (c.customerId || c.id || c._id) !== customerId,
+	              );
+	              setCustomers(nextCustomers);
+	              cacheRef.current = {
+	                ...cacheRef.current,
+	                data: nextCustomers,
+	              };
+	              Alert.alert("Success", "Customer deleted successfully");
             } else {
                   let errorMessage = "Failed to delete customer";
                   try {
@@ -996,6 +1152,47 @@ export default function CustomerMasterList({ navigation, route }) {
     await fetchCustomers();
   };
 
+  const clearDateRange = () => {
+    setFromDateObj(null);
+    setToDateObj(null);
+  };
+
+  const handleFromDateChange = (_, selectedDate) => {
+    setShowFromDatePicker(Platform.OS === "ios");
+    if (!selectedDate) return;
+    const normalizedDate = new Date(selectedDate);
+    normalizedDate.setHours(0, 0, 0, 0);
+    setFromDateObj(normalizedDate);
+    if (toDateObj && normalizedDate > toDateObj) {
+      setToDateObj(normalizedDate);
+    }
+  };
+
+  const handleToDateChange = (_, selectedDate) => {
+    setShowToDatePicker(Platform.OS === "ios");
+    if (!selectedDate) return;
+    const normalizedDate = new Date(selectedDate);
+    normalizedDate.setHours(0, 0, 0, 0);
+    if (fromDateObj && normalizedDate < fromDateObj) {
+      Alert.alert("Invalid Selection", "To Date cannot be earlier than From Date.");
+      setToDateObj(fromDateObj);
+      return;
+    }
+    setToDateObj(normalizedDate);
+  };
+
+  const dateFilterLabel = search.trim()
+    ? "Search Results"
+    : fromDateObj && toDateObj
+      ? `${formatDateLabel(fromDateObj)} - ${formatDateLabel(toDateObj)}`
+      : "Today Transactions";
+
+  const emptyStateText = search.trim()
+    ? "No saved customers match your search"
+    : fromDateObj && toDateObj
+      ? "No customer transactions found in this date range"
+      : "No customer transactions found for today";
+
   const handleViewBill = (customer) => {
     // Dealer/Supplier SD bills are now viewed through the same Bill History flow.
     navigation.navigate("BillHistory", { customer });
@@ -1032,7 +1229,7 @@ export default function CustomerMasterList({ navigation, route }) {
       {/* HEADER */}
       <CommonHeader
         title="Customer Data List"
-        subtitle={`Total Customers: ${displayData.length}`}
+        subtitle={`${dateFilterLabel}: ${displayData.length}`}
         onBack={() => navigation.goBack()}
         backgroundColor="#1B4D1B"
         insideSafeArea
@@ -1059,6 +1256,7 @@ export default function CustomerMasterList({ navigation, route }) {
           <Icon name="magnify" size={22} color="#888" />
           <TextInput
             placeholder="Search Customer..."
+            placeholderTextColor="#666"
             style={styles.search}
             value={searchInput}
             onChangeText={setSearchInput}
@@ -1086,6 +1284,32 @@ export default function CustomerMasterList({ navigation, route }) {
         </View>
       </View>
 
+      <View style={styles.dateFilterSection}>
+        <TouchableOpacity
+          style={styles.dateCard}
+          onPress={() => setShowFromDatePicker(true)}
+        >
+          <Text style={styles.dateTitle}>From Date</Text>
+          <Text style={[styles.dateValue, !fromDateObj && styles.datePlaceholder]}>
+            {formatDateLabel(fromDateObj)}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.dateCard}
+          onPress={() => setShowToDatePicker(true)}
+        >
+          <Text style={styles.dateTitle}>To Date</Text>
+          <Text style={[styles.dateValue, !toDateObj && styles.datePlaceholder]}>
+            {formatDateLabel(toDateObj)}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.clearDateBtn} onPress={clearDateRange}>
+          <Text style={styles.clearDateText}>Today</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* FILTER BUTTONS */}
       <View style={styles.filterRow}>
         {["ALL", "B2B", "B2C", "Supplier"].map((item) => (
@@ -1105,6 +1329,7 @@ export default function CustomerMasterList({ navigation, route }) {
 
       <FlatList
         data={pagedData}
+        extraData={customers}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         initialNumToRender={10}
@@ -1119,13 +1344,33 @@ export default function CustomerMasterList({ navigation, route }) {
             <View style={styles.loadingWrap}>
               <ActivityIndicator size="large" color="#2E7D32" />
             </View>
-          ) : (
-            <View style={styles.emptyWrap}>
-              <Text style={styles.emptyText}>No customers found</Text>
-            </View>
-          )
-        }
-      />
+	          ) : (
+	            <View style={styles.emptyWrap}>
+	              <Text style={styles.emptyText}>{emptyStateText}</Text>
+	            </View>
+	          )
+	        }
+	      />
+
+      {showFromDatePicker && (
+        <DateTimePicker
+          value={fromDateObj || new Date()}
+          mode="date"
+          display="default"
+          onChange={handleFromDateChange}
+          maximumDate={toDateObj || undefined}
+        />
+      )}
+
+      {showToDatePicker && (
+        <DateTimePicker
+          value={toDateObj || fromDateObj || new Date()}
+          mode="date"
+          display="default"
+          onChange={handleToDateChange}
+          minimumDate={fromDateObj || undefined}
+        />
+      )}
 
       {/* FLOATING ADD BUTTON */}
       <TouchableOpacity style={styles.addBtn} onPress={handleAdd}>
@@ -1192,7 +1437,7 @@ const styles = StyleSheet.create({
     marginTop: 15,
   },
 
-  search: { marginLeft: 10, flex: 1 },
+  search: { marginLeft: 10, flex: 1, color: "#000" },
   loadingWrap: {
     paddingVertical: 24,
     alignItems: "center",
@@ -1206,6 +1451,48 @@ const styles = StyleSheet.create({
   emptyText: {
     color: "#888",
     fontSize: 14,
+  },
+  dateFilterSection: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  dateCard: {
+    flex: 1,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "#E3E7EA",
+  },
+  dateTitle: {
+    fontSize: 12,
+    color: "#5F6B76",
+    marginBottom: 4,
+    fontWeight: "700",
+  },
+  dateValue: {
+    fontSize: 14,
+    color: "#1E293B",
+    fontWeight: "600",
+  },
+  datePlaceholder: {
+    color: "#94A3B8",
+  },
+  clearDateBtn: {
+    backgroundColor: "#2E7D32",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  clearDateText: {
+    color: "#fff",
+    fontWeight: "700",
   },
 
   filterRow: {
