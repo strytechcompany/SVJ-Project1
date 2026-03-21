@@ -231,6 +231,8 @@ const buildBillPayload = (body = {}) => {
         customerType: effectiveCustomerType,
         invoiceNo: formatMainBillNo(body.invoiceNo || body.billNo) || 'N/A',
         date: body.date || '',
+        description: String(body.description || '').trim(),
+        nilMode: String(body.nilMode || body.summary?.nilMode || '').trim(),
         ob: openingOldBalance,
         issuePure: totalIssueWeight,
         receiptPure: totalReceiptWeight,
