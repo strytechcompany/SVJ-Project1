@@ -57,6 +57,14 @@ export default function HomeScreen({ route }) {
   const [filterType, setFilterType] = useState("All");
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false);
   const [transactions, setTransactions] = useState([]);
+  const [quickAccessCounts, setQuickAccessCounts] = useState({
+    b2b: 0,
+    b2c: 0,
+    cash: 0,
+    suspense: 0,
+    estimate: 0,
+    customer: 0,
+  });
   const [balanceLookup, setBalanceLookup] = useState({});
   const [loading, setLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState(user);
@@ -80,14 +88,26 @@ export default function HomeScreen({ route }) {
     const direct =
       getSafeCustomerName(row?.displayName) ||
       getSafeCustomerName(row?.customerName) ||
+      getSafeCustomerName(row?.customer_name) ||
       getSafeCustomerName(row?.partyName) ||
+      getSafeCustomerName(row?.party_name) ||
       getSafeCustomerName(row?.userName) ||
+      getSafeCustomerName(row?.user_name) ||
+      getSafeCustomerName(row?.fullName) ||
+      getSafeCustomerName(row?.full_name) ||
+      getSafeCustomerName(row?.selectedCustomer) ||
+      getSafeCustomerName(row?.selectedDealer) ||
       getSafeCustomerName(row?.name);
     if (direct) return direct;
     const nested =
       getSafeCustomerName(row?.customer?.name) ||
       getSafeCustomerName(row?.customer?.customerName) ||
-      getSafeCustomerName(row?.customer?.fullName);
+      getSafeCustomerName(row?.customer?.customer_name) ||
+      getSafeCustomerName(row?.customer?.fullName) ||
+      getSafeCustomerName(row?.customer?.full_name) ||
+      getSafeCustomerName(row?.dealer?.name) ||
+      getSafeCustomerName(row?.dealer?.customerName) ||
+      getSafeCustomerName(row?.dealer?.customer_name);
     return nested || "";
   };
 
@@ -116,6 +136,37 @@ export default function HomeScreen({ route }) {
 
     return `${day}-${month}-${year} ${strHours}:${minutes}:${seconds} ${ampm}`;
   };
+
+  const isSameLocalCalendarDay = (value, referenceDate = new Date()) => {
+    if (!value) return false;
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (!Number.isFinite(parsed.getTime())) return false;
+    return (
+      parsed.getFullYear() === referenceDate.getFullYear() &&
+      parsed.getMonth() === referenceDate.getMonth() &&
+      parsed.getDate() === referenceDate.getDate()
+    );
+  };
+
+  const getRowDateCandidates = (row = {}) => [
+    row?.createdAt,
+    row?.updatedAt,
+    row?.date,
+    row?.transactionDate,
+    row?.billDate,
+    row?.lastTransactionDate,
+    row?.customer?.date,
+    row?.summary?.date,
+  ].filter(Boolean);
+
+  const isTodayTransactionRow = (row = {}) =>
+    getRowDateCandidates(row).some((value) => isSameLocalCalendarDay(value));
+
+  const renderQuickCountBadge = (count) => (
+    <View style={styles.quickTileBadge}>
+      <Text style={styles.quickTileBadgeText}>{Number(count || 0)}</Text>
+    </View>
+  );
 
   useEffect(() => {
     loadSession();
@@ -167,6 +218,7 @@ export default function HomeScreen({ route }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      const CASH_HISTORY_KEY = "cashpage_history";
       const toTs = (value) => {
         if (!value) return 0;
         const t = new Date(value).getTime();
@@ -190,32 +242,87 @@ export default function HomeScreen({ route }) {
       const [
         b2bResponse,
         b2cResponse,
+        suspenseRes,
+        estimateRes,
         dealersRes,
         customersRes,
         b2cCustomersRes,
         billB2BRes,
         billB2CRes,
+        cashHistoryRaw,
       ] = await Promise.all([
         fetch(`${base_url}/transactions`),
         fetch(`${base_url}/retail`),
+        fetch(`${base_url}/suspense`),
+        fetch(`${base_url}/estimates`),
         fetch(`${base_url}/customersDealer`),
         fetch(`${base_url}/customers`),
         fetch(`${base_url}/customersB2C`),
         fetch(`${base_url}/billSummary?billType=B2B`),
         fetch(`${base_url}/billSummary?billType=B2C`),
+        AsyncStorage.getItem(CASH_HISTORY_KEY),
       ]);
 
       const b2bData = b2bResponse.ok ? await b2bResponse.json() : [];
       const b2cData = b2cResponse.ok ? await b2cResponse.json() : [];
+      const suspenseRaw = suspenseRes.ok ? await suspenseRes.json() : [];
+      const estimateData = estimateRes.ok ? await estimateRes.json() : [];
       const dealers = dealersRes.ok ? await dealersRes.json() : [];
       const customers = customersRes.ok ? await customersRes.json() : [];
       const b2cCustomers = b2cCustomersRes.ok ? await b2cCustomersRes.json() : [];
       const billB2BRows = billB2BRes.ok ? await billB2BRes.json() : [];
       const billB2CRows = billB2CRes.ok ? await billB2CRes.json() : [];
+      const cashHistoryRows = (() => {
+        try {
+          const parsed = cashHistoryRaw ? JSON.parse(cashHistoryRaw) : [];
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+          console.error("Failed to parse cash history for quick access:", error);
+          return [];
+        }
+      })();
       const billRows = [
         ...(Array.isArray(billB2BRows) ? billB2BRows : []),
         ...(Array.isArray(billB2CRows) ? billB2CRows : []),
       ];
+      const suspenseRows = Array.isArray(suspenseRaw?.transactions)
+        ? suspenseRaw.transactions
+        : Array.isArray(suspenseRaw)
+          ? suspenseRaw
+          : [];
+
+      const todayB2BCount = (Array.isArray(b2bData) ? b2bData : []).filter(isTodayTransactionRow).length;
+      const todayB2CCount = (Array.isArray(b2cData) ? b2cData : []).filter(isTodayTransactionRow).length;
+      const todayCashCount = cashHistoryRows.filter(isTodayTransactionRow).length;
+      const todaySuspenseCount = suspenseRows.filter(isTodayTransactionRow).length;
+      const todayEstimateCount = (Array.isArray(estimateData) ? estimateData : []).filter(isTodayTransactionRow).length;
+
+      const todayCustomerKeys = new Set();
+      [...(Array.isArray(b2bData) ? b2bData : []), ...(Array.isArray(b2cData) ? b2cData : [])].forEach((row) => {
+        if (!isTodayTransactionRow(row)) return;
+        const rowId = row?.customerId || row?._id || row?.id;
+        const phoneKey = normalizePhone(
+          row?.phone || row?.phoneNumber || row?.customerNumber || row?.customer?.phone || "",
+        );
+        const nameKey = normalizeName(extractCustomerName(row));
+        const identityKey = rowId
+          ? `id:${String(rowId).trim().toLowerCase()}`
+          : phoneKey
+            ? `p:${phoneKey}`
+            : nameKey
+              ? `n:${nameKey}`
+              : "";
+        if (identityKey) todayCustomerKeys.add(identityKey);
+      });
+
+      setQuickAccessCounts({
+        b2b: todayB2BCount,
+        b2c: todayB2CCount,
+        cash: todayCashCount,
+        suspense: todaySuspenseCount,
+        estimate: todayEstimateCount,
+        customer: todayCustomerKeys.size,
+      });
 
       const lookup = {};
       const setBal = (key, ob, ab) => {
@@ -299,7 +406,6 @@ export default function HomeScreen({ route }) {
       };
 
       const b2bMapped = (Array.isArray(b2bData) ? b2bData : [])
-        .filter((t) => extractCustomerName(t))
         .map((t) => {
           const name = extractCustomerName(t);
           const derivedType = normalizeType({ ...t, customerType: t.customerType || customerMap[name] || t.type });
@@ -315,7 +421,6 @@ export default function HomeScreen({ route }) {
         });
 
       const b2cMapped = (Array.isArray(b2cData) ? b2cData : [])
-        .filter((t) => extractCustomerName(t))
         .map((t) => ({
           ...t,
           type: "B2C",
@@ -325,7 +430,6 @@ export default function HomeScreen({ route }) {
         }));
 
       const billMapped = (Array.isArray(billRows) ? billRows : [])
-        .filter((t) => extractCustomerName(t))
         .map((t) => {
           const dealerHit = isDealerRecord(t);
           const summaryCurrent = toBalanceNumber(t?.summary?.current, NaN);
@@ -1156,6 +1260,7 @@ export default function HomeScreen({ route }) {
             }
           >
             <Text style={styles.quickTileText}>B2B</Text>
+            {renderQuickCountBadge(quickAccessCounts.b2b)}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1165,22 +1270,25 @@ export default function HomeScreen({ route }) {
             }
           >
             <Text style={styles.quickTileText}>B2C</Text>
+            {renderQuickCountBadge(quickAccessCounts.b2c)}
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.quickTile}
-            onPress={() => navigation.navigate("StockMaster")}
+            onPress={() => navigation.navigate("CashPage")}
           >
-            <Text style={styles.quickTileText}>StockMaster</Text>
+            <Text style={styles.quickTileText}>Cash Page</Text>
+            {renderQuickCountBadge(quickAccessCounts.cash)}
           </TouchableOpacity>
         </View>
 
         <View style={styles.quickAccessRow}>
           <TouchableOpacity
             style={styles.quickTile}
-            onPress={() => navigation.navigate("ItemEntry")}
+            onPress={() => navigation.navigate("SuspenseTransaction")}
           >
-            <Text style={styles.quickTileText}>Item Entry</Text>
+            <Text style={styles.quickTileText}>ST</Text>
+            {renderQuickCountBadge(quickAccessCounts.suspense)}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1188,6 +1296,7 @@ export default function HomeScreen({ route }) {
             onPress={() => navigation.navigate("Estimate", { goldRate })}
           >
             <Text style={styles.quickTileText}>Estimate</Text>
+            {renderQuickCountBadge(quickAccessCounts.estimate)}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -1196,6 +1305,7 @@ export default function HomeScreen({ route }) {
           >
             <Text style={styles.quickTileText}>Customer</Text>
             <Text style={styles.quickTileText}>Data List</Text>
+            {renderQuickCountBadge(quickAccessCounts.customer)}
           </TouchableOpacity>
         </View>
 
@@ -1219,6 +1329,7 @@ export default function HomeScreen({ route }) {
             const displayType = resolveDisplayType(item);
             const isB2C = displayType === "B2C";
             const name = resolveDisplayName(item);
+            const nameColor = displayType === "Dealer" ? "#1B5E20" : "#1565C0";
             const { ob, ab } = resolveBalance(item);
             const displayDate = formatRecentTransactionDate(
               item.date || item.createdAt || item.updatedAt || item.lastTransactionDate
@@ -1251,7 +1362,7 @@ export default function HomeScreen({ route }) {
                 }
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.txnName}>{name}</Text>
+                  <Text style={[styles.txnName, { color: nameColor }]}>{name}</Text>
                   {displayDate ? (
                     <Text style={styles.txnDate}>{displayDate}</Text>
                   ) : null}
@@ -1340,6 +1451,7 @@ export default function HomeScreen({ route }) {
               onChangeText={setGoldRate}
               keyboardType="numeric"
               placeholder="Enter Gold Rate"
+              placeholderTextColor="#666"
             />
 
             <Text style={{ color: "#666", marginBottom: 4 }}>Gold Date</Text>
@@ -1348,6 +1460,7 @@ export default function HomeScreen({ route }) {
               value={goldDate}
               onChangeText={setGoldDate}
               placeholder="DD-MM-YYYY"
+              placeholderTextColor="#666"
             />
 
             <Text style={{ color: "#666", marginBottom: 4 }}>FT Rate</Text>
@@ -1357,6 +1470,7 @@ export default function HomeScreen({ route }) {
               onChangeText={setFtRate}
               keyboardType="numeric"
               placeholder="Enter FT Rate"
+              placeholderTextColor="#666"
             />
 
             <Text style={{ color: "#666", marginBottom: 4 }}>FT Date</Text>
@@ -1365,6 +1479,7 @@ export default function HomeScreen({ route }) {
               value={ftDate}
               onChangeText={setFtDate}
               placeholder="DD-MM-YYYY"
+              placeholderTextColor="#666"
             />
 
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
@@ -1574,12 +1689,30 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     justifyContent: "center",
     alignItems: "center",
+    position: "relative",
   },
   quickTileText: {
     textAlign: "center",
     fontSize: 14,
     fontWeight: "bold",
     color: "#333",
+  },
+  quickTileBadge: {
+    position: "absolute",
+    right: 8,
+    bottom: 8,
+    minWidth: 24,
+    height: 24,
+    paddingHorizontal: 6,
+    borderRadius: 12,
+    backgroundColor: "#1B4D1B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickTileBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
   },
   transactionCard: {
     backgroundColor: "#fff",
@@ -1661,6 +1794,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 10,
     marginBottom: 12,
+    color: "#000",
   },
   saveBtn: {
     backgroundColor: "#1B4D1B",
