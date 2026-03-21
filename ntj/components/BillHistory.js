@@ -343,6 +343,19 @@ const normalizeBills = (rows = [], ctxCustomer = {}) => {
   const sorted = unique;
   return sorted.map((bill) => ({
     ...bill,
+    description:
+      String(
+        bill?.description ??
+          bill?.previewSnapshot?.header?.description ??
+          "",
+      ).trim(),
+    nilMode: String(
+      bill?.nilMode ??
+        bill?.summary?.nilMode ??
+        bill?.previewSnapshot?.summary?.nilMode ??
+        bill?.previewSnapshot?.header?.nilMode ??
+        ""
+    ).trim(),
     isConvertedToGold: bill.isConvertedToGold || false,
   }));
 };
@@ -389,6 +402,14 @@ const enrichBillsWithTransactionImage = (billRows = [], allTx = [], ctxCustomer 
     const fallbackImage = getRecordImage(bestTx);
     return {
       ...bill,
+      description: String(bill?.description || bestTx?.description || "").trim(),
+      nilMode: String(
+        bill?.nilMode ||
+          bestTx?.nilMode ||
+          bill?.summary?.nilMode ||
+          bill?.previewSnapshot?.summary?.nilMode ||
+          ""
+      ).trim(),
       receiptImage: fallbackImage,
       proofImage: bill?.proofImage || fallbackImage,
       image: bill?.image || fallbackImage,
@@ -635,6 +656,8 @@ export default function BillHistory({ navigation, route }) {
     })
     : bills
   ).slice().sort((a, b) => getBillTimestamp(b) - getBillTimestamp(a));
+  const latestEditableBill = getLatestBillFromList(bills);
+  const latestEditableBillId = latestEditableBill?._id || latestEditableBill?.id || null;
 
   const normalizeB2CReceiptItems = (rows = [], bill = {}) =>
     (Array.isArray(rows) ? rows : []).map((row) => {
@@ -755,6 +778,7 @@ export default function BillHistory({ navigation, route }) {
     if (snapshot) {
       navigation.navigate("BillPreview", {
         fromHistory: true,
+        description: freshBill?.description || bill?.description || "",
         customer: {
           name: snapshot?.header?.customerName || freshBill.customerName || customer?.customerName || "Unknown",
           phone: snapshot?.header?.phoneNumber || freshBill?.phone || freshBill?.phoneNumber || freshBill?.customerNumber || customer?.customerNumber || customer?.phoneNumber || customer?.phone || "",
@@ -774,6 +798,7 @@ export default function BillHistory({ navigation, route }) {
           customerId: customer?.id || customer?._id || customer?.customerId || "",
           billNo: snapshot?.header?.billNo || freshBill.billNo || freshBill.invoiceNo || "",
           invoiceNo: snapshot?.header?.billNo || freshBill.billNo || freshBill.invoiceNo || "",
+          description: freshBill?.description || bill?.description || "",
         },
         issueItems: snapshot?.issue?.items || freshBill.issueItems || [],
         receiptItems: snapshot?.receipt?.items || freshBill.receiptItems || [],
@@ -790,6 +815,7 @@ export default function BillHistory({ navigation, route }) {
     if (isB2B && !["DEALER", "SUPPLIER"].includes(isDealerLike) && (Number.isFinite(prevOB) || Number.isFinite(savedFinal))) {
       navigation.navigate("BillPreview", {
         fromHistory: true,
+        description: freshBill?.description || "",
         customer: {
           name: freshBill.customerName || customer?.customerName || "Unknown",
           phone:
@@ -820,6 +846,7 @@ export default function BillHistory({ navigation, route }) {
           customerId: customer?.id || customer?._id || customer?.customerId || "",
           billNo: freshBill.billNo || freshBill.invoiceNo || "",
           invoiceNo: freshBill.billNo || freshBill.invoiceNo || "",
+          description: freshBill?.description || "",
         },
         issueItems: freshBill.issueItems || [],
         receiptItems: freshBill.receiptItems || [],
@@ -840,6 +867,7 @@ export default function BillHistory({ navigation, route }) {
     }
     navigation.navigate("BillPreview", {
       fromHistory: true,
+      description: freshBill?.description || "",
       customer: {
         name: freshBill.customerName || customer?.customerName || "Unknown",
         phone:
@@ -870,6 +898,7 @@ export default function BillHistory({ navigation, route }) {
         customerId: customer?.id || customer?._id || customer?.customerId || "",
         billNo: freshBill.billNo || freshBill.invoiceNo || "",
         invoiceNo: freshBill.billNo || freshBill.invoiceNo || "",
+        description: freshBill?.description || "",
       },
       issueItems: freshBill.issueItems || [],
       receiptItems: freshBill.receiptItems || [],
@@ -982,6 +1011,7 @@ export default function BillHistory({ navigation, route }) {
       "";
     if (snapshot) {
       navigation.navigate("BillPreview", {
+        description: bill?.description || "",
         customer: {
           name: snapshot?.header?.customerName || bill.customerName || customer?.customerName || "Unknown",
           phone:
@@ -1014,6 +1044,7 @@ export default function BillHistory({ navigation, route }) {
           customerId: customer?.id || customer?._id || customer?.customerId || "",
           billNo: snapshot?.header?.billNo || bill.billNo || bill.invoiceNo || "",
           invoiceNo: snapshot?.header?.billNo || bill.billNo || bill.invoiceNo || "",
+          description: bill?.description || "",
         },
         issueItems: snapshot?.issue?.items || bill.issueItems || [],
         receiptItems: snapshot?.receipt?.items || bill.receiptItems || [],
@@ -1030,6 +1061,7 @@ export default function BillHistory({ navigation, route }) {
     }
     if (isB2B && !["DEALER", "SUPPLIER"].includes(isDealerLike) && (Number.isFinite(prevOB) || Number.isFinite(savedFinal))) {
       navigation.navigate("BillPreview", {
+        description: bill?.description || "",
         customer: {
           name: bill.customerName || customer?.customerName || "Unknown",
           phone:
@@ -1060,6 +1092,7 @@ export default function BillHistory({ navigation, route }) {
           customerId: customer?.id || customer?._id || customer?.customerId || "",
           billNo: bill.billNo || bill.invoiceNo || "",
           invoiceNo: bill.billNo || bill.invoiceNo || "",
+          description: bill?.description || "",
         },
         issueItems: bill.issueItems || [],
         receiptItems: bill.receiptItems || [],
@@ -1080,6 +1113,7 @@ export default function BillHistory({ navigation, route }) {
       return;
     }
     navigation.navigate("BillPreview", {
+      description: bill?.description || "",
       customer: {
         name: bill.customerName || customer?.customerName || "Unknown",
         phone:
@@ -1110,6 +1144,7 @@ export default function BillHistory({ navigation, route }) {
         customerId: customer?.id || customer?._id || customer?.customerId || "",
         billNo: bill.billNo || bill.invoiceNo || "",
         invoiceNo: bill.billNo || bill.invoiceNo || "",
+        description: bill?.description || "",
       },
       issueItems: bill.issueItems || [],
       receiptItems: bill.receiptItems || [],
@@ -1270,14 +1305,17 @@ export default function BillHistory({ navigation, route }) {
     const gstBill = isGstBill(item);
     const itemType = gstBill ? "GST" : (snapshot?.header?.type || resolveDisplayTypeFromContext(item, customer));
     const billNumber = snapshot?.header?.billNo || item.billNo || item.invoiceNo || "00000";
-    const latestBill = getLatestBillFromList(filteredBills);
-    const isLatest = latestBill && item?._id && latestBill?._id === item._id;
+    const itemId = item?._id || item?.id || null;
+    const isLatest = Boolean(latestEditableBillId && itemId && latestEditableBillId === itemId);
     const balanceDisplay = getBalanceDisplay(item, isLatest);
     const isSharing = sharingBillId === item._id;
     const displayCustomerName = snapshot?.header?.customerName || item.customerName || customer?.customerName || customer?.name || "N/A";
     const displayPhone = snapshot?.header?.phoneNumber || item.phoneNumber || item.phone || customer?.phoneNumber || customer?.phone || "N/A";
     const displayGstin = snapshot?.header?.gstin || item.gstin || customer?.gstin || "N/A";
     const displayTotalAmount = getSavedTotalAmount(item);
+    const previewSummary = buildSummaryForPreview(item, balanceDisplay || { ob: 0, ab: 0, current: 0 });
+    const issuePure = num(previewSummary?.issue, 0);
+    const receiptPure = num(previewSummary?.receipt, 0);
 
     return (
       <View style={styles.billCard}>
@@ -1324,6 +1362,10 @@ export default function BillHistory({ navigation, route }) {
               </Text>
             </View>
           ) : null}
+          <View style={styles.pureTotalsRow}>
+            <Text style={styles.issuePureText}>Total Issued Pure: {issuePure.toFixed(3)} g</Text>
+            <Text style={styles.receiptPureText}>Total Receipt Pure: {receiptPure.toFixed(3)} g</Text>
+          </View>
 
           <Text style={styles.billDescription}>
             {item.description ||
@@ -1331,10 +1373,25 @@ export default function BillHistory({ navigation, route }) {
                 ? `${item.issueItems.length} item(s)`
                 : "Transaction details")}
           </Text>
+          {item.nilMode ? (
+            <View style={styles.nilModeBadge}>
+              <Text style={styles.nilModeBadgeText}>{item.nilMode}</Text>
+            </View>
+          ) : null}
         </TouchableOpacity>
 
         {/* ── Action Buttons ── */}
         <View style={styles.actionRow}>
+          {isLatest ? (
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => handleEditBill(item)}
+            >
+              <Icon name="pencil" size={16} color="#2E7D32" />
+              <Text style={[styles.actionText, { color: "#2E7D32" }]}>Edit</Text>
+            </TouchableOpacity>
+          ) : null}
+
           {/* View */}
           <TouchableOpacity
             style={styles.actionButton}
@@ -1660,8 +1717,43 @@ const styles = StyleSheet.create({
   obValue: { color: "#C62828" },
   abLabel: { color: "#C62828" },
   abValue: { color: "#C62828" },
+  pureTotalsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+    gap: 10,
+  },
+  issuePureText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#1565C0",
+  },
+  receiptPureText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#2E7D32",
+    textAlign: "right",
+  },
 
-  billDescription: { fontSize: 13, color: "#666", marginTop: 2 },
+  billDescription: { fontSize: 13, color: "#455A64", marginTop: 2 },
+  nilModeBadge: {
+    alignSelf: "flex-start",
+    marginTop: 8,
+    backgroundColor: "#FFF3E0",
+    borderWidth: 1,
+    borderColor: "#FF9800",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  nilModeBadgeText: {
+    color: "#E65100",
+    fontSize: 12,
+    fontWeight: "700",
+  },
 
   // ── Action Row ──
   actionRow: {
@@ -1747,7 +1839,7 @@ const styles = StyleSheet.create({
   },
   balanceInfo: { flex: 1 },
   customerNameMain: { fontSize: 18, fontWeight: "bold", color: "#1B4D1B" },
-  shopNameText: { fontSize: 12, color: "#666", marginTop: 2 },
+  shopNameText: { fontSize: 12, color: "#455A64", marginTop: 2 },
   balanceBadgeContainer: { marginLeft: 15 },
   balanceBadge: {
     paddingHorizontal: 12,
@@ -1758,7 +1850,7 @@ const styles = StyleSheet.create({
   },
   obBadge: { backgroundColor: "#FFEBEE" },
   abBadge: { backgroundColor: "#E8F5E9" },
-  badgeLabel: { fontSize: 10, fontWeight: "bold", color: "#888" },
+  badgeLabel: { fontSize: 10, fontWeight: "bold", color: "#455A64" },
   badgeValue: { fontSize: 16, fontWeight: "bold", color: "#333" },
 });
 
