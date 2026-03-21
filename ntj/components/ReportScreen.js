@@ -107,6 +107,31 @@ export default function ReportScreen({ navigation }) {
     const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   };
+  const getStartOfDay = (value = new Date()) => {
+    const d = new Date(value);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+  const getEndOfDay = (value = new Date()) => {
+    const d = new Date(value);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  };
+  const getEffectiveAppliedRange = () => {
+    if (hasAppliedDateRange && appliedFromDateObj && appliedToDateObj) {
+      return {
+        from: getStartOfDay(appliedFromDateObj),
+        to: getEndOfDay(appliedToDateObj),
+        isCustom: true,
+      };
+    }
+    const now = new Date();
+    return {
+      from: getStartOfDay(now),
+      to: getEndOfDay(now),
+      isCustom: false,
+    };
+  };
   const displayPhone = (value) => {
     const raw = value === undefined || value === null ? "" : String(value).trim();
     return raw ? raw : "-";
@@ -232,16 +257,18 @@ export default function ReportScreen({ navigation }) {
   };
 
   const fetchBillDataByType = async (tabToFetch, fromDate, toDate) => {
-    const fromDateParam = formatApiDate(fromDate);
-    const toDateParam = formatApiDate(toDate);
+    const effectiveRange =
+      hasAppliedDateRange && fromDate && toDate
+        ? { from: getStartOfDay(fromDate), to: getEndOfDay(toDate) }
+        : { from: getStartOfDay(new Date()), to: getEndOfDay(new Date()) };
+    const fromDateParam = formatApiDate(effectiveRange.from);
+    const toDateParam = formatApiDate(effectiveRange.to);
     const hasDates = Boolean(fromDateParam && toDateParam);
     const query = hasDates
       ? `fromDate=${encodeURIComponent(fromDateParam)}&toDate=${encodeURIComponent(toDateParam)}`
       : "";
-    const fromStart = fromDate ? new Date(fromDate) : null;
-    if (fromStart) fromStart.setHours(0, 0, 0, 0);
-    const toEnd = toDate ? new Date(toDate) : null;
-    if (toEnd) toEnd.setHours(23, 59, 59, 999);
+    const fromStart = effectiveRange.from;
+    const toEnd = effectiveRange.to;
     console.log("[ReportScreen] Fetch params:", {
       selectedType: tabToFetch,
       fromDate: fromDateParam || null,
@@ -512,7 +539,7 @@ export default function ReportScreen({ navigation }) {
   // ================= DATE FILTER =================
   const filterByDate = (list) => {
     if (!list || !Array.isArray(list)) return [];
-    if (!appliedFromDateObj || !appliedToDateObj) return list;
+    const effectiveRange = getEffectiveAppliedRange();
     return list.filter(item => {
       const dateToCheck = item?.createdAt || item?.date;
       if (!dateToCheck) return false;
@@ -520,13 +547,7 @@ export default function ReportScreen({ navigation }) {
       const itemDate = parseRecordDate(dateToCheck);
       if (!itemDate) return false;
 
-      const fromStart = new Date(appliedFromDateObj);
-      fromStart.setHours(0, 0, 0, 0);
-
-      const toEnd = new Date(appliedToDateObj);
-      toEnd.setHours(23, 59, 59, 999);
-
-      return itemDate >= fromStart && itemDate <= toEnd;
+      return itemDate >= effectiveRange.from && itemDate <= effectiveRange.to;
     });
   };
 
@@ -834,7 +855,7 @@ export default function ReportScreen({ navigation }) {
   };
 
   const getFilteredStock = (forceAllCategories = false) => {
-    const source = filterByDate(stocks);
+    const source = Array.isArray(stocks) ? stocks : [];
     const base = forceAllCategories
       ? source
       : source.filter(r =>
@@ -883,6 +904,18 @@ export default function ReportScreen({ navigation }) {
     rows.reduce((sum, row) => sum + parseNum(row?.issuePure ?? row?.issueTotal), 0);
   const getB2CTotalValue = (rows = []) => sumBy(rows, "totalAmount");
   const getCashTotalValue = (rows = []) => sumBy(rows, "cashAmount");
+  const sumBalanceBuckets = (rows = [], resolver) =>
+    rows.reduce(
+      (acc, row) => {
+        const current = resolver(row) || {};
+        const ob = parseNum(current.ob);
+        const ab = parseNum(current.ab);
+        if (ob > 0) acc.ob += ob;
+        if (ab > 0) acc.ab += ab;
+        return acc;
+      },
+      { ob: 0, ab: 0 }
+    );
 
   const buildSelectedReportHtml = () => {
     const showAll = activeTab === "All";
@@ -1043,9 +1076,10 @@ export default function ReportScreen({ navigation }) {
     const stockLabel = showAll
       ? "All Categories"
       : (selectedStockItem || "Filtered Category");
-    const dateLabel = appliedFromDateObj && appliedToDateObj
-      ? `From: ${formatDate(appliedFromDateObj)} To: ${formatDate(appliedToDateObj)}`
-      : "All Dates";
+    const effectiveRange = getEffectiveAppliedRange();
+    const dateLabel = effectiveRange.isCustom
+      ? `From: ${formatDate(effectiveRange.from)} To: ${formatDate(effectiveRange.to)}`
+      : `Today: ${formatDate(effectiveRange.from)}`;
 
     return `
       <html>
@@ -1174,10 +1208,10 @@ export default function ReportScreen({ navigation }) {
     try {
       const file = await createReportPdf();
       const label = activeTab === "All" ? "All Type" : activeTab;
-      const hasDateRange = Boolean(appliedFromDateObj && appliedToDateObj);
-      const msg = hasDateRange
-        ? `NTJ Report (${label}) From ${formatDate(appliedFromDateObj)} To ${formatDate(appliedToDateObj)}`
-        : `NTJ Report (${label}) - All Dates`;
+      const effectiveRange = getEffectiveAppliedRange();
+      const msg = effectiveRange.isCustom
+        ? `NTJ Report (${label}) From ${formatDate(effectiveRange.from)} To ${formatDate(effectiveRange.to)}`
+        : `NTJ Report (${label}) - Today ${formatDate(effectiveRange.from)}`;
       await Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}`).catch(async () => {
         await Linking.openURL(`https://wa.me/?text=${encodeURIComponent(msg)}`);
       });
@@ -1231,6 +1265,32 @@ export default function ReportScreen({ navigation }) {
   const cashCategoryTotal = getCashTotalValue(filteredCashRows);
   const allCategoryTotal =
     b2bCategoryTotal + b2cCategoryTotal + dealerCategoryTotal + cashCategoryTotal;
+  const b2bBalanceSummary = sumBalanceBuckets(filteredB2bRows, (r) =>
+    b2bBalances[r.customerId] ||
+    b2bBalances[r.customerName] || {
+      ob: parseFloat(r.oldBalance || 0),
+      ab: parseFloat(r.advBal || 0),
+    }
+  );
+  const dealerBalanceSummary = sumBalanceBuckets(filteredDealerRows, (r) =>
+    dealerBalances[String(r.customerId || "")] ||
+    dealerBalances[String(r.customerName || "")] ||
+    b2bBalances[r.customerId] ||
+    b2bBalances[r.customerName] || {
+      ob: parseFloat(r.oldBalance || 0),
+      ab: parseFloat(r.advBal || 0),
+    }
+  );
+  const b2cBalanceSummary = sumBalanceBuckets(filteredB2cRows, (r) =>
+    b2cBalances[r.phone] ||
+    b2cBalances[r.mobileNumber] ||
+    b2cBalances[r.customerName] || {
+      ob: parseFloat(r.oldBalance || 0),
+      ab: parseFloat(r.advBal || 0),
+    }
+  );
+  const b2bReceiptTotal = sumBy(filteredB2bRows, "receiptPure");
+  const dealerReceiptTotal = sumBy(filteredDealerRows, "receiptPure");
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -1447,6 +1507,24 @@ export default function ReportScreen({ navigation }) {
                 </TouchableOpacity>
               </View>
             </View>
+            <View style={styles.summaryRow}>
+              <View style={[styles.summaryCard, styles.summaryCardRed]}>
+                <Text style={styles.summaryLabel}>Total OB</Text>
+                <Text style={[styles.summaryValue, styles.summaryValueRed]}>OB: {b2bBalanceSummary.ob.toFixed(3)}</Text>
+              </View>
+              <View style={[styles.summaryCard, styles.summaryCardGreen]}>
+                <Text style={styles.summaryLabel}>Total Adv</Text>
+                <Text style={[styles.summaryValue, styles.summaryValueGreen]}>Adv: {b2bBalanceSummary.ab.toFixed(3)}</Text>
+              </View>
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryLabel}>Total Issued Pure</Text>
+                <Text style={styles.summaryValue}>{b2bCategoryTotal.toFixed(3)}</Text>
+              </View>
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryLabel}>Total Receipt Pure</Text>
+                <Text style={styles.summaryValue}>{b2bReceiptTotal.toFixed(3)}</Text>
+              </View>
+            </View>
             {showB2bDropdown && (
               <View style={styles.tableDropdown}>
                 <TouchableOpacity
@@ -1545,6 +1623,20 @@ export default function ReportScreen({ navigation }) {
                 >
                   <Text style={styles.tableFilterBtnText}>Items</Text>
                 </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.summaryRow}>
+              <View style={[styles.summaryCard, styles.summaryCardRed]}>
+                <Text style={styles.summaryLabel}>Total OB</Text>
+                <Text style={[styles.summaryValue, styles.summaryValueRed]}>OB: {b2cBalanceSummary.ob.toFixed(3)}</Text>
+              </View>
+              <View style={[styles.summaryCard, styles.summaryCardGreen]}>
+                <Text style={styles.summaryLabel}>Total Adv</Text>
+                <Text style={[styles.summaryValue, styles.summaryValueGreen]}>Adv: {b2cBalanceSummary.ab.toFixed(3)}</Text>
+              </View>
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryLabel}>Total Final Amt</Text>
+                <Text style={styles.summaryValue}>{b2cCategoryTotal.toFixed(2)}</Text>
               </View>
             </View>
             {showB2cDropdown && (
@@ -1691,6 +1783,24 @@ export default function ReportScreen({ navigation }) {
                 value={dealerSearch}
                 onChangeText={setDealerSearch}
               />
+            </View>
+            <View style={styles.summaryRow}>
+              <View style={[styles.summaryCard, styles.summaryCardRed]}>
+                <Text style={styles.summaryLabel}>Total OB</Text>
+                <Text style={[styles.summaryValue, styles.summaryValueRed]}>OB: {dealerBalanceSummary.ob.toFixed(3)}</Text>
+              </View>
+              <View style={[styles.summaryCard, styles.summaryCardGreen]}>
+                <Text style={styles.summaryLabel}>Total Adv</Text>
+                <Text style={[styles.summaryValue, styles.summaryValueGreen]}>Adv: {dealerBalanceSummary.ab.toFixed(3)}</Text>
+              </View>
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryLabel}>Total Issued Pure</Text>
+                <Text style={styles.summaryValue}>{dealerCategoryTotal.toFixed(3)}</Text>
+              </View>
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryLabel}>Total Receipt Pure</Text>
+                <Text style={styles.summaryValue}>{dealerReceiptTotal.toFixed(3)}</Text>
+              </View>
             </View>
             <ScrollView horizontal>
               <View>
@@ -2315,6 +2425,38 @@ const styles = StyleSheet.create({
   tableTitle: { fontSize: 16, fontWeight: "bold", marginVertical: 10, color: "#1b5e20" },
   tableTotalText: { fontSize: 14, fontWeight: "bold", color: "#1b5e20", marginHorizontal: 8 },
   tableHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginVertical: 10 },
+  summaryRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },
+  summaryCard: {
+    minWidth: 120,
+    flexGrow: 1,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#ddd",
+  },
+  summaryCardRed: {
+    backgroundColor: "#FFF5F5",
+    borderColor: "#F2B8BE",
+  },
+  summaryCardGreen: {
+    backgroundColor: "#F1FBF3",
+    borderColor: "#B7E4C7",
+  },
+  summaryLabel: {
+    fontSize: 12,
+    color: "#666",
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  summaryValue: {
+    fontSize: 15,
+    color: "#222",
+    fontWeight: "bold",
+  },
+  summaryValueRed: { color: "#D32F2F" },
+  summaryValueGreen: { color: "#2E7D32" },
   tableSearchInput: { backgroundColor: "#fff", padding: 8, borderRadius: 6, borderWidth: 1, borderColor: "#ccc", width: 150 },
   tableFilterBtn: { backgroundColor: "#1b5e20", padding: 8, borderRadius: 6, marginLeft: 10 },
   tableFilterBtnText: { color: "#fff", fontWeight: "bold" },
