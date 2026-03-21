@@ -57,6 +57,7 @@ export default function CreateTransaction({ navigation }) {
   const [cashPureInput, setCashPureInput] = useState("0.000");
 
   const [gstEnabled, setGstEnabled] = useState(false);
+  const [description, setDescription] = useState("");
   const [sgst, setSgst] = useState("");
   const [cgst, setCgst] = useState("");
   const [igst, setIgst] = useState("");
@@ -77,6 +78,8 @@ export default function CreateTransaction({ navigation }) {
   const [selectedReceiptItem, setSelectedReceiptItem] = useState(null);
   const [receiptItemDropdownOpen, setReceiptItemDropdownOpen] = useState(false);
   const [customReceiptItem, setCustomReceiptItem] = useState("");
+  const [editingIssueId, setEditingIssueId] = useState(null);
+  const [editingReceiptId, setEditingReceiptId] = useState(null);
   const [issueItemSearch, setIssueItemSearch] = useState("");
   const [receiptItemSearch, setReceiptItemSearch] = useState("");
   const [issueDetails, setIssueDetails] = useState("");
@@ -816,6 +819,7 @@ export default function CreateTransaction({ navigation }) {
         pure: Number(item.pure ?? 0),
       }))
     );
+    setDescription(String(t.description || ""));
     if (t.receiptImage || t.proofImage || t.image) {
       setProofImage(t.receiptImage || t.proofImage || t.image);
     }
@@ -870,6 +874,41 @@ export default function CreateTransaction({ navigation }) {
     const G = parseNum(rate);
     if (G <= 0) return 0;
     return Number((R / G).toFixed(3));
+  };
+
+  const clearIssueEntryInputs = () => {
+    setWeight("");
+    setStone("0");
+    setTouch("");
+    setIssueDetails("");
+    setSelectedIssueItem(null);
+    setIssueItemSearch("");
+    setEditingIssueId(null);
+  };
+
+  const clearReceiptEntryInputs = () => {
+    setReceiptWeight("");
+    setReceiptStone("0");
+    setReceiptTouch("");
+    setSelectedReceiptItem(null);
+    setReceiptItemSearch("");
+    setEditingReceiptId(null);
+  };
+
+  const adjustLocalStock = (itemName, delta) => {
+    if (!itemName || !Number.isFinite(Number(delta)) || Number(delta) === 0) {
+      return;
+    }
+
+    setItemsStock((prev) => ({
+      ...prev,
+      [itemName]: {
+        ...prev[itemName],
+        weight: Number(
+          (Number(prev[itemName]?.weight || 0) + Number(delta)).toFixed(3),
+        ),
+      },
+    }));
   };
 
   // Format helper
@@ -977,39 +1016,32 @@ export default function CreateTransaction({ navigation }) {
         console.error("Error updating stock:", stockError);
       }
 
-      // Update local stock
-      setItemsStock((prev) => ({
-        ...prev,
-        [selectedIssueItem]: {
-          ...prev[selectedIssueItem],
-          weight: Number(
-            ((prev[selectedIssueItem]?.weight || 0) - issueWeight).toFixed(3),
-          ),
-        },
-      }));
+      const nextIssueRow = {
+        id: editingIssueId || Date.now() + Math.random(),
+        item: selectedIssueItem,
+        weight: issueWeight,
+        stone: parseNum(stone),
+        touch: parseNum(touch),
+        purity,
+        details: issueDetails,
+        type: "issue",
+      };
 
-      // Add to issue items
-      setIssueItems((prev) => [
-        ...prev,
-        {
-          id: Date.now() + Math.random(),
-          item: selectedIssueItem,
-          weight: issueWeight,
-          stone: parseNum(stone),
-          touch: parseNum(touch),
-          purity,
-          details: issueDetails,
-          type: "issue",
-        },
-      ]);
+      if (editingIssueId) {
+        const previousRow = issueItems.find((item) => item.id === editingIssueId);
+        if (previousRow) {
+          adjustLocalStock(previousRow.item, previousRow.weight);
+        }
+        adjustLocalStock(selectedIssueItem, -issueWeight);
+        setIssueItems((prev) =>
+          prev.map((item) => (item.id === editingIssueId ? nextIssueRow : item)),
+        );
+      } else {
+        adjustLocalStock(selectedIssueItem, -issueWeight);
+        setIssueItems((prev) => [...prev, nextIssueRow]);
+      }
 
-      // Clear inputs
-      setWeight("");
-      setStone("0");
-      setTouch("");
-      setIssueDetails("");
-      setSelectedIssueItem(null);
-      setIssueItemSearch("");
+      clearIssueEntryInputs();
 
       // Success message removed as per user request
     } catch (error) {
@@ -1116,37 +1148,31 @@ export default function CreateTransaction({ navigation }) {
         console.error("Error updating stock:", stockError);
       }
 
-      // ➕ Increase item stock locally
-      setItemsStock((prev) => ({
-        ...prev,
-        [selectedReceiptItem]: {
-          ...prev[selectedReceiptItem],
-          weight: (
-            Number(prev[selectedReceiptItem]?.weight || 0) + receiptW
-          ).toFixed(3),
-        },
-      }));
+      const nextReceiptRow = {
+        id: editingReceiptId || Date.now() + Math.random(),
+        item: selectedReceiptItem,
+        weight: Number(receiptW.toFixed(3)),
+        stone: 0,
+        touch: Number(resolvedReceiptTouch.toFixed(3)),
+        purity,
+        type: "receipt",
+      };
 
-      // Add to receipt items
-      setReceiptItems((prev) => [
-        ...prev,
-        {
-          id: Date.now() + Math.random(),
-          item: selectedReceiptItem,
-          weight: Number(receiptW.toFixed(3)),
-          stone: 0,
-          touch: Number(resolvedReceiptTouch.toFixed(3)),
-          purity,
-          type: "receipt",
-        },
-      ]);
+      if (editingReceiptId) {
+        const previousRow = receiptItems.find((item) => item.id === editingReceiptId);
+        if (previousRow) {
+          adjustLocalStock(previousRow.item, -previousRow.weight);
+        }
+        adjustLocalStock(selectedReceiptItem, receiptW);
+        setReceiptItems((prev) =>
+          prev.map((item) => (item.id === editingReceiptId ? nextReceiptRow : item)),
+        );
+      } else {
+        adjustLocalStock(selectedReceiptItem, receiptW);
+        setReceiptItems((prev) => [...prev, nextReceiptRow]);
+      }
 
-      // Clear inputs
-      setReceiptWeight("");
-      setReceiptStone("0");
-      setReceiptTouch("");
-      setSelectedReceiptItem(null);
-      setReceiptItemSearch("");
+      clearReceiptEntryInputs();
 
       // Success message removed as per user request
     } catch (error) {
@@ -1230,18 +1256,7 @@ export default function CreateTransaction({ navigation }) {
   const removeIssueItem = (id) => {
     const itemToRemove = issueItems.find((item) => item.id === id);
     if (itemToRemove) {
-      // ➕ Add back the weight to stock
-      setItemsStock((prev) => ({
-        ...prev,
-        [itemToRemove.item]: {
-          ...prev[itemToRemove.item],
-          weight: Number(
-            (
-              (prev[itemToRemove.item]?.weight || 0) + itemToRemove.weight
-            ).toFixed(3),
-          ),
-        },
-      }));
+      adjustLocalStock(itemToRemove.item, itemToRemove.weight);
     }
     setIssueItems((prev) => prev.filter((p) => p.id !== id));
   };
@@ -1249,20 +1264,28 @@ export default function CreateTransaction({ navigation }) {
   const removeReceiptItem = (id) => {
     const itemToRemove = receiptItems.find((item) => item.id === id);
     if (itemToRemove) {
-      // 🔻 Subtract the weight from stock
-      setItemsStock((prev) => ({
-        ...prev,
-        [itemToRemove.item]: {
-          ...prev[itemToRemove.item],
-          weight: Number(
-            (
-              (prev[itemToRemove.item]?.weight || 0) - itemToRemove.weight
-            ).toFixed(3),
-          ),
-        },
-      }));
+      adjustLocalStock(itemToRemove.item, -itemToRemove.weight);
     }
     setReceiptItems((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const editIssueItem = (row) => {
+    setEditingIssueId(row.id);
+    setSelectedIssueItem(row.item);
+    setIssueItemSearch(row.item || "");
+    setWeight(String(row.weight ?? ""));
+    setStone(String(row.stone ?? "0"));
+    setTouch(String(row.touch ?? ""));
+    setIssueDetails(row.details || "");
+  };
+
+  const editReceiptItem = (row) => {
+    setEditingReceiptId(row.id);
+    setSelectedReceiptItem(row.item);
+    setReceiptItemSearch(row.item || "");
+    setReceiptWeight(String(row.weight ?? ""));
+    setReceiptStone(String(row.stone ?? "0"));
+    setReceiptTouch(String(row.touch ?? ""));
   };
 
   const removeCashEntry = (id) => {
@@ -1507,6 +1530,7 @@ export default function CreateTransaction({ navigation }) {
       cashPure: Number(totalCashPure.toFixed(3)),
       balance: finalDistinctBalance,
       advBal: Number(customerAdvanceBalance.toFixed(3)),
+      description: String(description || "").trim(),
     };
 
     console.log("📤 Sending /transactions POST Payload:", JSON.stringify(transactionData, null, 2));
@@ -1649,6 +1673,7 @@ export default function CreateTransaction({ navigation }) {
         gstPure: Number((gstEnabled ? gstPureValue : 0).toFixed(3)),
         advBal: Number(customerAdvanceBalance.toFixed(3)),
         currentBalance: newNet,
+        description: String(description || "").trim(),
         receiptImage: persistedDealerImage || null,
         proofImage: persistedDealerImage || null,
         image: persistedDealerImage || null,
@@ -1715,6 +1740,7 @@ export default function CreateTransaction({ navigation }) {
       console.log("✅ Entire bill saved successfully");
 
       navigation.navigate("BillPreview", {
+        description: String(description || "").trim(),
         customer: {
           name: selectedCustomer.name,
           id: customerRecordId,
@@ -1733,6 +1759,7 @@ export default function CreateTransaction({ navigation }) {
           date,
           oldBalance: fmt(customerOldBalance),
           advanceBalance: fmt(customerAdvanceBalance),
+          description: String(description || "").trim(),
           image: persistedDealerImage || "",
           receiptImage: persistedDealerImage || "",
           proofImage: persistedDealerImage || "",
@@ -2077,7 +2104,7 @@ export default function CreateTransaction({ navigation }) {
               onPress={addReceiptItem}
             >
               <Text style={[styles.addBtnText, { color: "#135F25" }]}>
-                + Add Receipt Item
+                {editingReceiptId ? "Update Receipt Item" : "+ Add Receipt Item"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -2091,6 +2118,7 @@ export default function CreateTransaction({ navigation }) {
             <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
               <View style={styles.productTable}>
                 <View style={styles.productTableHeader}>
+                  <Text style={styles.productHeaderCell}>Action</Text>
                   <Text style={styles.productHeaderCell}>#</Text>
                   <Text style={styles.productHeaderCell}>Kind</Text>
                   <Text style={styles.productHeaderCell}>Item</Text>
@@ -2098,11 +2126,30 @@ export default function CreateTransaction({ navigation }) {
                   <Text style={styles.productHeaderCell}>Stone (g)</Text>
                   <Text style={styles.productHeaderCell}>Touch (%)</Text>
                   <Text style={styles.productHeaderCell}>Pure (g)</Text>
-                  <Text style={styles.productHeaderCell}>Action</Text>
                 </View>
 
                 {receiptItems.map((row, idx) => (
                   <View key={row.id} style={styles.productTableRow}>
+                    <View
+                      style={{
+                        width: 86,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                        paddingHorizontal: 4,
+                      }}
+                    >
+                      <TouchableOpacity onPress={() => editReceiptItem(row)}>
+                        <Text style={[styles.actionText, { color: "#2E7D32" }]}>
+                          Edit
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => removeReceiptItem(row.id)}>
+                        <Text style={[styles.actionText, { color: "#d9534f" }]}>
+                          Delete
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                     <Text style={styles.productCell}>{idx + 1}</Text>
                     <Text style={styles.productCell}>Receipt</Text>
                     <Text style={styles.productCell}>{row.item}</Text>
@@ -2118,11 +2165,6 @@ export default function CreateTransaction({ navigation }) {
                     <Text style={styles.productCell}>
                       {Number(row.purity).toFixed(3)}
                     </Text>
-                    <TouchableOpacity onPress={() => removeReceiptItem(row.id)}>
-                      <Text style={[styles.actionText, { color: "#d9534f" }]}>
-                        Remove
-                      </Text>
-                    </TouchableOpacity>
                   </View>
                 ))}
               </View>
@@ -2245,7 +2287,9 @@ export default function CreateTransaction({ navigation }) {
             </View>
 
             <TouchableOpacity style={styles.addBtn} onPress={addIssueItem}>
-              <Text style={styles.addBtnText}>+ Add New Item (Issue)</Text>
+              <Text style={styles.addBtnText}>
+                {editingIssueId ? "Update Issue Item" : "+ Add New Item (Issue)"}
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -2258,6 +2302,7 @@ export default function CreateTransaction({ navigation }) {
             <ScrollView horizontal={true} showsHorizontalScrollIndicator={true}>
               <View style={styles.productTable}>
                 <View style={styles.productTableHeader}>
+                  <Text style={styles.productHeaderCell}>Action</Text>
                   <Text style={styles.productHeaderCell}>#</Text>
                   <Text style={styles.productHeaderCell}>Kind</Text>
                   <Text style={styles.productHeaderCell}>Item</Text>
@@ -2265,11 +2310,30 @@ export default function CreateTransaction({ navigation }) {
                   <Text style={styles.productHeaderCell}>Stone (g)</Text>
                   <Text style={styles.productHeaderCell}>Touch (%)</Text>
                   <Text style={styles.productHeaderCell}>Pure (g)</Text>
-                  <Text style={styles.productHeaderCell}>Action</Text>
                 </View>
 
                 {issueItems.map((row, idx) => (
                   <View key={row.id} style={styles.productTableRow}>
+                    <View
+                      style={{
+                        width: 86,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                        paddingHorizontal: 4,
+                      }}
+                    >
+                      <TouchableOpacity onPress={() => editIssueItem(row)}>
+                        <Text style={[styles.actionText, { color: "#2E7D32" }]}>
+                          Edit
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => removeIssueItem(row.id)}>
+                        <Text style={[styles.actionText, { color: "#d9534f" }]}>
+                          Delete
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                     <Text style={styles.productCell}>{idx + 1}</Text>
                     <Text style={styles.productCell}>Issue</Text>
                     <Text style={styles.productCell}>{row.item}</Text>
@@ -2285,11 +2349,6 @@ export default function CreateTransaction({ navigation }) {
                     <Text style={styles.productCell}>
                       {Number(row.purity).toFixed(3)}
                     </Text>
-                    <TouchableOpacity onPress={() => removeIssueItem(row.id)}>
-                      <Text style={[styles.actionText, { color: "#d9534f" }]}>
-                        Remove
-                      </Text>
-                    </TouchableOpacity>
                   </View>
                 ))}
               </View>
@@ -2485,6 +2544,21 @@ export default function CreateTransaction({ navigation }) {
             ))}
           </View>
         )}
+
+        {selectedCustomer && (
+          <View style={styles.card}>
+            <Text style={styles.subLabel}>Description</Text>
+            <TextInput
+              style={[styles.input, { minHeight: 80, textAlignVertical: "top" }]}
+              value={description}
+              onChangeText={setDescription}
+              placeholder="Enter description"
+              placeholderTextColor="#9E9E9E"
+              multiline
+            />
+          </View>
+        )}
+
         {/* Saved GST Selection Modal */}
         {showSavedGstModal && (
           <Modal
@@ -3229,4 +3303,3 @@ const styles = StyleSheet.create({
     color: "#333",
   },
 });
-
