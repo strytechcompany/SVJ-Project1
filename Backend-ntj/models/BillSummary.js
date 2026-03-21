@@ -67,6 +67,8 @@ const billSummarySchema = new mongoose.Schema(
     dealerType: { type: String, default: '' },
     invoiceNo: { type: String, default: 'N/A' },
     date: { type: String, default: '' },
+    description: { type: String, default: '' },
+    nilMode: { type: String, default: '' },
     ob: { type: Number, default: 0 },
     issuePure: { type: Number, default: 0 },
     receiptPure: { type: Number, default: 0 },
