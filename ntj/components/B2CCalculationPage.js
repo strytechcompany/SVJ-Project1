@@ -1729,6 +1729,7 @@ export default function CreateTransaction({ navigation, route }) {
               <View style={styles.searchRow}>
                 <TextInput
                   placeholder="Customers Name and Phone No...."
+                  placeholderTextColor="#9E9E9E"
                   style={styles.searchBox}
                   value={cartSearch}
                   onChangeText={setCartSearch}
@@ -1824,8 +1825,8 @@ export default function CreateTransaction({ navigation, route }) {
                 <Text style={{ fontSize: 18, fontWeight: 'bold' }}>{customerName}</Text>
                 <Text style={{ color: '#666', marginTop: 4 }}>Phone: {phone}</Text>
                 {address ? <Text style={{ color: '#666' }}>Address: {address}</Text> : null}
-                {oldBalance ? <Text style={{ color: '#666' }}>OB: {oldBalance}</Text> : null}
-                {advanceBalance ? <Text style={{ color: '#666' }}>AB: {advanceBalance}</Text> : null}
+                {oldBalance ? <Text style={{ color: '#455A64' }}>OB: {oldBalance}</Text> : null}
+                {advanceBalance ? <Text style={{ color: '#455A64' }}>AB: {advanceBalance}</Text> : null}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 15, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#f0f0f0' }}>
                   <View>
                     <Text style={{ fontWeight: 'bold' }}>Inv: {invoiceNo}</Text>
@@ -1874,6 +1875,7 @@ export default function CreateTransaction({ navigation, route }) {
                 <TextInput
                   style={styles.input}
                   placeholder="Enter item name"
+                  placeholderTextColor="#9E9E9E"
                   value={itemName}
                   onChangeText={handleItemNameChange}
                   onFocus={() => {
@@ -1945,6 +1947,7 @@ export default function CreateTransaction({ navigation, route }) {
                   onChangeText={setWeight}
                   keyboardType="decimal-pad"
                   placeholder="Enter weight"
+                  placeholderTextColor="#9E9E9E"
                 />
                 {modifiedWeight && (
                   <Text style={styles.modifiedWeightText}>
@@ -1969,6 +1972,7 @@ export default function CreateTransaction({ navigation, route }) {
                 value={wastage}
                 editable={false}
                 placeholder="Auto"
+                placeholderTextColor="#9E9E9E"
               />
               {/* RATE */}
               <Text style={styles.label}>Rate</Text>
@@ -2072,6 +2076,7 @@ export default function CreateTransaction({ navigation, route }) {
                         }}
                         keyboardType="decimal-pad"
                         placeholder="0.0"
+                        placeholderTextColor="#9E9E9E"
                       />
                     </View>
 
@@ -2108,6 +2113,7 @@ export default function CreateTransaction({ navigation, route }) {
                         }}
                         keyboardType="decimal-pad"
                         placeholder="0.0"
+                        placeholderTextColor="#9E9E9E"
                       />
                     </View>
                   </View>
@@ -2146,6 +2152,7 @@ export default function CreateTransaction({ navigation, route }) {
                         }}
                         keyboardType="decimal-pad"
                         placeholder="0.0"
+                        placeholderTextColor="#9E9E9E"
                       />
                     </View>
 
@@ -2156,6 +2163,7 @@ export default function CreateTransaction({ navigation, route }) {
                         value={gstPercentage}
                         editable={false}
                         placeholder="0.0"
+                        placeholderTextColor="#9E9E9E"
                       />
                     </View>
                   </View>
@@ -2167,6 +2175,7 @@ export default function CreateTransaction({ navigation, route }) {
                     onChangeText={setGstAmount}
                     keyboardType="decimal-pad"
                     placeholder="0.00"
+                    placeholderTextColor="#9E9E9E"
                   />
                 </View>
               )}
@@ -2267,6 +2276,7 @@ export default function CreateTransaction({ navigation, route }) {
                       value={rName}
                       onChangeText={setRName}
                       placeholder="Item Name"
+                      placeholderTextColor="#9E9E9E"
                     />
                   </View>
                   <View style={[styles.inputGroup, { flex: 1, marginRight: 10 }]}>
@@ -2277,6 +2287,7 @@ export default function CreateTransaction({ navigation, route }) {
                       onChangeText={setRWeight}
                       keyboardType="numeric"
                       placeholder="0.000"
+                      placeholderTextColor="#9E9E9E"
                     />
                   </View>
                   <View style={[styles.inputGroup, { flex: 1 }]}>
@@ -2287,6 +2298,7 @@ export default function CreateTransaction({ navigation, route }) {
                       onChangeText={setRSub}
                       keyboardType="numeric"
                       placeholder="0.000"
+                      placeholderTextColor="#9E9E9E"
                     />
                   </View>
                 </View>
@@ -2306,6 +2318,7 @@ export default function CreateTransaction({ navigation, route }) {
                       onChangeText={setRRate}
                       keyboardType="numeric"
                       placeholder="Rate"
+                      placeholderTextColor="#9E9E9E"
                     />
                   </View>
                   <View style={[styles.inputGroup, { flex: 1.5 }]}>
@@ -2414,6 +2427,7 @@ export default function CreateTransaction({ navigation, route }) {
                         setCashPureInput(computeCashPure(val, cashGoldRate || 0).toFixed(3));
                       }}
                       placeholder="0.00"
+                      placeholderTextColor="#9E9E9E"
                     />
                   </View>
 
@@ -2428,6 +2442,7 @@ export default function CreateTransaction({ navigation, route }) {
                         setCashPureInput(computeCashPure(rupees || 0, val).toFixed(3));
                       }}
                       placeholder="Rate"
+                      placeholderTextColor="#9E9E9E"
                     />
                   </View>
                 </View>
