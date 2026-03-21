@@ -1,89 +1,51 @@
-const Purchase = require("../models/Purchase");
+const Rate = require("../models/Rate");
 
-const createPurchase = async (req, res) => {
+// @desc    Get latest rate
+// @route   GET /api/rates
+// @access  Public (or Private)
+const getRate = async (req, res) => {
     try {
-        const { supplier, supplierName, issueItem, issueItemName, receiptItem, receiptItemName, cash, date } = req.body;
-
-        if (!supplier && !issueItem && !receiptItem && !cash) {
-            return res.status(400).json({ message: "At least one field (supplier, issue item, receipt item, or cash) must be filled" });
-        }
-
-        if (!date) return res.status(400).json({ message: "Date is required" });
-
-        const newPurchase = new Purchase({
-            supplier, supplierName, issueItem, issueItemName, receiptItem, receiptItemName, cash: cash || 0, date
-        });
-
-        const savedPurchase = await newPurchase.save();
-        res.status(201).json({ message: "Purchase created successfully", purchase: savedPurchase });
-    } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
+        const rate = await Rate.findOne().sort({ createdAt: -1 });
+        if (!rate) return res.status(404).json({ message: "No rates found" });
+        res.json(rate);
+    } catch (err) {
+        res.status(500).json({ message: "Server error", error: err.message });
     }
 };
 
-const getPurchases = async (req, res) => {
+// @desc    Save new rate
+// @route   POST /api/rates
+// @access  Private
+const createRate = async (req, res) => {
     try {
-        const { startDate, endDate, supplier } = req.query;
-        let filter = {};
-        if (supplier) filter.supplier = supplier;
-        if (startDate && endDate) filter.date = { $gte: startDate, $lte: endDate };
-
-        const purchases = await Purchase.find(filter)
-            .populate("supplier", "customerName shopName phoneNumber")
-            .populate("issueItem", "stockName itemDetails")
-            .populate("receiptItem", "stockName itemDetails")
-            .sort({ createdAt: -1 });
-
-        res.json(purchases);
-    } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
+        const { goldRate, goldDate, ftRate, ftDate } = req.body;
+        const newRate = new Rate({ goldRate, goldDate, ftRate, ftDate });
+        const saved = await newRate.save();
+        res.status(201).json(saved);
+    } catch (err) {
+        res.status(500).json({ message: "Server error", error: err.message });
     }
 };
 
-const getPurchaseById = async (req, res) => {
+// @desc    Update latest rate
+// @route   PUT /api/rates
+// @access  Private
+const updateRate = async (req, res) => {
     try {
-        const purchase = await Purchase.findById(req.params.id)
-            .populate("supplier", "customerName shopName phoneNumber")
-            .populate("issueItem", "stockName itemDetails")
-            .populate("receiptItem", "stockName itemDetails");
-
-        if (!purchase) return res.status(404).json({ message: "Purchase not found" });
-        res.json(purchase);
-    } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
-    }
-};
-
-const updatePurchase = async (req, res) => {
-    try {
-        const updatedPurchase = await Purchase.findByIdAndUpdate(
-            req.params.id, req.body, { new: true, runValidators: true }
-        )
-            .populate("supplier", "customerName shopName phoneNumber")
-            .populate("issueItem", "stockName itemDetails")
-            .populate("receiptItem", "stockName itemDetails");
-
-        if (!updatedPurchase) return res.status(404).json({ message: "Purchase not found" });
-        res.json({ message: "Purchase updated successfully", purchase: updatedPurchase });
-    } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
-    }
-};
-
-const deletePurchase = async (req, res) => {
-    try {
-        const deletedPurchase = await Purchase.findByIdAndDelete(req.params.id);
-        if (!deletedPurchase) return res.status(404).json({ message: "Purchase not found" });
-        res.json({ message: "Purchase deleted successfully" });
-    } catch (error) {
-        res.status(500).json({ message: "Server error", error: error.message });
+        const { goldRate, goldDate, ftRate, ftDate } = req.body;
+        const updated = await Rate.findOneAndUpdate(
+            {},
+            { goldRate, goldDate, ftRate, ftDate },
+            { sort: { createdAt: -1 }, new: true, upsert: true }
+        );
+        res.json(updated);
+    } catch (err) {
+        res.status(500).json({ message: "Server error", error: err.message });
     }
 };
 
 module.exports = {
-    createPurchase,
-    getPurchases,
-    getPurchaseById,
-    updatePurchase,
-    deletePurchase,
+    getRate,
+    createRate,
+    updateRate,
 };
