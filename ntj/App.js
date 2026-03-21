@@ -48,6 +48,7 @@ import PurchaseScreen from "./components/Purchase"
 import DealerBill from "./components/DealerBill";
 
 import SD from "./components/SD";
+import Cashpage from "./components/Cashpage"
 
 import ReportScreen from "./components/ReportScreen";
 import EstimateScreen from "./components/Estimate.js";
@@ -86,6 +87,10 @@ if (Platform.OS === "android" && !__DEV__) {
   TextInput.defaultProps.style = Array.isArray(existingTextInputStyle)
     ? [{ color: "#000" }, ...existingTextInputStyle]
     : [{ color: "#000" }, existingTextInputStyle].filter(Boolean);
+
+  if (!TextInput.defaultProps.placeholderTextColor) {
+    TextInput.defaultProps.placeholderTextColor = "#666";
+  }
 }
 
 export default function App() {
@@ -105,9 +110,19 @@ export default function App() {
         AsyncStorage.getItem("userSession"),
       ]);
       const storedUser = adminData || session;
-      if (adminLoggedIn === "true" && storedUser) {
-        setPersistedUser(JSON.parse(storedUser));
+      if (storedUser) {
+        const parsedUser = JSON.parse(storedUser);
+        setPersistedUser(parsedUser);
         setInitialRoute("Home");
+
+        // Self-heal partially missing session flags so app restarts don't look like auto logout.
+        if (adminLoggedIn !== "true" || !adminData || !session) {
+          await AsyncStorage.multiSet([
+            ["adminLoggedIn", "true"],
+            ["adminData", JSON.stringify(parsedUser)],
+            ["userSession", JSON.stringify(parsedUser)],
+          ]);
+        }
       }
     } catch (e) {
       console.error("Failed to fetch session", e);
@@ -150,6 +165,7 @@ export default function App() {
         <Stack.Screen name="SuspenseHistoryScreen" component={SuspenseHistoryScreen} />
 
         <Stack.Screen name="SD" component={SD} />
+        <Stack.Screen name="CashPage" component={Cashpage} />
 
         {/* Users */}
         <Stack.Screen name="EditSuspenseTransaction" component={EditSuspenseTransaction} />
