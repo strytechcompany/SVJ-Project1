@@ -5,11 +5,13 @@ const {
   getCustomerById,
   createCustomer,
   updateCustomer,
+  updateCustomerBalanceByPhone,
   deleteCustomer,
   deleteAllB2BCustomers
 } = require("../controllers/customerController");
 
 router.get("/", getCustomers);
+router.put("/update-balance", updateCustomerBalanceByPhone);
 router.get("/:id", getCustomerById);
 router.post("/", createCustomer);
 router.delete("/", deleteAllB2BCustomers);
