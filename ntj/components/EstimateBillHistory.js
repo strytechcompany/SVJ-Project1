@@ -13,9 +13,22 @@ import { useFocusEffect } from "@react-navigation/native";
 import { base_url } from "./config";
 import CommonHeader from "./CommonHeader";
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
 const toNum = (value, fallback = 0) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+};
+
+const getCreatedTimestamp = (record) => {
+  const ts = new Date(record?.createdAt || record?.date || 0).getTime();
+  return Number.isFinite(ts) ? ts : 0;
+};
+
+const isEstimateExpired = (record, now = Date.now()) => {
+  const createdTs = getCreatedTimestamp(record);
+  if (!createdTs) return false;
+  return now - createdTs >= ONE_DAY_MS;
 };
 
 export default function EstimateBillHistory({ navigation }) {
@@ -31,7 +44,26 @@ export default function EstimateBillHistory({ navigation }) {
         return;
       }
       const rows = await response.json();
-      setHistory(Array.isArray(rows) ? rows : []);
+      const estimateRows = Array.isArray(rows) ? rows : [];
+      const now = Date.now();
+      const expiredRows = estimateRows.filter((row) => row?._id && isEstimateExpired(row, now));
+      const activeRows = estimateRows.filter((row) => !isEstimateExpired(row, now));
+
+      if (expiredRows.length > 0) {
+        await Promise.all(
+          expiredRows.map(async (row) => {
+            try {
+              await fetch(`${base_url}/estimates/${row._id}`, {
+                method: "DELETE",
+              });
+            } catch (deleteError) {
+              console.error("Error deleting expired estimate:", deleteError);
+            }
+          })
+        );
+      }
+
+      setHistory(activeRows);
     } catch (error) {
       console.error("Error loading estimate history:", error);
       setHistory([]);
