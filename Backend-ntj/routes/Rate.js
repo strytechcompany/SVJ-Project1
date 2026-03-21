@@ -1,9 +1,25 @@
-const express = require("express");
-const router = express.Router();
-const { getRate, createRate, updateRate } = require("../controllers/rateController");
+const mongoose = require("mongoose");
 
-router.get("/", getRate);
-router.post("/", createRate);
-router.put("/", updateRate);
+const rateSchema = new mongoose.Schema(
+  {
+    goldRate: {
+      type: String,
+      required: true,
+    },
+    goldDate: {
+      type: String,
+      required: true,
+    },
+    ftRate: {
+      type: String,
+      required: true,
+    },
+    ftDate: {
+      type: String,
+      required: true,
+    },
+  },
+  { timestamps: true }
+);
 
-module.exports = router;
+module.exports = mongoose.model("Rate", rateSchema);
