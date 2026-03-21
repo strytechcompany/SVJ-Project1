@@ -64,6 +64,10 @@ const createCustomer = async (req, res) => {
 // @route   PUT /api/customers/:id
 const updateCustomer = async (req, res) => {
     try {
+        if (req.params.id === "update-balance") {
+            return updateCustomerBalanceByPhone(req, res);
+        }
+
         const customer = await Customer.findById(req.params.id);
         if (!customer)
             return res.status(404).json({ message: "Customer not found" });
@@ -103,6 +107,39 @@ const updateCustomer = async (req, res) => {
         if (req.body.igst !== undefined) customer.igst = req.body.igst;
 
         const updatedCustomer = await customer.save();
+        res.json(updatedCustomer);
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+};
+
+// @desc    Update customer balances by phone
+// @route   PUT /api/customers/update-balance
+const updateCustomerBalanceByPhone = async (req, res) => {
+    try {
+        const phone = String(req.body.phone || req.body.phoneNumber || "").trim();
+        const oldBalance = Number(req.body.oldBalance || 0);
+        const advanceBalance = Number(req.body.advanceBalance || 0);
+
+        if (!phone) {
+            return res.status(400).json({ message: "Phone is required" });
+        }
+
+        const updatedCustomer = await Customer.findOneAndUpdate(
+            { phoneNumber: phone },
+            {
+                $set: {
+                    oldBalance,
+                    advanceBalance,
+                },
+            },
+            { new: true }
+        );
+
+        if (!updatedCustomer) {
+            return res.status(404).json({ message: "Customer not found" });
+        }
+
         res.json(updatedCustomer);
     } catch (err) {
         res.status(400).json({ message: err.message });
@@ -149,6 +186,7 @@ module.exports = {
     getCustomerById,
     createCustomer,
     updateCustomer,
+    updateCustomerBalanceByPhone,
     deleteCustomer,
     deleteAllB2BCustomers,
 };
