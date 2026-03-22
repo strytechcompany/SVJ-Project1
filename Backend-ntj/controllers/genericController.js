@@ -1,10 +1,14 @@
 // controllers/genericController.js
 
+const { applyOptionalLimit } = require('../utils/queryPerformance');
+
 const createController = (Model) => {
     return {
         getAll: async (req, res) => {
             try {
-                const items = await Model.find().sort({ createdAt: -1 });
+                const itemsQuery = Model.find().sort({ createdAt: -1 }).lean();
+                applyOptionalLimit(itemsQuery, req.query.limit);
+                const items = await itemsQuery;
                 res.status(200).json(items);
             } catch (err) {
                 res.status(500).json({ error: err.message });
