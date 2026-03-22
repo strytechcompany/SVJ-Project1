@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { memo, useState, useCallback, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -33,6 +33,61 @@ import {
  *
  * Option C: includes product table & summary
  */
+
+const CustomerSelectItem = memo(function CustomerSelectItem({
+  item,
+  highlight = false,
+  onPress,
+}) {
+  let currentBalance = Number(item.ob || 0);
+  let advanceBalance = Number(item.ab || 0);
+  if (currentBalance < 0) {
+    advanceBalance += Math.abs(currentBalance);
+    currentBalance = 0;
+  }
+
+  return (
+    <TouchableOpacity
+      onPress={() => onPress(item)}
+      style={[
+        styles.listItem,
+        highlight && { borderLeftWidth: 4, borderLeftColor: "#2E7D32" },
+      ]}
+    >
+      <View>
+        <Text style={styles.listItemText}>
+          <Text style={{ fontWeight: "bold", color: "#000" }}>{item.name}</Text>{" "}
+          | P : {item.phone}
+        </Text>
+        <Text style={styles.balanceText}>
+          OB: {Number(currentBalance || 0).toFixed(3)}g{" "}
+          {advanceBalance > 0
+            ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g`
+            : ""}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+const DropdownItem = memo(function DropdownItem({
+  item,
+  onPress,
+  textStyle,
+  weightStyle,
+  containerStyle,
+  weightText,
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.listItem, containerStyle]}
+      onPress={() => onPress(item)}
+    >
+      <Text style={textStyle}>{item.itemName}</Text>
+      <Text style={weightStyle}>{weightText}</Text>
+    </TouchableOpacity>
+  );
+});
 
 export default function CreateTransaction({ navigation }) {
   const route = useRoute();
@@ -107,56 +162,87 @@ export default function CreateTransaction({ navigation }) {
     customer?.id || customer?._id || customer?.customerId || "";
 
   // ── TOTALS (after useState, before useEffect) ───────────────
-  const totalIssuePure = issueItems.reduce(
-    (acc, it) => acc + Number(it.purity || 0),
-    0,
-  );
-  const totalIssueWeight = issueItems.reduce(
-    (acc, it) => acc + Number(it.weight || 0),
-    0,
-  );
-  const totalIssueStone = issueItems.reduce(
-    (acc, it) => acc + Number(it.stone || 0),
-    0,
-  );
-  const totalIssueTouch = issueItems.reduce(
-    (acc, it) => acc + Number(it.touch || 0),
-    0,
-  );
-  const totalReceiptPure = receiptItems.reduce(
-    (acc, it) => acc + Number(it.purity || 0),
-    0,
-  );
-  const totalReceiptWeight = receiptItems.reduce(
-    (acc, it) => acc + Number(it.weight || 0),
-    0,
-  );
-  const totalReceiptStone = receiptItems.reduce(
-    (acc, it) => acc + Number(it.stone || 0),
-    0,
-  );
-  const totalReceiptTouch = receiptItems.reduce(
-    (acc, it) => acc + Number(it.touch || 0),
-    0,
-  );
+  const totals = useMemo(() => {
+    const totalIssuePure = issueItems.reduce(
+      (acc, it) => acc + Number(it.purity || 0),
+      0,
+    );
+    const totalIssueWeight = issueItems.reduce(
+      (acc, it) => acc + Number(it.weight || 0),
+      0,
+    );
+    const totalIssueStone = issueItems.reduce(
+      (acc, it) => acc + Number(it.stone || 0),
+      0,
+    );
+    const totalIssueTouch = issueItems.reduce(
+      (acc, it) => acc + Number(it.touch || 0),
+      0,
+    );
+    const totalReceiptPure = receiptItems.reduce(
+      (acc, it) => acc + Number(it.purity || 0),
+      0,
+    );
+    const totalReceiptWeight = receiptItems.reduce(
+      (acc, it) => acc + Number(it.weight || 0),
+      0,
+    );
+    const totalReceiptStone = receiptItems.reduce(
+      (acc, it) => acc + Number(it.stone || 0),
+      0,
+    );
+    const totalReceiptTouch = receiptItems.reduce(
+      (acc, it) => acc + Number(it.touch || 0),
+      0,
+    );
+    const totalCashPure = cashTable.reduce(
+      (acc, it) => acc + Math.abs(Number(it.pure || 0)),
+      0,
+    );
+    const positiveCashPureTotal = cashTable.reduce((acc, it) => {
+      const pure = Math.abs(Number(it.pure || 0));
+      return Number(it.rupees || 0) >= 0 ? acc + pure : acc;
+    }, 0);
+    const negativeCashPureTotal = cashTable.reduce((acc, it) => {
+      const pure = Math.abs(Number(it.pure || 0));
+      return Number(it.rupees || 0) < 0 ? acc - pure : acc;
+    }, 0);
+
+    return {
+      totalIssuePure,
+      totalIssueWeight,
+      totalIssueStone,
+      totalIssueTouch,
+      totalReceiptPure,
+      totalReceiptWeight,
+      totalReceiptStone,
+      totalReceiptTouch,
+      totalCashPure,
+      positiveCashPureTotal,
+      negativeCashPureTotal,
+      totalCartItems: issueItems.length + receiptItems.length,
+      totalCartPure: totalIssuePure + totalReceiptPure,
+    };
+  }, [issueItems, receiptItems, cashTable]);
+  const {
+    totalIssuePure,
+    totalIssueWeight,
+    totalIssueStone,
+    totalIssueTouch,
+    totalReceiptPure,
+    totalReceiptWeight,
+    totalReceiptStone,
+    totalReceiptTouch,
+    totalCashPure,
+    positiveCashPureTotal,
+    negativeCashPureTotal,
+    totalCartItems,
+    totalCartPure,
+  } = totals;
   const ftRateNum = Number(goldRate);
   const ftRateValue = Number.isFinite(ftRateNum) ? ftRateNum : 0;
   const issueFtAmount = totalIssuePure * ftRateValue;
   const receiptFtAmount = totalReceiptPure * ftRateValue;
-  const totalCartItems = issueItems.length + receiptItems.length;
-  const totalCartPure = totalIssuePure + totalReceiptPure;
-  const totalCashPure = cashTable.reduce(
-    (acc, it) => acc + Math.abs(Number(it.pure || 0)),
-    0,
-  );
-  const positiveCashPureTotal = cashTable.reduce((acc, it) => {
-    const pure = Math.abs(Number(it.pure || 0));
-    return Number(it.rupees || 0) >= 0 ? acc + pure : acc;
-  }, 0);
-  const negativeCashPureTotal = cashTable.reduce((acc, it) => {
-    const pure = Math.abs(Number(it.pure || 0));
-    return Number(it.rupees || 0) < 0 ? acc - pure : acc;
-  }, 0);
   const netBillPure = Math.max(0, totalIssuePure - totalReceiptPure - positiveCashPureTotal);
   const taxableBillAmount = netBillPure * ftRateValue;
   const sgstPercentValue = gstEnabled && isSgstEnabled ? (Number(sgst) || 0) : 0;
@@ -345,15 +431,65 @@ export default function CreateTransaction({ navigation }) {
     setPreviousReceiptWeight(newWeight);
   };
 
-  const recentCustomerSet = new Set(recentNames);
-  const recentCustomers = customers.filter((c) => recentCustomerSet.has(c.name));
-  const filteredCartCustomers = cartSearch.trim()
-    ? customers.filter(
-        (c) =>
-          (c.name && c.name.toLowerCase().includes(cartSearch.toLowerCase())) ||
-          (c.phone && String(c.phone).includes(cartSearch)),
-      )
-    : recentCustomers;
+  const recentCustomers = useMemo(() => {
+    const recentCustomerSet = new Set(recentNames);
+    return customers.filter((c) => recentCustomerSet.has(c.name));
+  }, [customers, recentNames]);
+  const filteredCartCustomers = useMemo(() => {
+    if (!cartSearch.trim()) return recentCustomers;
+    const normalizedSearch = cartSearch.toLowerCase();
+    return customers.filter(
+      (c) =>
+        (c.name && c.name.toLowerCase().includes(normalizedSearch)) ||
+        (c.phone && String(c.phone).includes(cartSearch)),
+    );
+  }, [cartSearch, customers, recentCustomers]);
+
+  const visibleReceiptItems = useMemo(
+    () =>
+      itemsList
+        .filter(
+          (it) =>
+            it.itemName.toLowerCase().includes(receiptItemSearch.toLowerCase()) &&
+            (it.type === "receipt" || it.receipt),
+        )
+        .slice(0, 3),
+    [itemsList, receiptItemSearch],
+  );
+
+  const handleSelectCustomer = useCallback((cust) => {
+    setSelectedCustomer(cust);
+  }, []);
+
+  const handleSelectReceiptDropdownItem = useCallback((it) => {
+    const buyingValue = it?.buyingTouch;
+    const sellingValue = it?.sellingTouch;
+
+    setSelectedReceiptItem(it.itemName);
+    setReceiptItemDropdownOpen(false);
+    setReceiptItemSearch(it.itemName);
+    setReceiptStone(
+      buyingValue === null || buyingValue === undefined ? "" : String(buyingValue),
+    );
+    setReceiptTouch(
+      sellingValue === null || sellingValue === undefined ? "" : String(sellingValue),
+    );
+  }, []);
+
+  const customerListData = useMemo(() => {
+    if (!cartSearch && recentNames.length > 0) {
+      return recentCustomers.map((cust, index) => ({
+        ...cust,
+        __listKey: `recent-${cust.id || index}`,
+        __highlight: true,
+      }));
+    }
+    return filteredCartCustomers.map((cust, index) => ({
+      ...cust,
+      __listKey: String(cust.id || index),
+      __highlight: false,
+    }));
+  }, [cartSearch, recentNames.length, recentCustomers, filteredCartCustomers]);
 
   const fetchCustomers = async () => {
     try {
@@ -502,7 +638,10 @@ export default function CreateTransaction({ navigation }) {
   const fetchItems = async () => {
     try {
       setLoadingItems(true);
-      const response = await fetch(`${base_url}/items`);
+      const [response, stockResponse] = await Promise.all([
+        fetch(`${base_url}/items`),
+        fetch(`${base_url}/stockMaster`),
+      ]);
 
       if (!response.ok) {
         throw new Error("Failed to fetch items");
@@ -550,39 +689,26 @@ export default function CreateTransaction({ navigation }) {
       console.log("Items list:", itemsList);
       setItemsList(itemsList);
 
-      // Build stock object by fetching from stock master
-      const fetchStock = async () => {
-        try {
-          const response = await fetch(`${base_url}/stockMaster`);
-          if (!response.ok) {
-            throw new Error("Failed to fetch stock");
+      let stockObj = {};
+      if (stockResponse.ok) {
+        const stockData = await stockResponse.json();
+        stockData.forEach((item) => {
+          const name = item.itemName;
+          const weight = Number(item.weight);
+          if (stockObj[name]) {
+            stockObj[name].weight += weight;
+          } else {
+            stockObj[name] = { weight: weight, _id: item._id };
           }
-          const stockData = await response.json();
-          const stockObj = {};
-          stockData.forEach((item) => {
-            const name = item.itemName;
-            const weight = Number(item.weight);
-            if (stockObj[name]) {
-              stockObj[name].weight += weight;
-            } else {
-              stockObj[name] = { weight: weight, _id: item._id };
-            }
-          });
-          setItemsStock(stockObj);
-        } catch (error) {
-          console.error("Error fetching stock:", error);
-          // Fallback to 0 for each item
-          const stockObj = {};
-          itemsList.forEach((item) => {
-            if (item.itemName) {
-              stockObj[item.itemName] = { weight: 0, _id: null };
-            }
-          });
-          setItemsStock(stockObj);
-        }
-      };
-
-      await fetchStock();
+        });
+      } else {
+        itemsList.forEach((item) => {
+          if (item.itemName) {
+            stockObj[item.itemName] = { weight: 0, _id: null };
+          }
+        });
+      }
+      setItemsStock(stockObj);
     } catch (error) {
       console.error("Error fetching items:", error);
       Alert.alert("Error", "Failed to load items");
@@ -1837,92 +1963,33 @@ export default function CreateTransaction({ navigation }) {
               />
             </View>
 
-            <ScrollView style={{ maxHeight: 200 }}>
-              {!cartSearch && recentNames.length > 0 && (
-                <View>
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: "#888",
-                      marginBottom: 10,
-                      marginLeft: 5,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    RECENT TRANSACTIONS
-                  </Text>
-                  {recentCustomers
-                    .map((cust, index) => {
-                      let currentBalance = Number(cust.ob || 0);
-                      let advanceBalance = Number(cust.ab || 0);
-                      if (currentBalance < 0) {
-                        advanceBalance += Math.abs(currentBalance);
-                        currentBalance = 0;
-                      }
-                      return (
-                        <TouchableOpacity
-                          key={`recent-${cust.id || index}`}
-                          onPress={() => setSelectedCustomer(cust)}
-                          style={[
-                            styles.listItem,
-                            { borderLeftWidth: 4, borderLeftColor: "#2E7D32" },
-                          ]}
-                        >
-                          <View>
-                            <Text style={styles.listItemText}>
-                              <Text
-                                style={{ fontWeight: "bold", color: "#000" }}
-                              >
-                                {cust.name}
-                              </Text>{" "}
-                              | P : {cust.phone}
-                            </Text>
-                            <Text style={styles.balanceText}>
-                              OB: {Number(currentBalance || 0).toFixed(3)}g{" "}
-                              {advanceBalance > 0
-                                ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g`
-                                : ""}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                </View>
-              )}
-              {(cartSearch.trim() || recentNames.length === 0) && filteredCartCustomers.length > 0 ? (
-                filteredCartCustomers.map((cust, index) => {
-                  // Calculate balances: if old balance (ob) is negative, convert to advance balance
-                  let currentBalance = Number(cust.ob || 0);
-                  let advanceBalance = Number(cust.ab || 0);
-
-                  if (currentBalance < 0) {
-                    advanceBalance += Math.abs(currentBalance);
-                    currentBalance = 0;
-                  }
-
-                  return (
-                    <TouchableOpacity
-                      key={cust.id || index}
-                      onPress={() => setSelectedCustomer(cust)}
-                      style={styles.listItem}
-                    >
-                      <View>
-                        <Text style={styles.listItemText}>
-                          <Text style={{ fontWeight: "bold", color: "#000" }}>
-                            {cust.name}
-                          </Text>{" "}
-                          | P : {cust.phone}
-                        </Text>
-                        <Text style={styles.balanceText}>
-                          OB: {Number(currentBalance || 0).toFixed(3)}g{" "}
-                          {advanceBalance > 0
-                            ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g`
-                            : ""}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })
+            <ScrollView
+              style={{ maxHeight: 200 }}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+            >
+              {!cartSearch && recentNames.length > 0 ? (
+                <Text
+                  style={{
+                    fontSize: 13,
+                    color: "#888",
+                    marginBottom: 10,
+                    marginLeft: 5,
+                    fontWeight: "bold",
+                  }}
+                >
+                  RECENT TRANSACTIONS
+                </Text>
+              ) : null}
+              {customerListData.length > 0 ? (
+                customerListData.map((item) => (
+                  <CustomerSelectItem
+                    key={item.__listKey}
+                    item={item}
+                    highlight={item.__highlight}
+                    onPress={handleSelectCustomer}
+                  />
+                ))
               ) : cartSearch.trim() ? (
                 <Text style={styles.infoText}>No customers found</Text>
               ) : null}
@@ -2224,55 +2291,17 @@ export default function CreateTransaction({ navigation }) {
             {receiptItemDropdownOpen && !loadingItems && (
               <View style={styles.dropdownFloating}>
                 {itemsList.length > 0 ? (
-                  itemsList
-                    .filter(
-                      (it) =>
-                        // Filter by search input
-                        it.itemName
-                          .toLowerCase()
-                          .includes(receiptItemSearch.toLowerCase()) &&
-                        // Filter by required type
-                        (it.type === "receipt" || it.receipt),
-                    )
-                    .slice(0, 3)
-                    .map((it, idx) => (
-                      <TouchableOpacity
-                        key={idx}
-                        style={[
-                          styles.listItem,
-                          styles.dropdownItemContentReceipt,
-                        ]}
-                        onPress={() => {
-                          const selectedName = it.itemName;
-                          const matchedItem = itemsList.find(
-                            (entry) => entry.itemName === selectedName,
-                          );
-                          const buyingValue = matchedItem?.buyingTouch ?? it.buyingTouch;
-                          const sellingValue = matchedItem?.sellingTouch ?? it.sellingTouch;
-
-                          setSelectedReceiptItem(selectedName);
-                          setReceiptItemDropdownOpen(false);
-                          setReceiptItemSearch(selectedName);
-                          setReceiptStone(
-                            buyingValue === null || buyingValue === undefined
-                              ? ""
-                              : String(buyingValue),
-                          ); // Buying Touch -> Result
-                          setReceiptTouch(
-                            sellingValue === null || sellingValue === undefined
-                              ? ""
-                              : String(sellingValue),
-                          ); // Selling Touch -> Touch
-                        }}
-                      >
-                        <Text style={styles.dropdownItemTextReceipt}>
-                          {it.itemName}
-                        </Text>
-                        <Text style={styles.dropdownItemWeightReceipt}>
-                          Weight: {itemsStock[it.itemName]?.weight || 0} g
-                        </Text>
-                      </TouchableOpacity>
-                    ))
+                  visibleReceiptItems.map((item, index) => (
+                    <DropdownItem
+                      key={`${item.itemName}-${index}`}
+                      item={item}
+                      containerStyle={styles.dropdownItemContentReceipt}
+                      textStyle={styles.dropdownItemTextReceipt}
+                      weightStyle={styles.dropdownItemWeightReceipt}
+                      weightText={`Weight: ${itemsStock[item.itemName]?.weight || 0} g`}
+                      onPress={handleSelectReceiptDropdownItem}
+                    />
+                  ))
                 ) : (
                   <Text style={styles.infoText}>No items in stock master</Text>
                 )}
