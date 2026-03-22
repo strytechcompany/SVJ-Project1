@@ -2,7 +2,7 @@ const Customer = require("../models/Customer");
 
 const getCustomers = async (req, res) => {
     try {
-        const customers = await Customer.find();
+        const customers = await Customer.find().sort({ createdAt: -1 }).lean();
         res.json(customers);
     } catch (err) {
         res.status(500).json({ message: err.message });
