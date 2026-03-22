@@ -85,5 +85,8 @@ const customerSchema = new mongoose.Schema(
 );
 
 customerSchema.index({ customerName: 1, shopName: 1 }, { unique: true });
+customerSchema.index({ phoneNumber: 1 });
+customerSchema.index({ createdAt: -1 });
+customerSchema.index({ lastTransactionDate: -1 });
 
 module.exports = mongoose.model("Customer", customerSchema);
