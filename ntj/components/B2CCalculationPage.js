@@ -57,6 +57,23 @@ const CustomerListItem = memo(({ item, onPress, highlight }) => {
   );
 });
 
+const ItemDropdownRow = memo(({ item, onSelect, onAdd }) => (
+  <View style={styles.dropdownItem}>
+    <TouchableOpacity onPress={() => onSelect(item)} style={styles.dropdownItemMain}>
+      <Text style={styles.dropdownItemName}>{item.itemName}</Text>
+      <Text style={styles.dropdownItemMeta}>
+        Stock: {Number(item.weight || 0).toFixed(3)} g | Touch: {Number(item.touchValue || 0).toFixed(2)}%
+      </Text>
+      {item.finalValue > 0 ? (
+        <Text style={styles.dropdownItemAmount}>Rs {item.finalValue.toFixed(2)}</Text>
+      ) : null}
+    </TouchableOpacity>
+    <TouchableOpacity onPress={() => onAdd(item)} style={styles.dropdownAddBtn}>
+      <Icon name="plus" size={18} color="#fff" />
+    </TouchableOpacity>
+  </View>
+));
+
 export default function CreateTransaction({ navigation, route }) {
   const transactionType = route?.params?.type || "B2C";
   const passedGoldRate = route?.params?.goldRate;
@@ -154,6 +171,37 @@ export default function CreateTransaction({ navigation, route }) {
     return b2cCustomers.filter((c) => recentSet.has(c.customerName));
   }, [b2cCustomers, recentNames]);
 
+  const customerListData = useMemo(() => {
+    const rows = [];
+    if (!cartSearch && recentCustomers.length > 0) {
+      rows.push({
+        __type: "header",
+        __listKey: "recent-header",
+        label: "RECENT TRANSACTIONS",
+      });
+      recentCustomers.forEach((cust, index) => {
+        rows.push({
+          ...cust,
+          __listKey: `recent-${cust.id || index}`,
+          __highlight: true,
+        });
+      });
+      rows.push({
+        __type: "header",
+        __listKey: "all-header",
+        label: "ALL CUSTOMERS",
+      });
+    }
+    filteredCartCustomers.forEach((cust, index) => {
+      rows.push({
+        ...cust,
+        __listKey: `customer-${cust.id || index}`,
+        __highlight: false,
+      });
+    });
+    return rows;
+  }, [cartSearch, recentCustomers, filteredCartCustomers]);
+
   // ---------------- RECEIPT ENTRY STATES ----------------
   const [receiptWeight, setReceiptWeight] = useState("");
   const [receiptTouch, setReceiptTouch] = useState("");
@@ -197,9 +245,11 @@ export default function CreateTransaction({ navigation, route }) {
             setIgst(latestB2C.igst || "");
 
             // âœ… Load saved checkbox states from AsyncStorage
-            const savedSgst = await AsyncStorage.getItem("b2c_sgst_enabled");
-            const savedCgst = await AsyncStorage.getItem("b2c_cgst_enabled");
-            const savedIgst = await AsyncStorage.getItem("b2c_igst_enabled");
+            const [savedSgst, savedCgst, savedIgst] = await Promise.all([
+              AsyncStorage.getItem("b2c_sgst_enabled"),
+              AsyncStorage.getItem("b2c_cgst_enabled"),
+              AsyncStorage.getItem("b2c_igst_enabled"),
+            ]);
 
             setIsSgstEnabled(
               savedSgst !== null
@@ -236,8 +286,7 @@ export default function CreateTransaction({ navigation, route }) {
         }
       };
 
-      fetchLatestGstSettings();
-      fetchNextInvoiceNo();
+      Promise.all([fetchLatestGstSettings(), fetchNextInvoiceNo()]);
     }, [])
   );
 
@@ -560,8 +609,7 @@ export default function CreateTransaction({ navigation, route }) {
       console.error("Failed to refresh next invoice number:", error);
     }
 
-    await fetchB2CCustomers();
-    await fetchRecentNames();
+    await Promise.all([fetchB2CCustomers(), fetchRecentNames()]);
     console.log("Success", "Data refreshed from database");
   };
 
@@ -599,10 +647,33 @@ export default function CreateTransaction({ navigation, route }) {
   // ---------------- LOAD STOCK MASTER ----------------
   useEffect(() => {
     if (showItems) {
-      fetchStockMaster();
-      fetchItemEntryItems();
+      Promise.all([fetchStockMaster(), fetchItemEntryItems()]);
     }
   }, [showItems]);
+
+  const itemDropdownData = useMemo(() => {
+    if (!Array.isArray(filteredItems)) return [];
+    return filteredItems.map((item) => {
+      const entry = itemEntryItems.find((e) => e.stockName === item.itemName);
+      const t = entry ? entry.percentage : parseFloat(item.pure || 0);
+      const r = parseFloat(rate || 0);
+      const wt = parseFloat(weight || 0);
+
+      let finalVal = 0;
+      if (wt > 0 && r > 0) {
+        const w = (wt * t) / 100;
+        const total = (wt + w) * r;
+        const gst = calcGST(total, gstPercentage, gstEnabled);
+        finalVal = total + gst;
+      }
+
+      return {
+        ...item,
+        touchValue: t,
+        finalValue: finalVal,
+      };
+    });
+  }, [filteredItems, itemEntryItems, rate, weight, gstPercentage, gstEnabled]);
 
   // âœ… Fetch Item Entry Items from API
   const fetchItemEntryItems = async () => {
@@ -1743,49 +1814,36 @@ export default function CreateTransaction({ navigation, route }) {
                   </View>
                 ) : (
                   <>
-                    {!cartSearch && recentCustomers.length > 0 && (
-                      <View>
-                        <Text
-                          style={{
-                            fontSize: 13,
-                            color: "#888",
-                            marginBottom: 10,
-                            marginLeft: 5,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          RECENT TRANSACTIONS
-                        </Text>
-                        {recentCustomers.map((cust, index) => (
-                          <CustomerListItem
-                            key={`recent-${cust.id || index}`}
-                            item={cust}
-                            onPress={selectCustomer}
-                            highlight
-                          />
-                        ))}
-                        <Text
-                          style={{
-                            fontSize: 13,
-                            color: "#888",
-                            marginVertical: 10,
-                            marginLeft: 5,
-                            fontWeight: "bold",
-                          }}
-                        >
-                          ALL CUSTOMERS
-                        </Text>
-                      </View>
-                    )}
-                    {filteredCartCustomers.length > 0 ? (
-                      filteredCartCustomers.map((cust, index) => (
-                        <CustomerListItem
-                          key={cust.id || index}
-                          item={cust}
-                          onPress={selectCustomer}
-                          highlight={false}
-                        />
-                      ))
+                    {customerListData.length > 0 ? (
+                      <ScrollView
+                        nestedScrollEnabled
+                        keyboardShouldPersistTaps="handled"
+                      >
+                        {customerListData.map((item) =>
+                          item.__type === "header" ? (
+                            <Text
+                              key={item.__listKey}
+                              style={{
+                                fontSize: 13,
+                                color: "#888",
+                                marginBottom: 10,
+                                marginTop: item.label === "ALL CUSTOMERS" ? 10 : 0,
+                                marginLeft: 5,
+                                fontWeight: "bold",
+                              }}
+                            >
+                              {item.label}
+                            </Text>
+                          ) : (
+                            <CustomerListItem
+                              key={item.__listKey}
+                              item={item}
+                              onPress={selectCustomer}
+                              highlight={item.__highlight}
+                            />
+                          )
+                        )}
+                      </ScrollView>
                     ) : !cartSearch && recentCustomers.length > 0 ? null : (
                       <Text style={styles.infoText}>No customers found</Text>
                     )}
@@ -1900,40 +1958,14 @@ export default function CreateTransaction({ navigation, route }) {
                       keyboardShouldPersistTaps="handled"
                       showsVerticalScrollIndicator
                     >
-                      {filteredItems.map((item, idx) => {
-                        const entry = itemEntryItems.find(e => e.stockName === item.itemName);
-                        const t = entry ? entry.percentage : parseFloat(item.pure || 0);
-                        const r = parseFloat(rate || 0);
-                        const wt = parseFloat(weight || 0);
-
-                        let finalVal = 0;
-                        if (wt > 0 && r > 0) {
-                          const w = (wt * t) / 100;
-                          const total = (wt + w) * r;
-                          const gst = calcGST(total, gstPercentage, gstEnabled);
-                          finalVal = total + gst;
-                        }
-
-                        return (
-                          <View key={item.id || `${item.itemName}-${idx}`} style={styles.dropdownItem}>
-                            <TouchableOpacity onPress={() => selectItem(item)} style={styles.dropdownItemMain}>
-                              <Text style={styles.dropdownItemName}>{item.itemName}</Text>
-                              <Text style={styles.dropdownItemMeta}>
-                                Stock: {Number(item.weight || 0).toFixed(3)} g | Touch: {Number(t || 0).toFixed(2)}%
-                              </Text>
-                              {finalVal > 0 ? (
-                                <Text style={styles.dropdownItemAmount}>Rs {finalVal.toFixed(2)}</Text>
-                              ) : null}
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              onPress={() => handleAddFromDropdown(item)}
-                              style={styles.dropdownAddBtn}
-                            >
-                              <Icon name="plus" size={18} color="#fff" />
-                            </TouchableOpacity>
-                          </View>
-                        );
-                      })}
+                      {itemDropdownData.map((item, idx) => (
+                        <ItemDropdownRow
+                          key={String(item.id || `${item.itemName}-${idx}`)}
+                          item={item}
+                          onSelect={selectItem}
+                          onAdd={handleAddFromDropdown}
+                        />
+                      ))}
                     </ScrollView>
                   </View>
                 )}
