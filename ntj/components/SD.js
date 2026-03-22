@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { memo, useState, useCallback, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -34,6 +34,61 @@ import {
  *
  * Option C: includes product table & summary
  */
+
+const DealerSelectItem = memo(function DealerSelectItem({
+  item,
+  onPress,
+  highlight = false,
+}) {
+  let currentBalance = Number(item.ob || 0);
+  let advanceBalance = Number(item.ab || 0);
+  if (currentBalance < 0) {
+    advanceBalance += Math.abs(currentBalance);
+    currentBalance = 0;
+  }
+
+  return (
+    <TouchableOpacity
+      style={[
+        styles.listItem,
+        highlight && { borderLeftWidth: 4, borderLeftColor: "#2E7D32" },
+      ]}
+      onPress={() => onPress(item)}
+    >
+      <View>
+        <Text style={styles.listItemText}>
+          <Text style={{ fontWeight: "bold", color: "#000" }}>{item.name}</Text>{" "}
+          | P : {item.phone}
+        </Text>
+        <Text style={styles.balanceText}>
+          OB: {Number(currentBalance || 0).toFixed(3)}g{" "}
+          {advanceBalance > 0
+            ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g`
+            : ""}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+const DealerDropdownItem = memo(function DealerDropdownItem({
+  item,
+  onPress,
+  textStyle,
+  weightStyle,
+  containerStyle,
+  weightText,
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.listItem, containerStyle]}
+      onPress={() => onPress(item)}
+    >
+      <Text style={textStyle}>{item.itemName}</Text>
+      <Text style={weightStyle}>{weightText}</Text>
+    </TouchableOpacity>
+  );
+});
 
 export default function CreateTransaction({ navigation }) {
   const route = useRoute();
@@ -99,42 +154,67 @@ export default function CreateTransaction({ navigation }) {
   const [showProofImageInBill, setShowProofImageInBill] = useState(true);
 
   // ── TOTALS (after useState, before useEffect) ───────────────
-  const totalIssuePure = issueItems.reduce(
-    (acc, it) => acc + Number(it.purity || 0),
-    0,
-  );
-  const totalIssueWeight = issueItems.reduce(
-    (acc, it) => acc + Number(it.weight || 0),
-    0,
-  );
-  const totalIssueStone = issueItems.reduce(
-    (acc, it) => acc + Number(it.stone || 0),
-    0,
-  );
-  const totalIssueTouch = issueItems.reduce(
-    (acc, it) => acc + Number(it.touch || 0),
-    0,
-  );
-  const totalReceiptPure = receiptItems.reduce(
-    (acc, it) => acc + Number(it.purity || 0),
-    0,
-  );
-  const totalReceiptWeight = receiptItems.reduce(
-    (acc, it) => acc + Number(it.weight || 0),
-    0,
-  );
-  const totalReceiptStone = receiptItems.reduce(
-    (acc, it) => acc + Number(it.stone || 0),
-    0,
-  );
-  const totalReceiptTouch = receiptItems.reduce(
-    (acc, it) => acc + Number(it.touch || 0),
-    0,
-  );
-  const totalCashPure = cashTable.reduce(
-    (acc, it) => acc + Number(it.pure || 0),
-    0,
-  );
+  const totals = useMemo(() => {
+    const totalIssuePure = issueItems.reduce(
+      (acc, it) => acc + Number(it.purity || 0),
+      0,
+    );
+    const totalIssueWeight = issueItems.reduce(
+      (acc, it) => acc + Number(it.weight || 0),
+      0,
+    );
+    const totalIssueStone = issueItems.reduce(
+      (acc, it) => acc + Number(it.stone || 0),
+      0,
+    );
+    const totalIssueTouch = issueItems.reduce(
+      (acc, it) => acc + Number(it.touch || 0),
+      0,
+    );
+    const totalReceiptPure = receiptItems.reduce(
+      (acc, it) => acc + Number(it.purity || 0),
+      0,
+    );
+    const totalReceiptWeight = receiptItems.reduce(
+      (acc, it) => acc + Number(it.weight || 0),
+      0,
+    );
+    const totalReceiptStone = receiptItems.reduce(
+      (acc, it) => acc + Number(it.stone || 0),
+      0,
+    );
+    const totalReceiptTouch = receiptItems.reduce(
+      (acc, it) => acc + Number(it.touch || 0),
+      0,
+    );
+    const totalCashPure = cashTable.reduce(
+      (acc, it) => acc + Number(it.pure || 0),
+      0,
+    );
+
+    return {
+      totalIssuePure,
+      totalIssueWeight,
+      totalIssueStone,
+      totalIssueTouch,
+      totalReceiptPure,
+      totalReceiptWeight,
+      totalReceiptStone,
+      totalReceiptTouch,
+      totalCashPure,
+    };
+  }, [issueItems, receiptItems, cashTable]);
+  const {
+    totalIssuePure,
+    totalIssueWeight,
+    totalIssueStone,
+    totalIssueTouch,
+    totalReceiptPure,
+    totalReceiptWeight,
+    totalReceiptStone,
+    totalReceiptTouch,
+    totalCashPure,
+  } = totals;
 
   const findItemConfigByName = (itemName) => {
     const normalizedName = String(itemName || "").trim().toLowerCase();
@@ -280,16 +360,62 @@ export default function CreateTransaction({ navigation }) {
     setPreviousReceiptWeight(newWeight);
   };
 
-  const filteredCartCustomers = customers.filter(
-    (c) =>
-      String(c.customerType || "").toUpperCase() === "DEALER" &&
-      (
-        (c.name && c.name.toLowerCase().includes(cartSearch.toLowerCase())) ||
-        (c.phone && String(c.phone).includes(cartSearch))
+  const recentDealerCustomers = useMemo(
+    () =>
+      customers.filter(
+        (c) =>
+          recentNames.includes(c.name) &&
+          String(c.customerType || "").toUpperCase() === "DEALER",
       ),
+    [customers, recentNames],
+  );
+  const filteredCartCustomers = useMemo(
+    () =>
+      customers.filter(
+        (c) =>
+          String(c.customerType || "").toUpperCase() === "DEALER" &&
+          (
+            (c.name && c.name.toLowerCase().includes(cartSearch.toLowerCase())) ||
+            (c.phone && String(c.phone).includes(cartSearch))
+          ),
+      ),
+    [customers, cartSearch],
   );
 
-  const selectDealerFromCard = (cust) => {
+  const visibleReceiptItems = useMemo(
+    () =>
+      itemsList.filter((it) => {
+        const nameMatch = String(it.itemName || "")
+          .toLowerCase()
+          .includes(String(receiptItemSearch).toLowerCase());
+        if (!nameMatch) return false;
+        const isIssueType =
+          it.issue === true || String(it.type || "").toLowerCase() === "issue";
+        const isReceiptType =
+          it.receipt === true || String(it.type || "").toLowerCase() === "receipt";
+        if (isIssueType && isReceiptType) return false;
+        return isIssueType;
+      }),
+    [itemsList, receiptItemSearch],
+  );
+  const visibleIssueItems = useMemo(
+    () =>
+      itemsList.filter((it) => {
+        const nameMatch = String(it.itemName || "")
+          .toLowerCase()
+          .includes(String(issueItemSearch).toLowerCase());
+        if (!nameMatch) return false;
+        const isIssueType =
+          it.issue === true || String(it.type || "").toLowerCase() === "issue";
+        const isReceiptType =
+          it.receipt === true || String(it.type || "").toLowerCase() === "receipt";
+        if (isIssueType && isReceiptType) return false;
+        return isReceiptType;
+      }),
+    [itemsList, issueItemSearch],
+  );
+
+  const handleSelectDealerCard = useCallback((cust) => {
     setSelectedCustomer(cust);
     setProofImage(cust.receiptImage || cust.proofImage || cust.image || "");
     setShowProofImageInBill(
@@ -297,42 +423,44 @@ export default function CreateTransaction({ navigation }) {
         ? cust.receiptImageShowInBill
         : true,
     );
-  };
+  }, []);
 
-  const renderDealerCard = (cust, key, highlight = false) => {
-    let currentBalance = Number(cust.ob || 0);
-    let advanceBalance = Number(cust.ab || 0);
-    if (currentBalance < 0) {
-      advanceBalance += Math.abs(currentBalance);
-      currentBalance = 0;
+  const handleSelectReceiptDropdownItem = useCallback((it) => {
+    const buyingTouchValue = parseNum(it.buyingTouch, 0);
+    setSelectedReceiptItem(it.itemName);
+    setReceiptItemDropdownOpen(false);
+    setReceiptItemSearch(it.itemName);
+    setReceiptStone("0");
+    setReceiptTouch(buyingTouchValue ? buyingTouchValue.toString() : "0");
+  }, []);
+
+  const handleSelectIssueDropdownItem = useCallback((it) => {
+    setSelectedIssueItem(it.itemName);
+    setIssueItemDropdownOpen(false);
+    setIssueItemSearch(it.itemName);
+    setTouch(it.sellingTouch?.toString() || "");
+  }, []);
+
+  const dealerListData = useMemo(() => {
+    const baseRows = filteredCartCustomers.map((cust, index) => ({
+      ...cust,
+      __listKey: `customer-${cust.id || index}`,
+      __highlight: false,
+    }));
+    if (!cartSearch && recentNames.length > 0) {
+      return [
+        { __type: "header", __listKey: "recent-header", label: "RECENT TRANSACTIONS" },
+        ...recentDealerCustomers.map((cust, index) => ({
+          ...cust,
+          __listKey: `recent-${cust.id || index}`,
+          __highlight: true,
+        })),
+        { __type: "header", __listKey: "all-header", label: "ALL CUSTOMERS" },
+        ...baseRows,
+      ];
     }
-
-    return (
-      <TouchableOpacity
-        key={key}
-        style={[
-          styles.listItem,
-          highlight && { borderLeftWidth: 4, borderLeftColor: "#2E7D32" },
-        ]}
-        onPress={() => selectDealerFromCard(cust)}
-      >
-        <View>
-          <Text style={styles.listItemText}>
-            <Text style={{ fontWeight: "bold", color: "#000" }}>
-              {cust.name}
-            </Text>{" "}
-            | P : {cust.phone}
-          </Text>
-          <Text style={styles.balanceText}>
-            OB: {Number(currentBalance || 0).toFixed(3)}g{" "}
-            {advanceBalance > 0
-              ? `| AB: ${Number(advanceBalance || 0).toFixed(3)}g`
-              : ""}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    );
-  };
+    return baseRows;
+  }, [filteredCartCustomers, cartSearch, recentNames.length, recentDealerCustomers]);
 
   const fetchCustomers = async () => {
     try {
@@ -572,7 +700,10 @@ export default function CreateTransaction({ navigation }) {
   const fetchItems = async () => {
     try {
       setLoadingItems(true);
-      const response = await fetch(`${base_url}/items`);
+      const [response, stockResponse] = await Promise.all([
+        fetch(`${base_url}/items`),
+        fetch(`${base_url}/stockMaster`),
+      ]);
 
       if (!response.ok) {
         throw new Error("Failed to fetch items");
@@ -600,39 +731,26 @@ export default function CreateTransaction({ navigation }) {
       console.log("Items list:", itemsList);
       setItemsList(itemsList);
 
-      // Build stock object by fetching from stock master
-      const fetchStock = async () => {
-        try {
-          const response = await fetch(`${base_url}/stockMaster`);
-          if (!response.ok) {
-            throw new Error("Failed to fetch stock");
+      const stockObj = {};
+      if (stockResponse.ok) {
+        const stockData = await stockResponse.json();
+        stockData.forEach((item) => {
+          const name = item.itemName;
+          const weight = Number(item.weight);
+          if (stockObj[name]) {
+            stockObj[name].weight += weight;
+          } else {
+            stockObj[name] = { weight: weight, _id: item._id };
           }
-          const stockData = await response.json();
-          const stockObj = {};
-          stockData.forEach((item) => {
-            const name = item.itemName;
-            const weight = Number(item.weight);
-            if (stockObj[name]) {
-              stockObj[name].weight += weight;
-            } else {
-              stockObj[name] = { weight: weight, _id: item._id };
-            }
-          });
-          setItemsStock(stockObj);
-        } catch (error) {
-          console.error("Error fetching stock:", error);
-          // Fallback to 0 for each item
-          const stockObj = {};
-          data.forEach((item) => {
-            if (item.stockName) {
-              stockObj[item.stockName] = { weight: 0, _id: null };
-            }
-          });
-          setItemsStock(stockObj);
-        }
-      };
-
-      fetchStock();
+        });
+      } else {
+        data.forEach((item) => {
+          if (item.stockName) {
+            stockObj[item.stockName] = { weight: 0, _id: null };
+          }
+        });
+      }
+      setItemsStock(stockObj);
     } catch (error) {
       console.error("Error fetching items:", error);
       Alert.alert("Error", "Failed to load items from stock master");
@@ -1890,45 +2008,35 @@ export default function CreateTransaction({ navigation }) {
               />
             </View>
 
-            <ScrollView style={{ maxHeight: 200 }}>
-              {!cartSearch && recentNames.length > 0 && (
-                <View>
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: "#888",
-                      marginBottom: 10,
-                      marginLeft: 5,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    RECENT TRANSACTIONS
-                  </Text>
-                  {customers
-                    .filter(
-                      (c) =>
-                        recentNames.includes(c.name) &&
-                        String(c.customerType || "").toUpperCase() === "DEALER",
-                    )
-                    .map((cust, index) =>
-                      renderDealerCard(cust, `recent-${cust.id || index}`, true),
-                    )}
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      color: "#888",
-                      marginVertical: 10,
-                      marginLeft: 5,
-                      fontWeight: "bold",
-                    }}
-                  >
-                    ALL CUSTOMERS
-                  </Text>
-                </View>
-              )}
-              {filteredCartCustomers.length > 0 ? (
-                filteredCartCustomers.map((cust, index) =>
-                  renderDealerCard(cust, cust.id || index, false),
+            <ScrollView
+              style={{ maxHeight: 200 }}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+            >
+              {dealerListData.length > 0 ? (
+                dealerListData.map((item) =>
+                  item.__type === "header" ? (
+                    <Text
+                      key={item.__listKey}
+                      style={{
+                        fontSize: 13,
+                        color: "#888",
+                        marginBottom: 10,
+                        marginTop: item.label === "ALL CUSTOMERS" ? 10 : 0,
+                        marginLeft: 5,
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {item.label}
+                    </Text>
+                  ) : (
+                    <DealerSelectItem
+                      key={item.__listKey}
+                      item={item}
+                      onPress={handleSelectDealerCard}
+                      highlight={item.__highlight}
+                    />
+                  ),
                 )
               ) : (
                 <Text style={styles.infoText}>No customers found</Text>
@@ -2014,31 +2122,17 @@ export default function CreateTransaction({ navigation }) {
             {receiptItemDropdownOpen && !loadingItems && (
               <View style={styles.dropdownFloating}>
                 {itemsList.length > 0 ? (
-                  getReverseMappedItems(receiptItemSearch, "receipt")
-                    .map((it, idx) => (
-                      <TouchableOpacity
-                        key={idx}
-                        style={[
-                          styles.listItem,
-                          styles.dropdownItemContentReceipt,
-                        ]}
-                        onPress={() => {
-                          const buyingTouchValue = parseNum(it.buyingTouch, 0);
-                          setSelectedReceiptItem(it.itemName);
-                          setReceiptItemDropdownOpen(false);
-                          setReceiptItemSearch(it.itemName);
-                          setReceiptStone("0");
-                          setReceiptTouch(buyingTouchValue ? buyingTouchValue.toString() : "0");
-                        }}
-                      >
-                        <Text style={styles.dropdownItemTextReceipt}>
-                          {it.itemName}
-                        </Text>
-                        <Text style={styles.dropdownItemWeightReceipt}>
-                          Weight: {itemsStock[it.itemName]?.weight || 0} g
-                        </Text>
-                      </TouchableOpacity>
-                    ))
+                  visibleReceiptItems.map((item, index) => (
+                    <DealerDropdownItem
+                      key={`${item.itemName}-${index}`}
+                      item={item}
+                      onPress={handleSelectReceiptDropdownItem}
+                      containerStyle={styles.dropdownItemContentReceipt}
+                      textStyle={styles.dropdownItemTextReceipt}
+                      weightStyle={styles.dropdownItemWeightReceipt}
+                      weightText={`Weight: ${itemsStock[item.itemName]?.weight || 0} g`}
+                    />
+                  ))
                 ) : (
                   <Text style={styles.infoText}>No items in stock master</Text>
                 )}
@@ -2210,29 +2304,17 @@ export default function CreateTransaction({ navigation }) {
             {issueItemDropdownOpen && !loadingItems && (
               <View style={styles.dropdownFloating}>
                 {itemsList.length > 0 ? (
-                  getReverseMappedItems(issueItemSearch, "issue")
-                    .map((it, idx) => (
-                      <TouchableOpacity
-                        key={idx}
-                        style={[
-                          styles.listItem,
-                          styles.dropdownItemContentIssue,
-                        ]}
-                        onPress={() => {
-                          setSelectedIssueItem(it.itemName);
-                          setIssueItemDropdownOpen(false);
-                          setIssueItemSearch(it.itemName);
-                          setTouch(it.sellingTouch?.toString() || ""); // Auto-fill touch
-                        }}
-                      >
-                        <Text style={styles.dropdownItemTextIssue}>
-                          {it.itemName}
-                        </Text>
-                        <Text style={styles.dropdownItemWeightIssue}>
-                          Weight: {itemsStock[it.itemName]?.weight || 0} g
-                        </Text>
-                      </TouchableOpacity>
-                    ))
+                  visibleIssueItems.map((item, index) => (
+                    <DealerDropdownItem
+                      key={`${item.itemName}-${index}`}
+                      item={item}
+                      onPress={handleSelectIssueDropdownItem}
+                      containerStyle={styles.dropdownItemContentIssue}
+                      textStyle={styles.dropdownItemTextIssue}
+                      weightStyle={styles.dropdownItemWeightIssue}
+                      weightText={`Weight: ${itemsStock[item.itemName]?.weight || 0} g`}
+                    />
+                  ))
                 ) : (
                   <Text style={styles.infoText}>No items in stock master</Text>
                 )}
