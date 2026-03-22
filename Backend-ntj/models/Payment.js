@@ -21,4 +21,9 @@ const paymentSchema = new mongoose.Schema({
   type: { type: String }
 }, { timestamps: true });
 
+paymentSchema.index({ type: 1, createdAt: -1 });
+paymentSchema.index({ selectedDealer: 1, createdAt: -1 });
+paymentSchema.index({ date: -1 });
+paymentSchema.index({ createdAt: -1 });
+
 module.exports = mongoose.model('Payment', paymentSchema);
