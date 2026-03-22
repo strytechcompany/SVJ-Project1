@@ -4,6 +4,7 @@ const Dealer = require('../models/Dealer');
 const BillCounter = require('../models/BillCounter');
 const { getBillSummaryModel, getLegacyBillSummaryModel, normalizeBillType } = require('../models/BillSummary');
 const { resolveImageFields } = require("../utils/imageStorage");
+const { applyOptionalLimit } = require('../utils/queryPerformance');
 
 const toNumber = (value, fallback = 0) => {
     const n = Number(value);
@@ -408,7 +409,7 @@ const createBillSummary = async (req, res) => {
         const BillSummary = getBillSummaryModel(payload.billType);
         const requestedBillNo = pickBillNo(req.body);
         const existingForRequestedNo = requestedBillNo
-            ? await BillSummary.findOne({ billNo: requestedBillNo })
+            ? await BillSummary.findOne({ billNo: requestedBillNo }).lean()
             : null;
 
         const existingMatchesCustomer = existingForRequestedNo &&
@@ -423,12 +424,12 @@ const createBillSummary = async (req, res) => {
                 { new: true, runValidators: true }
             );
 
-            await findCustomerAndUpdateOverview(updatedExisting);
-            try {
-                await syncDealerImageFromBill(updatedExisting);
-            } catch (syncErr) {
-                console.warn("Dealer image sync from bill failed:", syncErr?.message || syncErr);
-            }
+            await Promise.all([
+                findCustomerAndUpdateOverview(updatedExisting),
+                syncDealerImageFromBill(updatedExisting).catch((syncErr) => {
+                    console.warn("Dealer image sync from bill failed:", syncErr?.message || syncErr);
+                }),
+            ]);
 
             return res.status(200).json(serializeBillForClient(updatedExisting));
         }
@@ -442,12 +443,12 @@ const createBillSummary = async (req, res) => {
         payload.invoiceNo = payload.billNo;
         const saved = await BillSummary.create(payload);
 
-        await findCustomerAndUpdateOverview(saved);
-        try {
-            await syncDealerImageFromBill(saved);
-        } catch (syncErr) {
-            console.warn("Dealer image sync from bill failed:", syncErr?.message || syncErr);
-        }
+        await Promise.all([
+            findCustomerAndUpdateOverview(saved),
+            syncDealerImageFromBill(saved).catch((syncErr) => {
+                console.warn("Dealer image sync from bill failed:", syncErr?.message || syncErr);
+            }),
+        ]);
         res.status(201).json(serializeBillForClient(saved));
     } catch (error) {
         res.status(500).json({ message: 'Failed to save bill summary', error: error.message });
@@ -459,7 +460,9 @@ const getBillSummaries = async (req, res) => {
         const billType = normalizeBillType(req.query.billType || req.query.customerType);
         const BillSummary = getBillSummaryModel(billType);
         const query = addDateRangeToQuery({}, req.query);
-        const bills = await BillSummary.find(query).sort({ updatedAt: -1, createdAt: -1 });
+        const billsQuery = BillSummary.find(query).sort({ updatedAt: -1, createdAt: -1 }).lean();
+        applyOptionalLimit(billsQuery, req.query.limit);
+        const bills = await billsQuery;
         res.json((Array.isArray(bills) ? bills : []).map(serializeBillForClient));
     } catch (error) {
         res.status(500).json({ message: 'Failed to fetch bill summaries', error: error.message });
@@ -485,12 +488,16 @@ const getBillsByCustomerId = async (req, res) => {
         }
 
         const query = addDateRangeToQuery({ customerId: { $in: Array.from(idSet) } }, req.query);
-        const bills = await BillSummary.find(query).sort({ updatedAt: -1, createdAt: -1 });
+        const billsQuery = BillSummary.find(query).sort({ updatedAt: -1, createdAt: -1 }).lean();
+        applyOptionalLimit(billsQuery, req.query.limit);
+        const bills = await billsQuery;
         if (bills.length > 0) return res.json((Array.isArray(bills) ? bills : []).map(serializeBillForClient));
 
         const LegacyBillSummary = getLegacyBillSummaryModel();
         const legacyQuery = addDateRangeToQuery({ customerId: { $in: Array.from(idSet) } }, req.query);
-        const legacyBills = await LegacyBillSummary.find(legacyQuery).sort({ updatedAt: -1, createdAt: -1 });
+        const legacyBillsQuery = LegacyBillSummary.find(legacyQuery).sort({ updatedAt: -1, createdAt: -1 }).lean();
+        applyOptionalLimit(legacyBillsQuery, req.query.limit);
+        const legacyBills = await legacyBillsQuery;
         return res.json((Array.isArray(legacyBills) ? legacyBills : []).map(serializeBillForClient));
     } catch (error) {
         res.status(500).json({ message: 'Failed to fetch customer bills', error: error.message });
@@ -501,7 +508,7 @@ const getBillSummaryById = async (req, res) => {
     try {
         const billType = normalizeBillType(req.query.billType || req.query.customerType);
         const BillSummary = getBillSummaryModel(billType);
-        const bill = await BillSummary.findById(req.params.id);
+        const bill = await BillSummary.findById(req.params.id).lean();
         if (!bill) return res.status(404).json({ message: 'Bill not found' });
         res.json(serializeBillForClient(bill));
     } catch (error) {
@@ -546,15 +553,15 @@ const updateBillSummary = async (req, res) => {
             { new: true, runValidators: true }
         );
 
-        await findCustomerAndUpdateOverview({
-            ...updated.toObject(),
-            billType: normalizeBillType(updated.billType || updated.customerType),
-        });
-        try {
-            await syncDealerImageFromBill(updated);
-        } catch (syncErr) {
-            console.warn("Dealer image sync from bill failed:", syncErr?.message || syncErr);
-        }
+        await Promise.all([
+            findCustomerAndUpdateOverview({
+                ...updated.toObject(),
+                billType: normalizeBillType(updated.billType || updated.customerType),
+            }),
+            syncDealerImageFromBill(updated).catch((syncErr) => {
+                console.warn("Dealer image sync from bill failed:", syncErr?.message || syncErr);
+            }),
+        ]);
 
         res.json(serializeBillForClient(updated));
     } catch (error) {
