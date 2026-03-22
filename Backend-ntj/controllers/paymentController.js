@@ -1,9 +1,12 @@
 const Payment = require('../models/Payment');
 const Dealer = require('../models/Dealer');
+const { applyOptionalLimit } = require('../utils/queryPerformance');
 
 const getPayments = async (req, res) => {
     try {
-        const payments = await Payment.find().sort({ createdAt: -1 });
+        const paymentsQuery = Payment.find().sort({ createdAt: -1 }).lean();
+        applyOptionalLimit(paymentsQuery, req.query.limit);
+        const payments = await paymentsQuery;
         res.json(payments);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch payments' });
@@ -29,16 +32,23 @@ const handleDealerTransfer = async (req, res) => {
             type: 'dealerTransfer'
         });
 
-        await dealerTransfer.save();
+        const dealerUpdatePromise = selectedDealer
+            ? Dealer.findOneAndUpdate(
+                { customerName: selectedDealer },
+                {
+                    $inc: {
+                        advanceBalance: -(Number(transferWeight) || 0),
+                        oldBalance: Number(transferWeight) || 0,
+                    },
+                },
+                { new: true }
+            )
+            : Promise.resolve(null);
 
-        if (selectedDealer) {
-            const dealer = await Dealer.findOne({ customerName: selectedDealer });
-            if (dealer) {
-                dealer.advanceBalance = (dealer.advanceBalance || 0) - (transferWeight || 0);
-                dealer.oldBalance = (dealer.oldBalance || 0) + (transferWeight || 0);
-                await dealer.save();
-            }
-        }
+        await Promise.all([
+            dealerTransfer.save(),
+            dealerUpdatePromise,
+        ]);
 
         res.status(201).json({ message: 'Dealer transfer processed successfully', dealerTransfer });
     } catch (error) {
@@ -48,7 +58,9 @@ const handleDealerTransfer = async (req, res) => {
 
 const getDealerTransferHistory = async (req, res) => {
     try {
-        const dealerTransfers = await Payment.find({ type: 'dealerTransfer' }).sort({ createdAt: -1 });
+        const dealerTransfersQuery = Payment.find({ type: 'dealerTransfer' }).sort({ createdAt: -1 }).lean();
+        applyOptionalLimit(dealerTransfersQuery, req.query.limit);
+        const dealerTransfers = await dealerTransfersQuery;
         res.json(dealerTransfers);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch dealer transfer history' });
