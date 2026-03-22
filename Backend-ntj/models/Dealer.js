@@ -83,4 +83,9 @@ const dealerSchema = new mongoose.Schema({
   timestamps: true,
 });
 
+dealerSchema.index({ customerName: 1 });
+dealerSchema.index({ phoneNumber: 1 });
+dealerSchema.index({ createdAt: -1 });
+dealerSchema.index({ lastTransactionDate: -1 });
+
 module.exports = mongoose.model("Dealer", dealerSchema);
