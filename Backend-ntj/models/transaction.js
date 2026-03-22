@@ -22,4 +22,12 @@ const TransactionSchema = new mongoose.Schema({
   isConvertedToGold: { type: Boolean, default: false },
 }, { timestamps: true });
 
+TransactionSchema.index({ customerId: 1, createdAt: -1 });
+TransactionSchema.index({ customerName: 1, createdAt: -1 });
+TransactionSchema.index({ dealerType: 1, createdAt: -1 });
+TransactionSchema.index({ type: 1, createdAt: -1 });
+TransactionSchema.index({ date: -1 });
+TransactionSchema.index({ createdAt: -1 });
+TransactionSchema.index({ updatedAt: -1, createdAt: -1 });
+
 module.exports = mongoose.model("Transaction", TransactionSchema);
