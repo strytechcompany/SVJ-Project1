@@ -1,6 +1,7 @@
 const Transaction = require('../models/transaction.js');
 const Dealer = require('../models/Dealer');
 const { resolveImageFields } = require("../utils/imageStorage");
+const { applyOptionalLimit } = require('../utils/queryPerformance');
 
 const normalize = (v) => String(v || "").trim().toUpperCase();
 const pickImage = (body = {}) =>
@@ -41,7 +42,11 @@ const syncDealerLatestImage = async (body = {}) => {
 // @route   GET /api/transactions
 const getTransactions = async (req, res) => {
     try {
-        const transactions = await Transaction.find().sort({ updatedAt: -1, createdAt: -1 });
+        const transactionsQuery = Transaction.find()
+            .sort({ updatedAt: -1, createdAt: -1 })
+            .lean();
+        applyOptionalLimit(transactionsQuery, req.query.limit);
+        const transactions = await transactionsQuery;
         res.status(200).json(transactions);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -117,7 +122,7 @@ const createTransaction = async (req, res) => {
 // @route   GET /api/transactions/last
 const getLastTransaction = async (req, res) => {
     try {
-        const lastTransaction = await Transaction.findOne().sort({ updatedAt: -1, createdAt: -1 });
+        const lastTransaction = await Transaction.findOne().sort({ updatedAt: -1, createdAt: -1 }).lean();
         if (!lastTransaction) {
             return res.status(404).json({ error: "No transactions found" });
         }
