@@ -95,6 +95,12 @@ const billSummarySchema = new mongoose.Schema(
 
 billSummarySchema.index({ customerId: 1, billNo: 1 }, { unique: true });
 billSummarySchema.index({ createdAt: -1 });
+billSummarySchema.index({ billNo: 1 }, { unique: true });
+billSummarySchema.index({ customerId: 1, createdAt: -1 });
+billSummarySchema.index({ customerName: 1, createdAt: -1 });
+billSummarySchema.index({ billType: 1, createdAt: -1 });
+billSummarySchema.index({ date: -1 });
+billSummarySchema.index({ updatedAt: -1, createdAt: -1 });
 
 const normalizeBillType = (billType) => (String(billType || '').toUpperCase() === 'B2C' ? 'B2C' : 'B2B');
 
