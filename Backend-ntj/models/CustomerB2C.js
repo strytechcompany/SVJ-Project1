@@ -70,4 +70,8 @@ const customerB2CSchema = new mongoose.Schema({
 }, 
 { timestamps: true });
 
+customerB2CSchema.index({ phoneNumber: 1 });
+customerB2CSchema.index({ createdAt: -1 });
+customerB2CSchema.index({ lastTransactionDate: -1 });
+
 module.exports = mongoose.model('CustomerB2C', customerB2CSchema);
