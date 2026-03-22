@@ -60,15 +60,15 @@ const patchB2CBalances = async (req, res) => {
         customer.lastTransactionDate = new Date();
         customer.lastTransactionType = 'B2C';
 
-        const updated = await customer.save();
-
-        // If a billId is provided, also atomically mark the bill as converted
-        if (billId) {
-            const BillModel = getBillSummaryModel('B2C');
-            await BillModel.findByIdAndUpdate(billId, {
-                $set: { isConvertedToGold: true }
-            }).catch(e => console.error("Failed to mark bill as converted:", e.message));
-        }
+        const BillModel = billId ? getBillSummaryModel('B2C') : null;
+        const [updated] = await Promise.all([
+            customer.save(),
+            billId && BillModel
+                ? BillModel.findByIdAndUpdate(billId, {
+                    $set: { isConvertedToGold: true }
+                }).catch(e => console.error("Failed to mark bill as converted:", e.message))
+                : Promise.resolve(null),
+        ]);
 
         res.json(updated);
     } catch (err) {
@@ -88,7 +88,7 @@ const createCustomerB2C = async (req, res) => {
 
 const getCustomersB2C = async (req, res) => {
     try {
-        const customers = await CustomerB2C.find();
+        const customers = await CustomerB2C.find().sort({ createdAt: -1 }).lean();
         res.json(customers);
     } catch (err) {
         res.status(500).json({ message: err.message });
