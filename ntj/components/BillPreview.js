@@ -593,7 +593,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     toNum(customer?.ftRate, 0) ||
     0;
   const nilBaseBalanceValue =
-    rawB2BOldBalance > 0 ? toNum(rawB2BOldBalance, 0) : rawB2BAdvanceBalance > 0 ? toNum(rawB2BAdvanceBalance, 0) : 0;
+    rawB2BOldBalance > 0
+      ? toNum(rawB2BOldBalance, 0)
+      : rawB2BAdvanceBalance > 0
+        ? toNum(rawB2BAdvanceBalance, 0)
+        : rawSummaryFinalValue;
   const computedNilFtValue = rawSummaryFinalValue;
   const computedNilBalanceAmount = nilBaseBalanceValue * currentB2BFtRate;
   const displayNilFtValue =
@@ -609,6 +613,10 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     : isActiveNilFT
       ? `Nil FT : ${toNum(displayNilFtValue, 0).toFixed(3)}`
       : "";
+  const showPreviewNilResult =
+    customer?.type === "B2B" &&
+    !isDealerPreview &&
+    Boolean(previewNilStatusText);
   const nilBalanceButtonText = `Nil Balance : \u20B9 ${formatIndianNumber(Math.round(displayNilBalanceAmount))}`;
   const nilFtButtonValue = shouldZeroB2BFinalBalance ? 0 : toNum(displayNilFtValue, 0);
   const nilFtButtonText = `Nil FT : ${nilFtButtonValue.toFixed(3)}`;
@@ -802,6 +810,18 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             <div class="row"><span class="label">${pastBalanceLabel}</span><span class="value">${pastBalanceValue} g</span></div>
             <div class="row"><span class="label">${presentBalanceLabel}</span><span class="value">${presentBalanceValue} g</span></div>
             <div class="row"><span class="label">Date</span><span class="value">${advanceBill?.dateTime ? new Date(advanceBill.dateTime).toLocaleString("en-IN") : new Date().toLocaleString("en-IN")}</span></div>
+            ${showPreviewNilResult ? `
+              <h2>RESULT:</h2>
+              <table>
+                <tr>
+                  <th>STATUS</th>
+                  <th>VALUE</th>
+                </tr>
+                <tr>
+                  <td colspan="2"><strong>${previewNilStatusText}</strong></td>
+                </tr>
+              </table>
+            ` : ''}
           </body>
         </html>
       `;
@@ -1346,6 +1366,18 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             ` : ''}
 
             ${cashAmount ? `<p><strong>Cash Amount:</strong> â‚¹${cashAmount}</p>` : ''}
+            ${showPreviewNilResult ? `
+              <h2>RESULT:</h2>
+              <table>
+                <tr>
+                  <th>STATUS</th>
+                  <th>VALUE</th>
+                </tr>
+                <tr>
+                  <td colspan="2"><strong>${previewNilStatusText}</strong></td>
+                </tr>
+              </table>
+            ` : ''}
             ${upiAmount && parseFloat(upiAmount) > 0 ? `
               <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
                 <div>
@@ -1630,8 +1662,19 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                </tr>
 	              `}
             </table>
-            ${cashAmount ? `<p><strong>Cash Amount:</strong> â‚¹${cashAmount}</p>` : ''}
-          </body>
+            ${showPreviewNilResult ? `
+              <h2>RESULT:</h2>
+              <table>
+                <tr>
+                  <th>STATUS</th>
+                  <th>VALUE</th>
+                </tr>
+                <tr>
+                  <td colspan="2"><strong>${previewNilStatusText}</strong></td>
+                </tr>
+              </table>
+            ` : ''}
+            ${cashAmount ? `<p><strong>Cash Amount:</strong> â‚¹${cashAmount}</p>` : ''}          </body>
         </html>
     `;
     }
@@ -3649,7 +3692,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                    ) : null}
 	                  </>
 	                )}
-              </View>
+	              </View>
             </View>
           </View>
 
@@ -4545,13 +4588,24 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                       <Text style={styles.dealerSummaryCell}>{dealerSummaryValues.finalBalance}</Text>
                     </View>
 
-	                    <View style={styles.dealerSummaryRow}>
-	                      <Text style={[styles.dealerSummaryCell, { flex: 4 }]}>{dealerSummaryValues.expression}</Text>
-	                      <Text style={styles.dealerSummaryCell}>{`= ${dealerSummaryValues.finalBalance}`}</Text>
+		                    <View style={styles.dealerSummaryRow}>
+		                      <Text style={[styles.dealerSummaryCell, { flex: 4 }]}>{dealerSummaryValues.expression}</Text>
+		                      <Text style={styles.dealerSummaryCell}>{`= ${dealerSummaryValues.finalBalance}`}</Text>
+		                    </View>
+		                  </View>
+	                )}
+	                {showPreviewNilResult ? (
+	                  <View style={styles.nilResultTable}>
+	                    <View style={styles.nilResultHeaderRow}>
+	                      <Text style={[styles.nilResultHeaderCell, { borderRightWidth: 1 }]}>RESULT</Text>
+	                      <Text style={styles.nilResultHeaderCell}>VALUE</Text>
+	                    </View>
+	                    <View style={styles.nilResultValueRow}>
+	                      <Text style={styles.nilResultValueCell}>{previewNilStatusText}</Text>
 	                    </View>
 	                  </View>
-                )}
-              </View>
+	                ) : null}
+	              </View>
             </>
           )}
 
@@ -5349,3 +5403,4 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 });
+
