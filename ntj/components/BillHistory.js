@@ -28,6 +28,10 @@ import {
 } from "./balanceUtils";
 
 const num = (value, fallback = 0) => toBalanceNumber(value, fallback);
+const formatCurrencyValue = (value) =>
+  new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(
+    Math.round(num(value, 0)),
+  );
 const readImageField = (value) => {
   const isInvalidImageToken = (raw) => {
     const token = String(raw || "").trim().toLowerCase();
@@ -1289,9 +1293,57 @@ export default function BillHistory({ navigation, route }) {
   };
 
   // ── RENDER CARD ─────────────────────────────────────────────────────
-  const renderBillItem = ({ item }) => {
-    const snapshot = item?.previewSnapshot || null;
-    const activityDate = item.updatedAt || item.createdAt || null;
+	  const renderBillItem = ({ item }) => {
+	    const snapshot = item?.previewSnapshot || null;
+	    const normalizedBillType = resolveBillTypeFromContext(item, customer);
+	    const isB2BRecord = normalizedBillType === "B2B";
+	    const isNilBalance = Boolean(
+	      item?.isNilBalance ??
+	        snapshot?.summary?.isNilBalance ??
+	        (String(item?.nilMode || snapshot?.summary?.nilMode || "").trim() === "NIL Balance")
+	    );
+	    const isNilFT = Boolean(
+	      item?.isNilFT ??
+	        snapshot?.summary?.isNilFT ??
+	        (String(item?.nilMode || snapshot?.summary?.nilMode || "").trim() === "NIL FT")
+	    );
+	    const nilFtValue = num(
+	      item?.nilFtValue ??
+	        snapshot?.summary?.nilFtValue,
+	      0
+	    );
+	    const previousOldBalance = num(
+	      item?.previousOldBalance ??
+	        snapshot?.summary?.previousOldBalance ??
+	        snapshot?.header?.oldBalance ??
+	        item?.summary?.ob,
+	      0
+	    );
+	    const previousAdvanceBalance = num(
+	      item?.previousAdvanceBalance ??
+	        snapshot?.summary?.previousAdvanceBalance ??
+	        snapshot?.header?.advanceBalance ??
+	        item?.summary?.ab,
+	      0
+	    );
+	    const nilBalanceBasisValue = previousOldBalance > 0 ? previousOldBalance : previousAdvanceBalance;
+	    const ftRateValue = num(
+	      item?.ftRate ??
+	        snapshot?.summary?.ftRate ??
+	        snapshot?.header?.ftRate,
+	      0
+	    );
+	    const nilBalanceAmount = num(
+	      item?.nilBalanceAmount ??
+	        snapshot?.summary?.nilBalanceAmount,
+	      nilBalanceBasisValue * ftRateValue
+	    );
+	    const nilBadgeText = isNilBalance
+	      ? `Nil Balance : \u20B9 ${formatCurrencyValue(nilBalanceAmount)}`
+	      : isNilFT
+	        ? `Nil FT : ${nilFtValue.toFixed(3)}`
+	        : "";
+	    const activityDate = item.updatedAt || item.createdAt || null;
     const activityDateObj = activityDate ? new Date(activityDate) : null;
     const createdDate = snapshot?.header?.date ||
       (activityDateObj ? activityDateObj.toLocaleDateString() : item.date || "N/A");
@@ -1367,18 +1419,18 @@ export default function BillHistory({ navigation, route }) {
             <Text style={styles.receiptPureText}>Total Receipt Pure: {receiptPure.toFixed(3)} g</Text>
           </View>
 
-          <Text style={styles.billDescription}>
-            {item.description ||
-              (item.issueItems?.length > 0
-                ? `${item.issueItems.length} item(s)`
-                : "Transaction details")}
-          </Text>
-          {item.nilMode ? (
-            <View style={styles.nilModeBadge}>
-              <Text style={styles.nilModeBadgeText}>{item.nilMode}</Text>
-            </View>
-          ) : null}
-        </TouchableOpacity>
+	          <Text style={styles.billDescription}>
+	            {item.description ||
+	              (item.issueItems?.length > 0
+	                ? `${item.issueItems.length} item(s)`
+	                : "Transaction details")}
+	          </Text>
+	          {isB2BRecord && nilBadgeText ? (
+	            <View style={styles.nilModeBadge}>
+	              <Text style={styles.nilModeBadgeText}>{nilBadgeText}</Text>
+	            </View>
+	          ) : null}
+	        </TouchableOpacity>
 
         {/* ── Action Buttons ── */}
         <View style={styles.actionRow}>
