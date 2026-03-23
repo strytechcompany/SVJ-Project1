@@ -1035,16 +1035,16 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                 ${parseFloat(gst.igst || 0) > 0 ? `
                   <tr>
                     <td style="text-align: left; padding: 4px; border: 1px solid black;">IGST (${gst.igst}%)</td>
-                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount}</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount}</td>
                   </tr>
                 ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
                   <tr>
                     <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
-                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
                   </tr>
                   <tr>
                     <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
-                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
                   </tr>
                 ` : `
                   <tr>
@@ -1053,12 +1053,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                   </tr>
                   <tr>
                     <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
-                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
                   </tr>
                 `}
                 <tr style="font-weight: bold; background-color: #f2f2f2;">
                   <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
-                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
                 </tr>
               </table>
             ` : ''}
@@ -1322,11 +1322,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                 ` : (parseFloat(gst.sgst || 0) > 0 || parseFloat(gst.cgst || 0) > 0) ? `
                   <tr>
                     <td style="text-align: left; padding: 4px; border: 1px solid black;">SGST (${gst.sgst || 0}%)</td>
-                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
                   </tr>
                   <tr>
                     <td style="text-align: left; padding: 4px; border: 1px solid black;">CGST (${gst.cgst || 0}%)</td>
-                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${(parseFloat(gst.amount || 0) / 2).toFixed(2)}</td>
                   </tr>
                 ` : `
                   <tr>
@@ -1335,12 +1335,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                   </tr>
                   <tr>
                     <td style="text-align: left; padding: 4px; border: 1px solid black;">GST Amount</td>
-                    <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                    <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
                   </tr>
                 `}
                 <tr style="font-weight: bold; background-color: #f2f2f2;">
                   <td style="text-align: left; padding: 4px; border: 1px solid black;">Total GST Amount</td>
-                  <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
+                  <td style="text-align: right; padding: 4px; border: 1px solid black;">₹${gst.amount || '0.00'}</td>
                 </tr>
               </table>
             ` : ''}
@@ -3103,7 +3103,9 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	        const isNilFTSelected = isB2BBill && !isDealerPreview && activeB2BNilMode === "NIL FT";
 	        const shouldResetB2BBalances =
 	          isB2BBill && !isDealerPreview && (isNilBalanceSelected || isNilFTSelected || b2bBalanceResetApplied);
-	        const nilFtValueForSave = isNilFTSelected ? computedNilFtValue : 0;
+	        const nilFtValueForSave = isNilFTSelected
+	          ? (savedNilFtValue > 0 ? savedNilFtValue : computedNilFtValue)
+	          : 0;
 	        const nilBalanceAmountForSave = isNilBalanceSelected ? computedNilBalanceAmount : 0;
         const customerId = getCustomerIdForSave();
 
