@@ -1,5 +1,5 @@
 // screens/SettingsScreen.js
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Modal, Alert } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -9,6 +9,108 @@ import CommonHeader from "./CommonHeader";
 export default function SettingsScreen({ navigation, route }) {
   const user = route?.params?.user || null;
   const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
+  const [restoreVisible, setRestoreVisible] = useState(false);
+  const [backupList, setBackupList] = useState([]);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const BACKUP_KEY = "backup_history_v1";
+  const RESTORE_KEY = "backup_restore_v1";
+
+  const latestBackup = useMemo(
+    () => (Array.isArray(backupList) && backupList.length ? backupList[0] : null),
+    [backupList],
+  );
+
+  const formatBackupStamp = (value) => {
+    const d = value ? new Date(value) : null;
+    if (!d || !Number.isFinite(d.getTime())) return { date: "N/A", time: "N/A" };
+    return {
+      date: d.toLocaleDateString(),
+      time: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+  };
+
+  const loadBackups = async () => {
+    try {
+      const raw = await AsyncStorage.getItem(BACKUP_KEY);
+      if (!raw) {
+        setBackupList([]);
+        return [];
+      }
+      const parsed = JSON.parse(raw);
+      const list = Array.isArray(parsed) ? parsed : [];
+      setBackupList(list);
+      return list;
+    } catch (error) {
+      console.error("Backup load error:", error);
+      setBackupList([]);
+      return [];
+    }
+  };
+
+  const createDailyBackup = async () => {
+    setBackupLoading(true);
+    try {
+      const [b2bRes, b2cRes, dealerRes, billRes, txnRes] = await Promise.all([
+        fetch(`${base_url}/customers`),
+        fetch(`${base_url}/customersB2C`),
+        fetch(`${base_url}/customersDealer`),
+        fetch(`${base_url}/billSummary`),
+        fetch(`${base_url}/transactions`),
+      ]);
+      const [b2b, b2c, dealers, bills, txns] = await Promise.all([
+        b2bRes.ok ? b2bRes.json() : [],
+        b2cRes.ok ? b2cRes.json() : [],
+        dealerRes.ok ? dealerRes.json() : [],
+        billRes.ok ? billRes.json() : [],
+        txnRes.ok ? txnRes.json() : [],
+      ]);
+      const backup = {
+        id: `backup-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        customers: {
+          b2b,
+          b2c,
+          dealers,
+        },
+        bills,
+        transactions: txns,
+      };
+      const existing = await loadBackups();
+      const updated = [backup, ...(existing || [])].slice(0, 30);
+      await AsyncStorage.setItem(BACKUP_KEY, JSON.stringify(updated));
+      setBackupList(updated);
+    } catch (error) {
+      console.error("Backup create error:", error);
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const ensureDailyBackup = async () => {
+    const list = await loadBackups();
+    const latest = Array.isArray(list) && list.length ? list[0] : null;
+    const latestDate = latest?.timestamp
+      ? new Date(latest.timestamp).toISOString().slice(0, 10)
+      : "";
+    const today = new Date().toISOString().slice(0, 10);
+    if (!latest || latestDate !== today) {
+      await createDailyBackup();
+    }
+  };
+
+  const handleRestore = async (backup) => {
+    try {
+      await AsyncStorage.setItem(RESTORE_KEY, JSON.stringify(backup));
+      Alert.alert("Restore", "Backup restored successfully.");
+      setRestoreVisible(false);
+    } catch (error) {
+      Alert.alert("Error", "Failed to restore backup.");
+    }
+  };
+
+  useEffect(() => {
+    ensureDailyBackup();
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -88,6 +190,26 @@ export default function SettingsScreen({ navigation, route }) {
           <Text style={styles.itemText}>View Admin Notifications</Text>
         </TouchableOpacity>
 
+        {/* Backup & Restore */}
+        <Text style={styles.sectionTitle}>Backup & Restore</Text>
+        {latestBackup ? (
+          <View style={[styles.item, { elevation: 1 }]}>
+            <Icon name="cloud-check-outline" size={24} color="#1B4D1B" />
+            <View style={{ marginLeft: 15 }}>
+              <Text style={styles.itemText}>Restore Available</Text>
+              <Text style={{ color: "#666", fontSize: 12 }}>
+                Last backup: {formatBackupStamp(latestBackup.timestamp).date}{" "}
+                {formatBackupStamp(latestBackup.timestamp).time}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        <TouchableOpacity style={styles.item} onPress={() => setRestoreVisible(true)}>
+          <Icon name="backup-restore" size={24} color="#1B4D1B" />
+          <Text style={styles.itemText}>{backupLoading ? "Preparing backups..." : "Restore"}</Text>
+        </TouchableOpacity>
+
         {/* Security */}
         <Text style={styles.sectionTitle}>Security</Text>
 
@@ -123,6 +245,47 @@ export default function SettingsScreen({ navigation, route }) {
         </TouchableOpacity>
 
       </ScrollView>
+
+      {/* Restore Modal */}
+      <Modal visible={restoreVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Icon name="backup-restore" size={44} color="#1B4D1B" />
+            <Text style={styles.modalTitle}>Available Backups</Text>
+            <ScrollView style={{ maxHeight: 260, width: "100%" }}>
+              {backupList.length === 0 ? (
+                <Text style={styles.modalText}>No backups available.</Text>
+              ) : (
+                backupList.map((b) => {
+                  const stamp = formatBackupStamp(b.timestamp);
+                  const summary = [
+                    `Customers: ${(b?.customers?.b2b?.length || 0) + (b?.customers?.b2c?.length || 0) + (b?.customers?.dealers?.length || 0)}`,
+                    `Bills: ${b?.bills?.length || 0}`,
+                    `Txns: ${b?.transactions?.length || 0}`,
+                  ].join(" | ");
+                  return (
+                    <TouchableOpacity
+                      key={b.id}
+                      style={[styles.item, { marginBottom: 8 }]}
+                      onPress={() => handleRestore(b)}
+                    >
+                      <Icon name="calendar-clock" size={22} color="#1B4D1B" />
+                      <View style={{ marginLeft: 12, flex: 1 }}>
+                        <Text style={styles.itemText}>{stamp.date} {stamp.time}</Text>
+                        <Text style={{ color: "#666", fontSize: 12 }}>{summary}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setRestoreVisible(false)}>
+              <Text style={styles.cancelBtnText}>CLOSE</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Delete Confirmation Modal */}
       <Modal visible={confirmDeleteVisible} transparent animationType="fade">
