@@ -32,6 +32,20 @@ const formatCurrencyValue = (value) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(
     Math.round(num(value, 0)),
   );
+const appendOthersSuffix = (name, ...sources) => {
+  const baseName = String(name || "").trim();
+  if (!baseName || baseName.includes("(Others)")) return baseName || "";
+  const hasOthersFlag = sources.some((src) => {
+    if (!src) return false;
+    const shop = String(
+      src?.shopName || src?.companyName || src?.company || src?.customer?.shopName || ""
+    )
+      .trim()
+      .toLowerCase();
+    return shop === "others";
+  });
+  return hasOthersFlag ? `${baseName} (Others)` : baseName;
+};
 const readImageField = (value) => {
   const isInvalidImageToken = (raw) => {
     const token = String(raw || "").trim().toLowerCase();
@@ -1322,6 +1336,10 @@ export default function BillHistory({ navigation, route }) {
 	        snapshot?.summary?.isNilFT ??
 	        (String(item?.nilMode || snapshot?.summary?.nilMode || "").trim() === "NIL FT")
 	    );
+	    const isNilIssue = Boolean(
+	      item?.isNilIssue ??
+	        snapshot?.summary?.isNilIssue
+	    );
 	    const nilFtValue = num(
 	      item?.nilFtValue ??
 	        snapshot?.summary?.nilFtValue,
@@ -1353,11 +1371,36 @@ export default function BillHistory({ navigation, route }) {
 	        snapshot?.summary?.nilBalanceAmount,
 	      nilBalanceBasisValue * ftRateValue
 	    );
-	    const nilBadgeText = isNilBalance
-	      ? `Nil Balance : \u20B9 ${formatCurrencyValue(nilBalanceAmount)}`
-	      : isNilFT
-	        ? `Nil FT : ${nilFtValue.toFixed(3)}`
-	        : "";
+	    const nilIssueAmount = num(
+	      item?.nilIssueAmount ??
+	        snapshot?.summary?.nilIssueAmount,
+	      0
+	    );
+	    const storedNilResultType = String(
+	      item?.nilResultType ??
+	        snapshot?.summary?.nilResultType ??
+	        ""
+	    ).trim();
+	    const storedNilResultValue = num(
+	      item?.nilResultValue ??
+	        snapshot?.summary?.nilResultValue,
+	      NaN
+	    );
+	    const nilBadgeText = storedNilResultType && Number.isFinite(storedNilResultValue)
+	      ? (storedNilResultType === "NIL FT"
+	          ? `NIL FT : ${storedNilResultValue.toFixed(3)}`
+	          : storedNilResultType === "NIL Issue"
+	            ? `NIL Issue : \u20B9 ${formatCurrencyValue(storedNilResultValue)}`
+	            : storedNilResultType === "NIL Balance"
+	              ? `Nil Balance : \u20B9 ${formatCurrencyValue(storedNilResultValue)}`
+	              : "")
+	      : isNilIssue
+	        ? `NIL Issue : \u20B9 ${formatCurrencyValue(nilIssueAmount)}`
+	        : isNilBalance
+	          ? `Nil Balance : \u20B9 ${formatCurrencyValue(nilBalanceAmount)}`
+	          : isNilFT
+	            ? `NIL FT : ${nilFtValue.toFixed(3)}`
+	            : "";
 	    const activityDate = item.updatedAt || item.createdAt || null;
     const activityDateObj = activityDate ? new Date(activityDate) : null;
     const createdDate = snapshot?.header?.date ||
@@ -1376,7 +1419,8 @@ export default function BillHistory({ navigation, route }) {
     const isLatest = Boolean(latestEditableBillId && itemId && latestEditableBillId === itemId);
     const balanceDisplay = getBalanceDisplay(item, isLatest);
     const isSharing = sharingBillId === item._id;
-    const displayCustomerName = snapshot?.header?.customerName || item.customerName || customer?.customerName || customer?.name || "N/A";
+    const displayCustomerNameRaw = snapshot?.header?.customerName || item.customerName || customer?.customerName || customer?.name || "N/A";
+    const displayCustomerName = appendOthersSuffix(displayCustomerNameRaw, item, snapshot?.header, customer);
     const displayPhone = snapshot?.header?.phoneNumber || item.phoneNumber || item.phone || customer?.phoneNumber || customer?.phone || "N/A";
     const displayGstin = snapshot?.header?.gstin || item.gstin || customer?.gstin || "N/A";
     const displayTotalAmount = getSavedTotalAmount(item);
