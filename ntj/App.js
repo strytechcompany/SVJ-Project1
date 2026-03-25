@@ -60,6 +60,7 @@ import UPIControl from "./components/UPIControl.js";
 
 import GSTPage from "./components/GSTPage.js";
 import CustomerGstPage from "./components/customerGstPage.js";
+import GSTBillPreview from "./components/GSTBillPreview.js";
 import ThirukkuralSettings from "./components/ThirukkuralSettings.js";
 import ReminderSettings from "./components/ReminderSettings.js";
 import AdminNotifications from "./components/AdminNotifications.js";
@@ -209,6 +210,7 @@ export default function App() {
 
         <Stack.Screen name="GSTPage" component={GSTPage} />
         <Stack.Screen name="CustomerGstPage" component={CustomerGstPage} />
+        <Stack.Screen name="GSTBillPreview" component={GSTBillPreview} />
 
         <Stack.Screen name="ReportScreen" component={ReportScreen} />
         <Stack.Screen name="Estimate" component={EstimateScreen} />
