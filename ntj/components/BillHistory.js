@@ -782,6 +782,8 @@ export default function BillHistory({ navigation, route }) {
     if (snapshot) {
       navigation.navigate("BillPreview", {
         fromHistory: true,
+        savedBillId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
+        billId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
         description: freshBill?.description || bill?.description || "",
         customer: {
           name: snapshot?.header?.customerName || freshBill.customerName || customer?.customerName || "Unknown",
@@ -819,6 +821,8 @@ export default function BillHistory({ navigation, route }) {
     if (isB2B && !["DEALER", "SUPPLIER"].includes(isDealerLike) && (Number.isFinite(prevOB) || Number.isFinite(savedFinal))) {
       navigation.navigate("BillPreview", {
         fromHistory: true,
+        savedBillId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
+        billId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
         description: freshBill?.description || "",
         customer: {
           name: freshBill.customerName || customer?.customerName || "Unknown",
@@ -871,6 +875,8 @@ export default function BillHistory({ navigation, route }) {
     }
     navigation.navigate("BillPreview", {
       fromHistory: true,
+      savedBillId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
+      billId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
       description: freshBill?.description || "",
       customer: {
         name: freshBill.customerName || customer?.customerName || "Unknown",
@@ -1015,6 +1021,9 @@ export default function BillHistory({ navigation, route }) {
       "";
     if (snapshot) {
       navigation.navigate("BillPreview", {
+        fromHistory: true,
+        savedBillId: bill?._id || bill?.id || "",
+        billId: bill?._id || bill?.id || "",
         description: bill?.description || "",
         customer: {
           name: snapshot?.header?.customerName || bill.customerName || customer?.customerName || "Unknown",
@@ -1065,6 +1074,9 @@ export default function BillHistory({ navigation, route }) {
     }
     if (isB2B && !["DEALER", "SUPPLIER"].includes(isDealerLike) && (Number.isFinite(prevOB) || Number.isFinite(savedFinal))) {
       navigation.navigate("BillPreview", {
+        fromHistory: true,
+        savedBillId: bill?._id || bill?.id || "",
+        billId: bill?._id || bill?.id || "",
         description: bill?.description || "",
         customer: {
           name: bill.customerName || customer?.customerName || "Unknown",
@@ -1117,6 +1129,9 @@ export default function BillHistory({ navigation, route }) {
       return;
     }
     navigation.navigate("BillPreview", {
+      fromHistory: true,
+      savedBillId: bill?._id || bill?.id || "",
+      billId: bill?._id || bill?.id || "",
       description: bill?.description || "",
       customer: {
         name: bill.customerName || customer?.customerName || "Unknown",
