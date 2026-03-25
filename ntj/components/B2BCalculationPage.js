@@ -123,6 +123,7 @@ export default function CreateTransaction({ navigation }) {
   const [isIgstEnabled, setIsIgstEnabled] = useState(false);
   const [savedGstList, setSavedGstList] = useState([]);
   const [showSavedGstModal, setShowSavedGstModal] = useState(false);
+  const [latestB2BGstRecord, setLatestB2BGstRecord] = useState(null);
 
   const [itemsList, setItemsList] = useState([]);
   const [loadingItems, setLoadingItems] = useState(true);
@@ -293,6 +294,7 @@ export default function CreateTransaction({ navigation }) {
 
       const nextSgst = String(latestB2B.sgst ?? "0");
       const nextCgst = String(latestB2B.cgst ?? "0");
+      setLatestB2BGstRecord(latestB2B);
 
       setSgst(nextSgst);
       setCgst(nextCgst);
@@ -1641,6 +1643,123 @@ export default function CreateTransaction({ navigation }) {
     return txns;
   };
 
+  const syncCustomerToGstPage = async (generatedBillNo = "") => {
+    if (!gstEnabled || !selectedCustomer) {
+      return;
+    }
+
+    const gstWeightValue = Math.max(0, netBillPure);
+    const gstRateFromCashTable = [...cashTable]
+      .reverse()
+      .map((item) => Number(item?.goldRate) || 0)
+      .find((value) => value > 0);
+    const gstRateValue = gstRateFromCashTable || ftRateValue;
+    const gstTaxableValue = gstWeightValue * gstRateValue;
+    const gstCgstValue = (gstTaxableValue * cgstPercentValue) / 100;
+    const gstSgstValue = (gstTaxableValue * sgstPercentValue) / 100;
+    const gstRowTotalValue = gstTaxableValue + gstCgstValue + gstSgstValue;
+
+    const primaryRow = {
+      sno: "1",
+      particular: "New Gold Ornaments",
+      hsnCode: String(
+        latestB2BGstRecord?.hsnCode ||
+        latestB2BGstRecord?.hsn ||
+        "",
+      ).trim(),
+      weight: gstWeightValue.toFixed(3),
+      rate: gstRateValue.toFixed(2),
+      taxableValue: gstTaxableValue.toFixed(2),
+      cgst: gstCgstValue.toFixed(2),
+      sgst: gstSgstValue.toFixed(2),
+      total: gstRowTotalValue.toFixed(2),
+    };
+
+    const payload = {
+      customerName: String(selectedCustomer.name || "").trim(),
+      phoneNumber: String(
+        selectedCustomer.phone ||
+        selectedCustomer.customerNumber ||
+        selectedCustomer.phoneNumber ||
+        "",
+      ).trim(),
+      address: String(selectedCustomer.address || "").trim(),
+      gstin: String(selectedCustomer.gst || selectedCustomer.gstin || "").trim(),
+      date: String(date || "").trim(),
+      invoiceNo: String(generatedBillNo || "").trim(),
+      totalInvoiceValue: gstRowTotalValue.toFixed(2),
+      billRows: [
+        primaryRow,
+        { sno: "2", particular: "", hsnCode: "", weight: "", rate: "", taxableValue: "", cgst: "", sgst: "", total: "" },
+        { sno: "3", particular: "", hsnCode: "", weight: "", rate: "", taxableValue: "", cgst: "", sgst: "", total: "" },
+      ],
+      bankDetails: {
+        accountName: "",
+        accountNo: "",
+        ifsc: "",
+        branch: "",
+      },
+    };
+
+    if (!payload.customerName || !payload.phoneNumber || !payload.address) {
+      return;
+    }
+
+    try {
+      const listResponse = await fetch(`${base_url}/gstCustomers`);
+      if (!listResponse.ok) {
+        throw new Error("Failed to load GST customers");
+      }
+
+      const existingCustomers = await listResponse.json();
+      const matchedCustomer = Array.isArray(existingCustomers)
+        ? existingCustomers.find((item) => {
+          const samePhone =
+            String(item?.phoneNumber || "").trim() === payload.phoneNumber;
+          const sameName =
+            String(item?.customerName || "").trim().toLowerCase() ===
+            payload.customerName.toLowerCase();
+          return samePhone || sameName;
+        })
+        : null;
+
+      if (matchedCustomer) {
+        const preservedRows =
+          Array.isArray(matchedCustomer.billRows) && matchedCustomer.billRows.length > 1
+            ? matchedCustomer.billRows.slice(1, 3)
+            : payload.billRows.slice(1);
+        const preservedTotal = preservedRows.reduce(
+          (sum, row) => sum + (Number(row?.total) || 0),
+          0,
+        );
+
+        payload.billRows = [
+          primaryRow,
+          ...preservedRows,
+        ];
+        payload.bankDetails = matchedCustomer.bankDetails || payload.bankDetails;
+        payload.totalInvoiceValue = (gstRowTotalValue + preservedTotal).toFixed(2);
+      }
+
+      const saveUrl = matchedCustomer?._id
+        ? `${base_url}/gstCustomers/${matchedCustomer._id}`
+        : `${base_url}/gstCustomers`;
+      const saveMethod = matchedCustomer?._id ? "PUT" : "POST";
+
+      const saveResponse = await fetch(saveUrl, {
+        method: saveMethod,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!saveResponse.ok) {
+        throw new Error("Failed to save GST customer");
+      }
+    } catch (gstCustomerError) {
+      console.warn("GST customer sync failed:", gstCustomerError);
+    }
+  };
+
   const saveCompleteTransaction = async () => {
     console.log("💾 saveCompleteTransaction called");
 
@@ -1816,7 +1935,9 @@ export default function CreateTransaction({ navigation }) {
 
       console.log("✅ Entire bill saved successfully");
 
-      navigation.navigate("BillPreview", {
+      await syncCustomerToGstPage(generatedBillNo);
+
+      const commonPreviewPayload = {
         description: String(description || "").trim(),
         customer: {
           name: selectedCustomer.name,
@@ -1873,17 +1994,19 @@ export default function CreateTransaction({ navigation }) {
             cgst: "0",
             igst: "0"
           },
-        summary: {
-          ob: fmt(customerOldBalance),
-          issue: fmt(totalIssuePure),
-          gstPure: fmt(gstPureValue),
-          receipt: fmt(totalReceiptPure),
-          cash: fmt(totalCashPure),
+	        summary: {
+	          ob: fmt(customerOldBalance),
+	          issue: fmt(totalIssuePure),
+	          gstPure: fmt(gstPureValue),
+	          receipt: fmt(totalReceiptPure),
+	          cash: fmt(totalCashPure),
           current: fmt(newNet),
           obPlusIssue: fmt(customerOldBalance + totalIssuePure + gstPureValue),
           receiptPlusCash: fmt(totalReceiptPure + totalCashPure),
         },
-      });
+      };
+
+      navigation.navigate("BillPreview", commonPreviewPayload);
     } catch (error) {
       console.error("❌ Error saving transaction:", error);
       Alert.alert("Error", `Failed to save transaction: ${error.message}`);
@@ -2007,15 +2130,15 @@ export default function CreateTransaction({ navigation }) {
                 <Icon name="account-circle" size={24} />
                 <Text style={styles.sectionTitle}>Customer Info</Text>
               </View>
-              <TouchableOpacity
-                style={styles.changeButton}
-                onPress={() => {
-                  setSelectedCustomer(null);
-                  setSearch("");
-                  setPhone("");
-                  setCartSearch("");
-                }}
-              >
+	              <TouchableOpacity
+	                style={styles.changeButton}
+	                onPress={() => {
+	                  setSelectedCustomer(null);
+	                  setSearch("");
+	                  setPhone("");
+	                  setCartSearch("");
+	                }}
+	              >
                 <Icon name="account-switch" size={20} color="#1E88E5" />
                 <Text style={styles.changeButtonText}>Change</Text>
               </TouchableOpacity>
@@ -2063,7 +2186,7 @@ export default function CreateTransaction({ navigation }) {
                     </View>
                   )}
                 </View>
-                <Text style={styles.cartText}>{totalIssuePure.toFixed(3)}g</Text>
+	                <Text style={styles.cartText}>{totalIssuePure.toFixed(3)}g</Text>
                 <Text style={styles.cartText}>
                   {"\u20B9"}<Text style={{ fontWeight: "bold" }}>{issueFtAmount.toFixed(2)}</Text> 
                   {/* <Text style={{ fontSize: 12 }}>( {totalIssuePure.toFixed(3)} x {ftRateValue.toFixed(2)})</Text> */}
@@ -2604,16 +2727,38 @@ export default function CreateTransaction({ navigation }) {
               <View style={{ marginTop: 8 }}>
                 <View style={styles.row}>
                   <View style={styles.inputBox}>
-                    <Text style={styles.subLabel}>SGST ({sgstPercentValue.toFixed(2)}%)</Text>
-                    <View style={styles.purityBox}>
-                      <Text style={styles.purityText}>{"\u20B9"}{sgstAmountValue.toFixed(2)}</Text>
-                    </View>
+                    <Text style={styles.subLabel}>SGST (%)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={sgst}
+                      onChangeText={(val) => {
+                        setSgst(val);
+                        setIsSgstEnabled((Number(val) || 0) > 0);
+                      }}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor="#9E9E9E"
+                    />
+                    <Text style={[styles.infoText, { marginTop: 6 }]}>
+                      Amount: {"\u20B9"}{sgstAmountValue.toFixed(2)}
+                    </Text>
                   </View>
                   <View style={styles.inputBox}>
-                    <Text style={styles.subLabel}>CGST ({cgstPercentValue.toFixed(2)}%)</Text>
-                    <View style={styles.purityBox}>
-                      <Text style={styles.purityText}>{"\u20B9"}{cgstAmountValue.toFixed(2)}</Text>
-                    </View>
+                    <Text style={styles.subLabel}>CGST (%)</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={cgst}
+                      onChangeText={(val) => {
+                        setCgst(val);
+                        setIsCgstEnabled((Number(val) || 0) > 0);
+                      }}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor="#9E9E9E"
+                    />
+                    <Text style={[styles.infoText, { marginTop: 6 }]}>
+                      Amount: {"\u20B9"}{cgstAmountValue.toFixed(2)}
+                    </Text>
                   </View>
                 </View>
                 <Text style={[styles.subLabel, { marginTop: 12 }]}>Total GST</Text>
@@ -2735,7 +2880,7 @@ export default function CreateTransaction({ navigation }) {
                   <Text style={styles.summaryCell}>
                     {fmt(totalIssueWeight)}
                   </Text>
-                  <Text style={styles.summaryCell}>{fmt(totalIssuePure)}</Text>
+	                  <Text style={styles.summaryCell}>{fmt(totalIssuePure)}</Text>
                   {gstEnabled && (
                     <Text style={styles.summaryCell}>{fmt(gstPureValue)}</Text>
                   )}
@@ -2749,9 +2894,9 @@ export default function CreateTransaction({ navigation }) {
                 </View>
               </View>
             </ScrollView>
-            <TouchableOpacity
-              style={styles.addBtn2}
-              onPress={saveCompleteTransaction}
+	            <TouchableOpacity
+	              style={styles.addBtn2}
+	              onPress={saveCompleteTransaction}
             >
               <Text style={styles.addBtnText2}>Save Transaction</Text>
             </TouchableOpacity>
