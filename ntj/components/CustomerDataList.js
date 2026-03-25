@@ -195,6 +195,21 @@ const extractCustomerDisplayName = (row = {}) =>
   getSafeCustomerName(row?.dealer?.customer_name) ||
   "Unknown";
 
+const getDisplayNameWithOthers = (row = {}) => {
+  const baseName = extractCustomerDisplayName(row);
+  if (!baseName) return baseName;
+  if (baseName.includes("(Others)")) return baseName;
+  const shop = String(
+    row?.shopName || row?.companyName || row?.company || row?.customer?.shopName || ""
+  )
+    .trim()
+    .toLowerCase();
+  const hasActivity =
+    Boolean(row?.lastBillNo || row?.lastBillDate) ||
+    Number(row?.__latestVisibleActivityTs || 0) > 0;
+  return shop === "others" && hasActivity ? `${baseName} (Others)` : baseName;
+};
+
 const CustomerCard = memo(({
     item,
     handleViewBill,
@@ -212,7 +227,7 @@ const CustomerCard = memo(({
   const advanceBalance = Number(item.advanceBalance || 0);
   const updatedAt = item.__latestVisibleActivityTs || item.updatedAt;
 
-  const getBalanceInfo = () => {
+  const balanceInfo = useMemo(() => {
     if (advanceBalance > 0) return { color: "#2E7D32", blinking: false }; // Green for Advance
     if (oldBalance > 0) {
       if (!updatedAt) return { color: "#000", blinking: false };
@@ -228,9 +243,9 @@ const CustomerCard = memo(({
       if (diffDays >= 5) return { color: "#F44336", blinking: true }; // Red + Blinking (5th day+)
     }
     return { color: "#000", blinking: false };
-  };
+  }, [advanceBalance, oldBalance, updatedAt]);
 
-  const { color: valueColor, blinking } = getBalanceInfo();
+  const { color: valueColor, blinking } = balanceInfo;
 
   useEffect(() => {
     let animation;
@@ -261,12 +276,7 @@ const CustomerCard = memo(({
 
   const customerId = item.customerId || item.id;
   const phoneNumber = item.customerNumber || item.phone || "";
-  const imageUri = normalizeImageUri(getRowImageRaw(item));
-
-  // 🔍 Debug: show imageUri for dealer card
-  if (isDealerCard) {
-    console.log(`📷 CustomerCard "${extractCustomerDisplayName(item)}" imageUri length: ${imageUri?.length || 0}`);
-  }
+  const imageUri = useMemo(() => normalizeImageUri(getRowImageRaw(item)), [item]);
 
   if (isDealerCard) {
     return (
@@ -277,7 +287,7 @@ const CustomerCard = memo(({
             onPress={() => handleViewBill(item)}
           >
             <View style={styles.customerDataCardHeader}>
-              <Text style={styles.customerDataName}>{extractCustomerDisplayName(item)}</Text>
+              <Text style={styles.customerDataName}>{getDisplayNameWithOthers(item)}</Text>
               <View style={styles.customerDataIconRow}>
                 <TouchableOpacity onPress={() => handlePhonePress(phoneNumber)}>
                   <Icon name="phone" size={22} color="#000000" />
@@ -386,7 +396,7 @@ const CustomerCard = memo(({
           )}
 
           <Text style={[styles.name, isOverdue && styles.overdueName]}>
-            {extractCustomerDisplayName(item)}
+            {getDisplayNameWithOthers(item)}
           </Text>
 
           <View style={styles.iconRow}>
@@ -842,8 +852,8 @@ export default function CustomerMasterList({ navigation, route }) {
         customerType: "B2B",
         customerNumber: customer.phoneNumber,
         shopName: customer.shopName || customer.companyName || "No Shop Name",
-        oldBalance: customer.oldBalance || "0.000",
-        advanceBalance: customer.advanceBalance || "0.000",
+        oldBalance: Number.isFinite(Number(customer.oldBalance)) ? customer.oldBalance : "0.000",
+        advanceBalance: Number.isFinite(Number(customer.advanceBalance)) ? customer.advanceBalance : "0.000",
         billCurrentBalance: customer.billCurrentBalance || "0.000",
         updatedAt: customer.updatedAt || new Date().toISOString(),
       }));
@@ -1007,7 +1017,7 @@ export default function CustomerMasterList({ navigation, route }) {
   const filteredData = useMemo(() => {
       const lowered = search.toLowerCase();
       const filtered = visibleCustomers.filter((item) => {
-      const custName = extractCustomerDisplayName(item).toLowerCase();
+      const custName = getDisplayNameWithOthers(item).toLowerCase();
       const matchesSearch = custName.includes(lowered);
       const normalizedType = String(item.customerType || "").toUpperCase();
 
