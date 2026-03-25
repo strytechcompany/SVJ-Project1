@@ -151,6 +151,12 @@ export default function BillPreview({ route, navigation }) {
       routeParams?.previewSnapshot?.summary?.nilBalanceAmount ??
       0
   ) || 0;
+  const initialIsNilIssue = Boolean(
+    routeParams.isNilIssue ??
+      routeParams?.transactions?.[0]?.isNilIssue ??
+      routeParams?.previewSnapshot?.summary?.isNilIssue ??
+      false
+  );
   const isFromHistory = Boolean(route.params?.fromHistory);
 const toNum = (value, fallback = 0) => toBalanceNumber(value, fallback);
 
@@ -264,6 +270,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     if (initialIsNilFT) return "NIL FT";
     return initialNilMode;
   });
+  const [isNilIssueSelected, setIsNilIssueSelected] = useState(initialIsNilIssue);
   const [savedNilFtValue, setSavedNilFtValue] = useState(initialNilFtValue);
   const [savedNilBalanceAmount, setSavedNilBalanceAmount] = useState(initialNilBalanceAmount);
   const [b2bBalanceResetApplied, setB2bBalanceResetApplied] = useState(
@@ -327,6 +334,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     } else {
       setB2bNilMode(initialNilMode);
     }
+    setIsNilIssueSelected(initialIsNilIssue);
     setSavedNilFtValue(initialNilFtValue);
     setSavedNilBalanceAmount(initialNilBalanceAmount);
     setB2bBalanceResetApplied(Boolean(initialIsNilBalance || initialIsNilFT));
@@ -334,7 +342,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       oldBalance: Boolean(initialIsNilBalance || initialIsNilFT) ? 0 : null,
       advanceBalance: Boolean(initialIsNilBalance || initialIsNilFT) ? 0 : null,
     });
-  }, [initialIsNilBalance, initialIsNilFT, initialNilFtValue, initialNilBalanceAmount, initialNilMode]);
+  }, [initialIsNilBalance, initialIsNilFT, initialIsNilIssue, initialNilFtValue, initialNilBalanceAmount, initialNilMode]);
 
   useFocusEffect(
     useCallback(() => {
@@ -455,7 +463,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const summaryReceiptRaw = toNum(summary?.receipt, 0);
   const summaryCashRaw = toNum(summary?.cash, 0);
   const summaryGstPureRaw = toNum(summary?.gstPure, 0);
-  const summaryIssue = Math.abs(summaryIssueRaw) < 0.0001 && Math.abs(issueFromRows) > 0.0001 ? issueFromRows : summaryIssueRaw;
+  const shouldZeroNilIssue =
+    customer?.type === "B2B" &&
+    !isDealerPreview &&
+    Boolean(isNilIssueSelected);
+  const summaryIssueComputed = Math.abs(summaryIssueRaw) < 0.0001 && Math.abs(issueFromRows) > 0.0001 ? issueFromRows : summaryIssueRaw;
+  const summaryIssue = shouldZeroNilIssue ? 0 : summaryIssueComputed;
   const summaryReceipt = Math.abs(summaryReceiptRaw) < 0.0001 && Math.abs(receiptFromRows) > 0.0001 ? receiptFromRows : summaryReceiptRaw;
   const summaryCash = Math.abs(summaryCashRaw) < 0.0001 && Math.abs(cashFromRows) > 0.0001 ? cashFromRows : summaryCashRaw;
   const summaryGstPure = summaryGstPureRaw;
@@ -620,6 +633,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const nilBalanceButtonText = `Nil Balance : \u20B9 ${formatIndianNumber(Math.round(displayNilBalanceAmount))}`;
   const nilFtButtonValue = shouldZeroB2BFinalBalance ? 0 : toNum(displayNilFtValue, 0);
   const nilFtButtonText = `Nil FT : ${nilFtButtonValue.toFixed(3)}`;
+  const nilIssueBasePure = toNum(summaryIssueComputed, 0);
+  const nilIssueFtAmount = nilIssueBasePure * currentB2BFtRate;
+  const nilIssueButtonText = isNilIssueSelected
+    ? `NIL Issue : \u20B9 ${formatIndianNumber(Math.round(nilIssueFtAmount))}`
+    : "NIL Issue";
+  const displayedIssuePureText = toNum(displaySummary.issue, 0).toFixed(3);
   const b2cRateFallback =
     toNum(safeCashTable?.[0]?.goldRate, 0) ||
     toNum(safeReceiptItems?.[0]?.rate, 0) ||
@@ -1398,19 +1417,23 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     `;
     } else {
       return `
-    <html>
-          <head>
-            <style>
-              @page { margin: 0; }
-              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 10px; }
-              h1 { text-align: center; font-size: 16px; margin-bottom: 5px; }
-              h2 { margin-top: 8px; font-size: 11px; margin-bottom: 5px; }
-              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
-              th, td { border: 1px solid black; padding: 2px 1px; text-align: center; font-size: 8px; word-wrap: break-word; overflow: hidden; }
-              th { background-color: #f2f2f2; }
-              p { margin: 2px 0; font-size: 9px; }
-            </style>
-          </head>
+	    <html>
+	          <head>
+	            <style>
+	              @page { margin: 0; }
+	              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 11px; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+	              h1 { text-align: center; font-size: 17px; margin-bottom: 6px; color: #000; }
+	              h2 { margin-top: 9px; font-size: 12px; margin-bottom: 5px; color: #000; }
+	              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+	              th, td { border: 1px solid #000; padding: 3px 2px; text-align: center; font-size: 9px; color: #000; vertical-align: middle; word-break: break-word; overflow-wrap: anywhere; }
+	              th { background-color: #ececec; font-weight: 700; }
+	              p { margin: 2px 0; font-size: 10px; color: #000; }
+	              .total-row td { font-weight: 700; background-color: #f3f3f3; }
+	              .summary-table td, .summary-table th { font-size: 8.5px; }
+	              .summary-balance { font-weight: 800; }
+	              .summary-expression { text-align: center; font-size: 8px; line-height: 1.25; white-space: normal; }
+	            </style>
+	          </head>
           <body>
             <h1>BILL</h1>
             <div>
@@ -1450,15 +1473,15 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                     <td>${row.pure}</td>
                   </tr>
                 `).join('') : '<tr><td colspan="5">No receipt items</td></tr>'}
-                ${receiptItems && receiptItems.length > 0 ? `
-                <tr class="total-row">
-                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
-                  <td>TW: ${totalReceiptTW}</td>
-                  <td>N.W: ${totalReceiptNW}</td>
-                  <td>-</td>
-                  <td><Strong>Pure: ${totalReceiptPure}</Strong></td>
-                </tr>` : ''}
-              </table>
+	                ${receiptItems && receiptItems.length > 0 ? `
+	                <tr class="total-row">
+	                  <td style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
+	                  <td><strong>TW: ${totalReceiptTW}</strong></td>
+	                  <td><strong>N.W: ${totalReceiptNW}</strong></td>
+	                  <td>-</td>
+	                  <td><strong>Pure: ${totalReceiptPure}</strong></td>
+	                </tr>` : ''}
+	              </table>
             <h2>ISSUE:</h2>
             <table>
               <tr>
@@ -1478,15 +1501,15 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                     <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
                     <td><strong>${row.pure}</strong></td>
                   </tr>
-                `).join('')}
-                <tr class="total-row">
-                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
-                  <td>TW: ${totalIssueTW}</td>
-                  ${showIssueMColumn ? '<td>-</td>' : ''}
-                  ${showIssueNetWeightColumn ? `<td>N.W: ${totalIssueNW}</td>` : ''}
-                  <td>-</td>
-                  <td><strong>Pure: ${totalIssuePure}</strong></td>
-                </tr>
+	                `).join('')}
+	                <tr class="total-row">
+	                  <td style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
+	                  <td><strong>TW: ${totalIssueTW}</strong></td>
+	                  ${showIssueMColumn ? '<td>-</td>' : ''}
+	                  ${showIssueNetWeightColumn ? `<td><strong>N.W: ${totalIssueNW}</strong></td>` : ''}
+	                  <td>-</td>
+	                  <td><strong>Pure: ${displayedIssuePureText}</strong></td>
+	                </tr>
               </table>
             ` : `
             <h2>ISSUE:</h2>
@@ -1508,15 +1531,15 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                     <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
                     <td><strong>${row.pure}</strong></td>
                   </tr>
-                `).join('')}
-                <tr class="total-row">
-                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
-                  <td>TW: ${totalIssueTW}</td>
-                  ${showIssueMColumn ? '<td>-</td>' : ''}
-                  ${showIssueNetWeightColumn ? `<td>N.W: ${totalIssueNW}</td>` : ''}
-                  <td>-</td>
-                  <td><strong>Pure: ${totalIssuePure}</strong></td>
-                </tr>
+	                `).join('')}
+	                <tr class="total-row">
+	                  <td style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
+	                  <td><strong>TW: ${totalIssueTW}</strong></td>
+	                  ${showIssueMColumn ? '<td>-</td>' : ''}
+	                  ${showIssueNetWeightColumn ? `<td><strong>N.W: ${totalIssueNW}</strong></td>` : ''}
+	                  <td>-</td>
+	                  <td><strong>Pure: ${displayedIssuePureText}</strong></td>
+	                </tr>
               </table>
             <h2>RECEIPT:</h2>
             <table>
@@ -1536,34 +1559,38 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                     <td>${row.pure}</td>
                   </tr>
                 `).join('') : '<tr><td colspan="5">No receipt items</td></tr>'}
-                ${receiptItems && receiptItems.length > 0 ? `
-                <tr class="total-row">
-                  <td style="text-align: right; padding-right: 5px;">Totals:</td>
-                  <td>TW: ${totalReceiptTW}</td>
-                  <td>N.W: ${totalReceiptNW}</td>
-                  <td>-</td>
-                  <td><Strong>Pure: ${totalReceiptPure}</Strong></td>
-                </tr>` : ''}
-              </table>
-            `}
-            <h2>CASH:</h2>
-            ${cashTable && cashTable.length > 0 ? `
+	                ${receiptItems && receiptItems.length > 0 ? `
+	                <tr class="total-row">
+	                  <td style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
+	                  <td><strong>TW: ${totalReceiptTW}</strong></td>
+	                  <td><strong>N.W: ${totalReceiptNW}</strong></td>
+	                  <td>-</td>
+	                  <td><strong>Pure: ${totalReceiptPure}</strong></td>
+	                </tr>` : ''}
+	              </table>
+	            `}
+	            <h2>CASH:</h2>
+	            ${cashTable && cashTable.length > 0 ? `
               <table>
                 <tr>
                   <th>Amount</th>
                   <th>Rate</th>
                   <th style="text-align:right;">Pure</th>
                 </tr>
-                ${cashTable.map(c => `
-                  <tr>
-                    <td>${c.rupees}</td>
-                    <td>${c.goldRate}</td>
-                    <td style="text-align:right;">${c.pure}</td>
-                  </tr>
-                `).join('')}
-              </table>
-            ` : '<p>N/A</p>'}
-            ${gst && (gst.enabled || (parseFloat(gst.amount) > 0)) ? `
+	                ${cashTable.map(c => `
+	                  <tr>
+	                    <td>${c.rupees}</td>
+	                    <td>${c.goldRate}</td>
+	                    <td style="text-align:right;">${c.pure}</td>
+	                  </tr>
+	                `).join('')}
+	                <tr class="total-row">
+	                  <td colspan="2" style="text-align: right; padding-right: 5px;"><strong>Total Cash Pure:</strong></td>
+	                  <td style="text-align:right;"><strong>${safeCashTable.reduce((sum, c) => sum + toNum(c?.pure, 0), 0).toFixed(3)}</strong></td>
+	                </tr>
+	              </table>
+	            ` : '<p>N/A</p>'}
+            ${false && gst && (gst.enabled || (parseFloat(gst.amount) > 0)) ? `
               <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
               <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
                 ${parseFloat(gst.igst || 0) > 0 ? `
@@ -1595,31 +1622,31 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                   <td style="text-align: right; padding: 4px; border: 1px solid black;">â‚¹${gst.amount || '0.00'}</td>
                 </tr>
               </table>
-            ` : ''}
-
-            <h2>SUMMARY:</h2>
-            <table>
-	              ${isDealerPreview ? `
-	                <tr>
-	                  <th>${dealerSummaryValues.activeLabel}</th>
+	            ` : ''}
+	
+	            <h2>SUMMARY:</h2>
+	            <table class="summary-table">
+		              ${isDealerPreview ? `
+		                <tr>
+		                  <th>${dealerSummaryValues.activeLabel}</th>
 	                  <th>RECEIPT</th>
 	                  <th>ISSUE</th>
 	                  <th>CASH</th>
 	                  <th>${dealerSummaryValues.finalLabel}</th>
 	                </tr>
-	                <tr>
-	                  <td>${dealerSummaryValues.oldBalance}</td>
-	                  <td>${dealerSummaryValues.receipt}</td>
-                  <td>${dealerSummaryValues.issue}</td>
-                  <td>${dealerSummaryValues.cash}</td>
-                  <td>${dealerSummaryValues.finalBalance}</td>
-	                </tr>
-	                <tr>
-	                  <td colspan="4">${dealerSummaryValues.expression}</td>
-	                  <td><strong>= ${dealerSummaryValues.finalBalance}</strong></td>
-	                </tr>
-	              ` : summaryOB !== 0 ? `
-	                <!-- OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | Old Balance -->
+		                <tr>
+		                  <td>${dealerSummaryValues.oldBalance}</td>
+		                  <td>${dealerSummaryValues.receipt}</td>
+	                  <td>${dealerSummaryValues.issue}</td>
+	                  <td>${dealerSummaryValues.cash}</td>
+	                  <td class="summary-balance">${dealerSummaryValues.finalBalance}</td>
+		                </tr>
+		                <tr class="total-row">
+		                  <td colspan="4" class="summary-expression">${dealerSummaryValues.expression}</td>
+		                  <td class="summary-balance">= ${dealerSummaryValues.finalBalance}</td>
+		                </tr>
+		              ` : summaryOB !== 0 ? `
+		                <!-- OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | Old Balance -->
 	                <tr>
 	                  <th>Old Balance</th>
 	                  <th>ISSUE</th>
@@ -1627,20 +1654,19 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                  <th>CASH</th>
 	                  <th>Old Balance</th>
 	                </tr>
-	                <tr>
-	                  <td>${summaryOB.toFixed(3)}</td>
-	                  <td>${displaySummary.issue}</td>
-	                  <td>${displaySummary.receipt}</td>
-	                  <td>${displaySummary.cash}</td>
-		                  <td>${summaryFinalValue.toFixed(3)}</td>
-	                </tr>
-	                <tr>
-	                  <td colspan="4">${summaryOB.toFixed(3)} + ${displaySummary.issue} - (${displaySummary.receipt} + ${displaySummary.cash})</td>
-	                  <td>=</td>
-		                  <td><strong>${summaryFinalValue.toFixed(3)}</strong></td>
-	                </tr>
-	              ` : `
-	                <!-- AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | Advance Balance -->
+		                <tr>
+		                  <td>${summaryOB.toFixed(3)}</td>
+		                  <td>${displaySummary.issue}</td>
+		                  <td>${displaySummary.receipt}</td>
+		                  <td>${displaySummary.cash}</td>
+			                  <td class="summary-balance">${summaryFinalValue.toFixed(3)}</td>
+		                </tr>
+		                <tr class="total-row">
+		                  <td colspan="4" class="summary-expression">${summaryOB.toFixed(3)} + ${displaySummary.issue} - (${displaySummary.receipt} + ${displaySummary.cash})</td>
+			                  <td class="summary-balance">= ${summaryFinalValue.toFixed(3)}</td>
+		                </tr>
+		              ` : `
+		                <!-- AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | Advance Balance -->
 	                <tr>
 	                  <th>ISSUE</th>
 	                  <th>Advance Balance</th>
@@ -1648,20 +1674,19 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                  <th>CASH</th>
 	                  <th>${b2bAdvanceSummaryValues.finalLabel}</th>
 	                </tr>
-	                <tr>
-	                  <td>${displaySummary.issue}</td>
-	                  <td>${summaryAB.toFixed(3)}</td>
-	                  <td>${displaySummary.receipt}</td>
-	                  <td>${displaySummary.cash}</td>
-	                  <td>${summaryFinalValue.toFixed(3)}</td>
-	                </tr>
-	                <tr>
-	                  <td colspan="4" style="text-align: right; padding-right: 10px;">${summaryAB.toFixed(3)} + ${displaySummary.receipt} + ${displaySummary.cash} - ${displaySummary.issue}</td>
-	                  <td>=</td>
-	                  <td><strong>${summaryFinalValue.toFixed(3)}</strong></td>
-	                </tr>
-	              `}
-            </table>
+		                <tr>
+		                  <td>${displaySummary.issue}</td>
+		                  <td>${summaryAB.toFixed(3)}</td>
+		                  <td>${displaySummary.receipt}</td>
+		                  <td>${displaySummary.cash}</td>
+		                  <td class="summary-balance">${summaryFinalValue.toFixed(3)}</td>
+		                </tr>
+		                <tr class="total-row">
+		                  <td colspan="4" class="summary-expression">${summaryAB.toFixed(3)} + ${displaySummary.receipt} + ${displaySummary.cash} - ${displaySummary.issue}</td>
+		                  <td class="summary-balance">= ${summaryFinalValue.toFixed(3)}</td>
+		                </tr>
+		              `}
+	            </table>
             ${showPreviewNilResult ? `
               <h2>RESULT:</h2>
               <table>
@@ -2259,7 +2284,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       <td>TW: ${totalIssueTW}</td>
       ${showIssueMColumn ? '<td>-</td>' : ''}
       ${showIssueNetWeightColumn ? `<td>NW: ${totalIssueNW}</td>` : ''}
-      <td>-</td><td>Pure: ${totalIssuePure}</td>
+      <td>-</td><td>Pure: ${displayedIssuePureText}</td>
     </tr></tfoot>
   </table>
   ` : `
@@ -2278,7 +2303,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       <td>TW: ${totalIssueTW}</td>
       ${showIssueMColumn ? '<td>-</td>' : ''}
       ${showIssueNetWeightColumn ? `<td>NW: ${totalIssueNW}</td>` : ''}
-      <td>-</td><td>Pure: ${totalIssuePure}</td>
+      <td>-</td><td>Pure: ${displayedIssuePureText}</td>
     </tr></tfoot>
   </table>
 
@@ -3144,6 +3169,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
           : "";
 	        const isNilBalanceSelected = isB2BBill && !isDealerPreview && activeB2BNilMode === "NIL Balance";
 	        const isNilFTSelected = isB2BBill && !isDealerPreview && activeB2BNilMode === "NIL FT";
+	        const isNilIssueForSave = isB2BBill && !isDealerPreview && isNilIssueSelected;
 	        const shouldResetB2BBalances =
 	          isB2BBill && !isDealerPreview && (isNilBalanceSelected || isNilFTSelected || b2bBalanceResetApplied);
 	        const nilFtValueForSave = isNilFTSelected
@@ -3203,7 +3229,9 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       }));
       const issueRowsToSave = isB2BBill ? safeIssueItems : b2cIssueRows;
       const receiptRowsToSave = isB2BBill ? safeReceiptItems : b2cReceiptRows;
-      const displayedIssue = toNum(displaySummary?.issue, toNum(summary?.issue, toNum(totalIssuePure, 0)));
+      const displayedIssue = isNilIssueForSave
+        ? 0
+        : toNum(displaySummary?.issue, toNum(summary?.issue, toNum(totalIssuePure, 0)));
       const displayedReceipt = toNum(displaySummary?.receipt, toNum(summary?.receipt, toNum(totalReceiptPure, 0)));
       const displayedCash = toNum(displaySummary?.cash, toNum(summary?.cash, 0));
       const displayedGstPure = toNum(displaySummary?.gstPure, toNum(summary?.gstPure, 0));
@@ -3270,13 +3298,14 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         customerRecordType,
         Number(displayedIssue).toFixed(3),
         Number(displayedReceipt).toFixed(3),
-        Number(displayedCash).toFixed(3),
-        Number(finalBalanceValue).toFixed(3),
-        finalBalanceTypeCode,
-        activeB2BNilMode,
-        Number(nilFtValueForSave).toFixed(3),
-        Number(nilBalanceAmountForSave).toFixed(2),
-      ].join("|");
+	        Number(displayedCash).toFixed(3),
+	        Number(finalBalanceValue).toFixed(3),
+	        finalBalanceTypeCode,
+	        activeB2BNilMode,
+	        isNilIssueForSave ? "nil-issue" : "",
+	        Number(nilFtValueForSave).toFixed(3),
+	        Number(nilBalanceAmountForSave).toFixed(2),
+	      ].join("|");
       if (!force && lastSavedSignatureRef.current === saveSignature && savedBillIdRef.current) {
         return { _id: savedBillIdRef.current, skipped: true };
       }
@@ -3290,11 +3319,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         gstPure: displayedGstPure,
         current: finalNetBalanceForSave,
         description: billDescription,
-        nilMode: activeB2BNilMode,
-        isNilBalance: isNilBalanceSelected,
-        isNilFT: isNilFTSelected,
-        nilFtValue: nilFtValueForSave,
-        nilBalanceAmount: nilBalanceAmountForSave,
+	        nilMode: activeB2BNilMode,
+	        isNilBalance: isNilBalanceSelected,
+	        isNilFT: isNilFTSelected,
+	        isNilIssue: isNilIssueForSave,
+	        nilFtValue: nilFtValueForSave,
+	        nilBalanceAmount: nilBalanceAmountForSave,
         ftRate: currentB2BFtRate,
         balanceType: finalBalanceTypeCode,
         balanceValue: finalBalanceValue,
@@ -3328,25 +3358,26 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
           address: customer?.address || "",
           gstin: customer?.gstin || customer?.gst || "",
           description: billDescription,
-          nilMode: activeB2BNilMode,
-          isNilBalance: isNilBalanceSelected,
-          isNilFT: isNilFTSelected,
-          nilFtValue: nilFtValueForSave,
-          nilBalanceAmount: nilBalanceAmountForSave,
+	          nilMode: activeB2BNilMode,
+	          isNilBalance: isNilBalanceSelected,
+	          isNilFT: isNilFTSelected,
+	          isNilIssue: isNilIssueForSave,
+	          nilFtValue: nilFtValueForSave,
+	          nilBalanceAmount: nilBalanceAmountForSave,
           ftRate: currentB2BFtRate,
           oldBalance: previousOldBalance,
           advanceBalance: previousAdvanceBalance,
           startLabel: summaryStartLabel,
           finalLabel: summaryFinalLabel,
         },
-        issue: {
-          items: issueRowsToSave,
-          totals: {
-            tw: totalIssueTW,
-            nw: totalIssueNW,
-            pure: totalIssuePure,
-          },
-        },
+	        issue: {
+	          items: issueRowsToSave,
+	          totals: {
+	            tw: totalIssueTW,
+	            nw: totalIssueNW,
+	            pure: toNum(displayedIssue, 0).toFixed(3),
+	          },
+	        },
         receipt: {
           items: receiptRowsToSave,
           totals: {
@@ -3373,11 +3404,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
           previousAdvanceBalance,
           finalBalance,
           finalLabel: finalBalanceTypeCode === "AB" ? "Advance Balance" : "Old Balance",
-          nilMode: activeB2BNilMode,
-          isNilBalance: isNilBalanceSelected,
-          isNilFT: isNilFTSelected,
-          nilFtValue: nilFtValueForSave,
-          nilBalanceAmount: nilBalanceAmountForSave,
+	          nilMode: activeB2BNilMode,
+	          isNilBalance: isNilBalanceSelected,
+	          isNilFT: isNilFTSelected,
+	          isNilIssue: isNilIssueForSave,
+	          nilFtValue: nilFtValueForSave,
+	          nilBalanceAmount: nilBalanceAmountForSave,
           ftRate: currentB2BFtRate,
           balanceType,
           balanceValue: finalBalanceValue,
@@ -3407,10 +3439,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         address: customer?.address || "",
         gstin: customer?.gstin || customer?.gst || "",
         description: billDescription,
-        nilMode: activeB2BNilMode,
-        isNilBalance: isNilBalanceSelected,
-        isNilFT: isNilFTSelected,
-        nilFtValue: nilFtValueForSave,
+	        nilMode: activeB2BNilMode,
+	        isNilBalance: isNilBalanceSelected,
+	        isNilFT: isNilFTSelected,
+	        isNilIssue: isNilIssueForSave,
+	        nilFtValue: nilFtValueForSave,
         nilBalanceAmount: nilBalanceAmountForSave,
         ftRate: currentB2BFtRate,
         ...(allowBillNoForSave ? { billNo: String(billNo) } : {}),
@@ -4380,7 +4413,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                       {showIssueNetWeightColumn && (
                         <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalIssueNW}</Text>
                       )}
-                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalIssuePure}</Text>
+	                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {displayedIssuePureText}</Text>
                     </View>
                   </View>
                 </>
@@ -4416,7 +4449,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                       {showIssueNetWeightColumn && (
                         <Text style={[styles.totalCell, { fontSize: 13, flex: 1, left: 0 }]}>N.W: {totalIssueNW}</Text>
                       )}
-                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {totalIssuePure}</Text>
+	                      <Text style={[styles.totalCell, { fontSize: 13, flex: 1.5, textAlign: 'right', left: 0 }]}>Pure: {displayedIssuePureText}</Text>
                     </View>
                   </View>
 
@@ -4486,7 +4519,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
               </View>
 
               {/* GST */}
-              {gst && gst.enabled && gst.showInBill !== false && (gst.igst > 0 || gst.cgst > 0 || gst.sgst > 0) && (
+              {false && gst && gst.enabled && gst.showInBill !== false && (gst.igst > 0 || gst.cgst > 0 || gst.sgst > 0) && (
                 <View style={styles.cashBox}>
                   <Text style={styles.sectionTitle}>GST BREAKDOWN :</Text>
 
@@ -4622,17 +4655,26 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                >
 	                  <Text style={styles.transferBtnText}>{nilBalanceButtonText}</Text>
 	                </TouchableOpacity>
-	                <TouchableOpacity
-	                  style={[
-	                    styles.transferBtnB2B,
-	                    { backgroundColor: activeNilMode === "NIL FT" ? "#EF6C00" : "#2be916ff" },
-	                  ]}
-	                  onPress={() => handleSelectB2BNilMode("NIL FT")}
-	                >
-	                  <Text style={styles.transferBtnText}>{nilFtButtonText}</Text>
-	                </TouchableOpacity>
-	              </>
-            ) : null}
+		                <TouchableOpacity
+		                  style={[
+		                    styles.transferBtnB2B,
+		                    { backgroundColor: activeNilMode === "NIL FT" ? "#EF6C00" : "#2be916ff" },
+		                  ]}
+		                  onPress={() => handleSelectB2BNilMode("NIL FT")}
+		                >
+		                  <Text style={styles.transferBtnText}>{nilFtButtonText}</Text>
+		                </TouchableOpacity>
+		                <TouchableOpacity
+		                  style={[
+		                    styles.transferBtnB2B,
+		                    { backgroundColor: isNilIssueSelected ? "#1565C0" : "#2be916ff" },
+		                  ]}
+		                  onPress={() => setIsNilIssueSelected((prev) => !prev)}
+		                >
+		                  <Text style={styles.transferBtnText}>{nilIssueButtonText}</Text>
+		                </TouchableOpacity>
+		              </>
+	            ) : null}
             {customer?.type === "B2B" ? (
               <TouchableOpacity
                 style={styles.transferBtnB2B}
