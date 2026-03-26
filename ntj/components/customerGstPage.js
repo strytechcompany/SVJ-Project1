@@ -33,6 +33,15 @@ const toNum = (value, fallback = 0) => {
 };
 
 const formatMoney = (value) => toNum(value, 0).toFixed(2);
+const hasValue = (value) => String(value ?? "").trim() !== "";
+const formatDecimal = (value, digits) =>
+  Number.isFinite(value) ? value.toFixed(digits) : "";
+const isZeroLike = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text) return false;
+  const num = Number(text);
+  return Number.isFinite(num) && num === 0;
+};
 
 const normalizeRow = (row = {}, snoFallback) => ({
   sno: String(row.sno || snoFallback || ""),
@@ -48,7 +57,6 @@ const normalizeRow = (row = {}, snoFallback) => ({
 
 const hasRowData = (row = {}) =>
   [
-    row.sno,
     row.particular,
     row.hsnCode,
     row.hsn,
@@ -76,6 +84,164 @@ const normalizeRowsForForm = (rows = [], { ensureOneEmpty = false } = {}) => {
   return nextRows;
 };
 
+const renumberRows = (rows = []) =>
+  rows.map((row, index) => ({
+    ...row,
+    sno: String(index + 1),
+  }));
+
+const hasPrimaryRowIdentity = (row = {}) =>
+  hasValue(row.particular) || hasValue(row.weight) || hasValue(row.taxableValue) || hasValue(row.total);
+
+const collapseToPrimaryRows = (rows = []) => {
+  const normalized = normalizeRowsForForm(rows, { ensureOneEmpty: true });
+  const primaryRows = normalized.filter((row, index) => {
+    if (index === 0) return true;
+    return hasPrimaryRowIdentity(row);
+  });
+  return primaryRows.length > 0 ? renumberRows(primaryRows) : [EMPTY_ROW(1)];
+};
+
+const getLatestB2BGstRecord = (records = []) =>
+  Array.isArray(records)
+    ? records.find((item) => String(item?.type || "").toUpperCase() === "B2B") || null
+    : null;
+
+const getMatchedLatestB2BBill = (bills = [], customer = {}) => {
+  const customerPhone = String(customer.phoneNumber || customer.phone || "").trim();
+  const customerName = String(customer.customerName || customer.name || "").trim().toLowerCase();
+
+  return Array.isArray(bills)
+    ? bills.find((bill) => {
+        const billPhone = String(bill?.phoneNumber || bill?.phone || "").trim();
+        const billName = String(bill?.customerName || bill?.name || "").trim().toLowerCase();
+        return (customerPhone && billPhone === customerPhone) || (customerName && billName === customerName);
+      }) || null
+    : null;
+};
+
+const buildRowFallbacks = ({ gstRecord, latestBill } = {}) => {
+  const previewCashRows = Array.isArray(latestBill?.previewSnapshot?.cash?.rows)
+    ? latestBill.previewSnapshot.cash.rows
+    : [];
+  const cashRows = previewCashRows.length > 0
+    ? previewCashRows
+    : Array.isArray(latestBill?.cashTable)
+      ? latestBill.cashTable
+      : [];
+  const gstFromBill = latestBill?.gst || {};
+  const fallbackWeight = cashRows.reduce(
+    (sum, row) => sum + toNum(row?.pure, 0),
+    0,
+  );
+  const fallbackRate = [...cashRows]
+    .reverse()
+    .map((row) => toNum(row?.goldRate, 0))
+    .find((value) => value > 0) ||
+    toNum(latestBill?.previewSnapshot?.header?.ftRate, toNum(gstFromBill?.rate, NaN));
+  const taxableValue = Number.isFinite(fallbackWeight) && Number.isFinite(fallbackRate)
+    ? fallbackWeight * fallbackRate
+    : NaN;
+  const sgstPercent = toNum(gstRecord?.sgst, 0);
+  const cgstPercent = toNum(gstRecord?.cgst, 0);
+  const sgstAmount = Number.isFinite(taxableValue)
+    ? (taxableValue * sgstPercent) / 100
+    : NaN;
+  const cgstAmount = Number.isFinite(taxableValue)
+    ? (taxableValue * cgstPercent) / 100
+    : NaN;
+  const totalValue = toNum(
+    NaN,
+    Number.isFinite(taxableValue) && Number.isFinite(sgstAmount) && Number.isFinite(cgstAmount)
+      ? taxableValue + sgstAmount + cgstAmount
+      : NaN,
+  );
+
+  return {
+    hsnCode: String(gstRecord?.hsnCode || gstRecord?.hsn || "").trim(),
+    sgstPercent,
+    cgstPercent,
+    hasGstRecord: Boolean(gstRecord),
+    weight: fallbackWeight,
+    rate: fallbackRate,
+    taxableValue,
+    sgstAmount,
+    cgstAmount,
+    totalValue,
+  };
+};
+
+const enrichRowsWithFallbacks = (rows = [], fallbacks = {}) =>
+  collapseToPrimaryRows(rows).map((row, index) => {
+    if (!hasRowData(row)) return row;
+
+    const allowFallbackFill = index === 0 || hasPrimaryRowIdentity(row);
+    const shouldReplaceWeight = !hasValue(row.weight) || isZeroLike(row.weight);
+    const shouldReplaceRate = !hasValue(row.rate) || isZeroLike(row.rate);
+    const shouldReplaceTaxable = !hasValue(row.taxableValue) || isZeroLike(row.taxableValue);
+    const shouldReplaceCgst = !hasValue(row.cgst) || isZeroLike(row.cgst);
+    const shouldReplaceSgst = !hasValue(row.sgst) || isZeroLike(row.sgst);
+    const shouldReplaceTotal = !hasValue(row.total) || isZeroLike(row.total);
+
+    const weightValue = !shouldReplaceWeight
+      ? toNum(row.weight, NaN)
+      : allowFallbackFill
+        ? fallbacks.weight
+        : NaN;
+    const rateValue = !shouldReplaceRate
+      ? toNum(row.rate, NaN)
+      : allowFallbackFill
+        ? fallbacks.rate
+        : NaN;
+    const taxableValue = !shouldReplaceTaxable
+      ? toNum(row.taxableValue, NaN)
+      : Number.isFinite(fallbacks.taxableValue)
+        ? fallbacks.taxableValue
+        : Number.isFinite(weightValue) && Number.isFinite(rateValue)
+        ? weightValue * rateValue
+        : NaN;
+    const cgstValue = !shouldReplaceCgst
+      ? toNum(row.cgst, NaN)
+      : Number.isFinite(fallbacks.cgstAmount)
+        ? fallbacks.cgstAmount
+        : fallbacks.hasGstRecord && Number.isFinite(taxableValue)
+        ? (taxableValue * fallbacks.cgstPercent) / 100
+        : NaN;
+    const sgstValue = !shouldReplaceSgst
+      ? toNum(row.sgst, NaN)
+      : Number.isFinite(fallbacks.sgstAmount)
+        ? fallbacks.sgstAmount
+        : fallbacks.hasGstRecord && Number.isFinite(taxableValue)
+        ? (taxableValue * fallbacks.sgstPercent) / 100
+        : NaN;
+    const recomputedTotalValue =
+      Number.isFinite(taxableValue) && Number.isFinite(cgstValue) && Number.isFinite(sgstValue)
+        ? taxableValue + cgstValue + sgstValue
+        : NaN;
+    const totalValue = !shouldReplaceTotal
+      ? toNum(row.total, NaN)
+      : Number.isFinite(recomputedTotalValue)
+        ? recomputedTotalValue
+        : Number.isFinite(fallbacks.totalValue)
+        ? fallbacks.totalValue
+        : NaN;
+
+    return {
+      ...row,
+      hsnCode: hasValue(row.hsnCode)
+        ? row.hsnCode
+        : allowFallbackFill
+          ? fallbacks.hsnCode
+          : "",
+      weight: shouldReplaceWeight ? formatDecimal(weightValue, 3) : row.weight,
+      rate: shouldReplaceRate ? formatDecimal(rateValue, 2) : row.rate,
+      taxableValue: shouldReplaceTaxable ? formatDecimal(taxableValue, 2) : row.taxableValue,
+      cgst: shouldReplaceCgst ? formatDecimal(cgstValue, 2) : row.cgst,
+      sgst: shouldReplaceSgst ? formatDecimal(sgstValue, 2) : row.sgst,
+      total: shouldReplaceTotal ? formatDecimal(totalValue, 2) : row.total,
+    };
+  });
+
 export default function CustomerGstPage({ navigation }) {
   const route = useRoute();
   const [customerName, setCustomerName] = useState("");
@@ -92,6 +258,7 @@ export default function CustomerGstPage({ navigation }) {
     ifsc: "",
     branch: "",
   });
+  const [showBankDetails, setShowBankDetails] = useState(false);
   const [loading, setLoading] = useState(false);
   const [customers, setCustomers] = useState([]);
   const [editingId, setEditingId] = useState(null);
@@ -106,7 +273,18 @@ export default function CustomerGstPage({ navigation }) {
     }
   };
 
-  const applyCustomerToForm = (item = {}) => {
+  const findExistingCustomerMatch = (customer = {}, list = customers) => {
+    const phone = String(customer.phoneNumber || customer.phone || "").trim();
+    const name = String(customer.customerName || customer.name || "").trim().toLowerCase();
+
+    return (Array.isArray(list) ? list : []).find((item) => {
+      const itemPhone = String(item?.phoneNumber || item?.phone || "").trim();
+      const itemName = String(item?.customerName || item?.name || "").trim().toLowerCase();
+      return (phone && itemPhone === phone) || (name && itemName === name);
+    }) || null;
+  };
+
+  const applyCustomerToForm = (item = {}, rowFallbacks = null) => {
     setCustomerName(item.customerName || item.name || "");
     setPhoneNumber(item.phoneNumber || item.phone || "");
     setAddress(item.address || "");
@@ -114,13 +292,23 @@ export default function CustomerGstPage({ navigation }) {
     setInvoiceNo(item.invoiceNo || item.billNo || "");
     setDate(item.date || new Date().toLocaleDateString("en-GB"));
     setTotalInvoiceValue(item.totalInvoiceValue || "");
-    setBillRows(normalizeRowsForForm(item.billRows, { ensureOneEmpty: true }));
-    setBankDetails({
+    const normalizedRows = collapseToPrimaryRows(item.billRows);
+    setBillRows(rowFallbacks ? enrichRowsWithFallbacks(normalizedRows, rowFallbacks) : normalizedRows);
+    const nextBankDetails = {
       accountName: item.bankDetails?.accountName || "",
       accountNo: item.bankDetails?.accountNo || "",
       ifsc: item.bankDetails?.ifsc || "",
       branch: item.bankDetails?.branch || "",
-    });
+    };
+    setBankDetails(nextBankDetails);
+    setShowBankDetails(
+      [
+        nextBankDetails.accountName,
+        nextBankDetails.accountNo,
+        nextBankDetails.ifsc,
+        nextBankDetails.branch,
+      ].some((value) => String(value || "").trim() !== ""),
+    );
     setEditingId(item._id || null);
   };
 
@@ -186,6 +374,7 @@ export default function CustomerGstPage({ navigation }) {
     setTotalInvoiceValue("");
     setBillRows(normalizeRowsForForm([], { ensureOneEmpty: true }));
     setBankDetails({ accountName: "", accountNo: "", ifsc: "", branch: "" });
+    setShowBankDetails(false);
     setEditingId(null);
   };
 
@@ -193,6 +382,19 @@ export default function CustomerGstPage({ navigation }) {
     setBillRows((prev) =>
       prev.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)),
     );
+  };
+
+  const addBillRow = () => {
+    setBillRows((prev) => [...renumberRows(prev), EMPTY_ROW(prev.length + 1)]);
+  };
+
+  const removeBillRow = (index) => {
+    setBillRows((prev) => {
+      const nextRows = prev.filter((_, rowIndex) => rowIndex !== index);
+      return nextRows.length > 0
+        ? renumberRows(nextRows)
+        : [EMPTY_ROW(1)];
+    });
   };
 
   const computedInvoiceValue = useMemo(
@@ -229,10 +431,14 @@ export default function CustomerGstPage({ navigation }) {
 
     try {
       setLoading(true);
-      const url = editingId
-        ? `${base_url}/gstCustomers/${editingId}`
+      const matchedCustomer = editingId
+        ? customers.find((item) => String(item?._id) === String(editingId)) || null
+        : findExistingCustomerMatch(payload);
+      const resolvedEditingId = editingId || matchedCustomer?._id || null;
+      const url = resolvedEditingId
+        ? `${base_url}/gstCustomers/${resolvedEditingId}`
         : `${base_url}/gstCustomers`;
-      const method = editingId ? "PUT" : "POST";
+      const method = resolvedEditingId ? "PUT" : "POST";
       const response = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -241,11 +447,30 @@ export default function CustomerGstPage({ navigation }) {
 
       const { data: result, raw } = await readResponseBody(response);
       if (!response.ok) {
+        if (!resolvedEditingId && (result?.message || raw || "").includes("already exists")) {
+          const duplicateCustomer = findExistingCustomerMatch(payload);
+          if (duplicateCustomer?._id) {
+            const retryResponse = await fetch(`${base_url}/gstCustomers/${duplicateCustomer._id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            const { data: retryResult, raw: retryRaw } = await readResponseBody(retryResponse);
+            if (!retryResponse.ok) {
+              Alert.alert("Error", retryResult?.message || retryRaw || "Failed to save GST customer");
+              return;
+            }
+            Alert.alert("Success", "GST customer updated");
+            applyCustomerToForm(retryResult || payload);
+            await fetchCustomers();
+            return;
+          }
+        }
         Alert.alert("Error", result?.message || raw || "Failed to save GST customer");
         return;
       }
 
-      Alert.alert("Success", editingId ? "GST customer updated" : "GST customer added");
+      Alert.alert("Success", resolvedEditingId ? "GST customer updated" : "GST customer added");
       applyCustomerToForm(result || payload);
       await fetchCustomers();
     } catch (error) {
@@ -257,7 +482,30 @@ export default function CustomerGstPage({ navigation }) {
   };
 
   const handleEdit = (item) => {
-    applyCustomerToForm(item);
+    const loadEditData = async () => {
+      try {
+        setLoading(true);
+        const [gstResponse, billsResponse] = await Promise.all([
+          fetch(`${base_url}/gst`),
+          fetch(`${base_url}/billSummary?billType=B2B`),
+        ]);
+
+        const gstRecords = gstResponse.ok ? await gstResponse.json() : [];
+        const b2bBills = billsResponse.ok ? await billsResponse.json() : [];
+        const gstRecord = getLatestB2BGstRecord(gstRecords);
+        const latestBill = getMatchedLatestB2BBill(b2bBills, item);
+        const rowFallbacks = buildRowFallbacks({ gstRecord, latestBill });
+
+        applyCustomerToForm(item, rowFallbacks);
+      } catch (error) {
+        console.error("GST customer edit prefill error:", error);
+        applyCustomerToForm(item);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadEditData();
   };
 
   const handleDelete = (item) => {
@@ -395,12 +643,22 @@ export default function CustomerGstPage({ navigation }) {
             </View>
           </View>
 
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Bill Details</Text>
-            {billRows.map((row, index) => (
-              <View key={index} style={styles.rowCard}>
-                <Text style={styles.rowTitle}>Row {index + 1}</Text>
-                <View style={styles.threeColumnRow}>
+	          <View style={styles.sectionCard}>
+	            <Text style={styles.sectionTitle}>Bill Details</Text>
+	            {billRows.map((row, index) => (
+	              <View key={index} style={styles.rowCard}>
+	                <View style={styles.rowHeader}>
+	                  <Text style={styles.rowTitle}>Row {index + 1}</Text>
+	                  {billRows.length > 1 ? (
+	                    <TouchableOpacity
+	                      style={styles.removeRowBtn}
+	                      onPress={() => removeBillRow(index)}
+	                    >
+	                      <Text style={styles.removeRowText}>Remove</Text>
+	                    </TouchableOpacity>
+	                  ) : null}
+	                </View>
+	                <View style={styles.threeColumnRow}>
                   <View style={styles.smallField}>
                     <Text style={styles.label}>Sno</Text>
                     <TextInput style={styles.input} value={row.sno} onChangeText={(value) => updateBillRow(index, "sno", value)} />
@@ -443,33 +701,50 @@ export default function CustomerGstPage({ navigation }) {
                     <Text style={styles.label}>Total</Text>
                     <TextInput style={styles.input} keyboardType="decimal-pad" value={row.total} onChangeText={(value) => updateBillRow(index, "total", value)} />
                   </View>
-                </View>
-              </View>
-            ))}
-          </View>
+	                </View>
+	              </View>
+	            ))}
+	            <TouchableOpacity style={styles.addRowBtn} onPress={addBillRow}>
+	              <Text style={styles.addRowText}>Add Item</Text>
+	            </TouchableOpacity>
+	          </View>
 
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Bank Details</Text>
-            <View style={styles.twoColumnRow}>
-              <View style={styles.flexField}>
-                <Text style={styles.label}>Bank Account Name</Text>
-                <TextInput style={styles.input} value={bankDetails.accountName} onChangeText={(value) => setBankDetails((prev) => ({ ...prev, accountName: value }))} />
-              </View>
-              <View style={styles.flexField}>
-                <Text style={styles.label}>Account Number</Text>
-                <TextInput style={styles.input} value={bankDetails.accountNo} onChangeText={(value) => setBankDetails((prev) => ({ ...prev, accountNo: value }))} />
-              </View>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Bank Details</Text>
+              <TouchableOpacity
+                style={styles.sectionToggleBtn}
+                onPress={() => setShowBankDetails((prev) => !prev)}
+              >
+                <Text style={styles.sectionToggleText}>
+                  {showBankDetails ? "Hide" : "Show"}
+                </Text>
+              </TouchableOpacity>
             </View>
-            <View style={styles.twoColumnRow}>
-              <View style={styles.flexField}>
-                <Text style={styles.label}>IFSC Code</Text>
-                <TextInput style={styles.input} value={bankDetails.ifsc} onChangeText={(value) => setBankDetails((prev) => ({ ...prev, ifsc: value }))} />
-              </View>
-              <View style={styles.flexField}>
-                <Text style={styles.label}>Branch</Text>
-                <TextInput style={styles.input} value={bankDetails.branch} onChangeText={(value) => setBankDetails((prev) => ({ ...prev, branch: value }))} />
-              </View>
-            </View>
+            {showBankDetails ? (
+              <>
+                <View style={styles.twoColumnRow}>
+                  <View style={styles.flexField}>
+                    <Text style={styles.label}>Bank Account Name</Text>
+                    <TextInput style={styles.input} value={bankDetails.accountName} onChangeText={(value) => setBankDetails((prev) => ({ ...prev, accountName: value }))} />
+                  </View>
+                  <View style={styles.flexField}>
+                    <Text style={styles.label}>Account Number</Text>
+                    <TextInput style={styles.input} value={bankDetails.accountNo} onChangeText={(value) => setBankDetails((prev) => ({ ...prev, accountNo: value }))} />
+                  </View>
+                </View>
+                <View style={styles.twoColumnRow}>
+                  <View style={styles.flexField}>
+                    <Text style={styles.label}>IFSC Code</Text>
+                    <TextInput style={styles.input} value={bankDetails.ifsc} onChangeText={(value) => setBankDetails((prev) => ({ ...prev, ifsc: value }))} />
+                  </View>
+                  <View style={styles.flexField}>
+                    <Text style={styles.label}>Branch</Text>
+                    <TextInput style={styles.input} value={bankDetails.branch} onChangeText={(value) => setBankDetails((prev) => ({ ...prev, branch: value }))} />
+                  </View>
+                </View>
+              </>
+            ) : null}
           </View>
 
           <View style={styles.buttonRow}>
@@ -576,6 +851,25 @@ const styles = StyleSheet.create({
     color: "#1B4D1B",
     marginBottom: 12,
   },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  sectionToggleBtn: {
+    backgroundColor: "#E8F5E9",
+    borderWidth: 1,
+    borderColor: "#C8E6C9",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  sectionToggleText: {
+    color: "#1B5E20",
+    fontSize: 12,
+    fontWeight: "800",
+  },
   inputGroup: {
     marginBottom: 12,
   },
@@ -627,7 +921,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "800",
     color: "#1B4D1B",
+  },
+  rowHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 10,
+  },
+  addRowBtn: {
+    marginTop: 4,
+    alignSelf: "flex-start",
+    backgroundColor: "#E8F5E9",
+    borderWidth: 1,
+    borderColor: "#A5D6A7",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  addRowText: {
+    color: "#1B5E20",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  removeRowBtn: {
+    backgroundColor: "#FFEBEE",
+    borderWidth: 1,
+    borderColor: "#FFCDD2",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  removeRowText: {
+    color: "#C62828",
+    fontSize: 12,
+    fontWeight: "800",
   },
   buttonRow: {
     flexDirection: "row",
