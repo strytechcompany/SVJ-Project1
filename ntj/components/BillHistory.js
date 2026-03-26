@@ -338,27 +338,32 @@ const normalizeBills = (rows = [], ctxCustomer = {}) => {
   const ordered = [...(Array.isArray(rows) ? rows : [])].sort(
     (a, b) => getBillTimestamp(b) - getBillTimestamp(a),
   );
-  const seen = new Set();
-  const unique = ordered.filter((bill) => {
-    const rawNo = bill?.billNo || bill?.invoiceNo || "";
-    const isB2C = String(bill?.billType || bill?.customerType || "").toUpperCase() === "B2C";
-    const formattedNo = isB2C ? formatB2CInvoiceNo(rawNo) : (formatMainBillNo(rawNo) || "00000");
+  const selectPreferredDuplicate = (current, candidate) => {
+    const currentNo = Number.parseInt(String(current?.billNo || current?.invoiceNo || "").replace(/\D/g, ""), 10);
+    const candidateNo = Number.parseInt(String(candidate?.billNo || candidate?.invoiceNo || "").replace(/\D/g, ""), 10);
+    if (Number.isFinite(candidateNo) && Number.isFinite(currentNo) && candidateNo !== currentNo) {
+      return candidateNo < currentNo ? candidate : current;
+    }
+    return getBillTimestamp(candidate) <= getBillTimestamp(current) ? candidate : current;
+  };
 
-    const compositeKey = [
+  const grouped = new Map();
+  for (const bill of ordered) {
+    const contentKey = [
       String(bill?.customerId || "").trim(),
-      formattedNo,
       String(bill?.date || "").trim(),
       String(num(bill?.oldBalance ?? bill?.ob, 0)),
       String(num(bill?.issuePure ?? bill?.totalIssueWeight, 0)),
       String(num(bill?.receiptPure ?? bill?.totalReceiptWeight, 0)),
       String(num(bill?.cashPure ?? bill?.cashAmount, 0)),
+      String(num(bill?.gstPure ?? bill?.summary?.gstPure, 0)),
+      String(num(bill?.finalBalance ?? bill?.summary?.current, 0)),
     ].join("|");
-    const key = compositeKey;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-  const sorted = unique;
+    const existing = grouped.get(contentKey);
+    grouped.set(contentKey, existing ? selectPreferredDuplicate(existing, bill) : bill);
+  }
+
+  const sorted = [...grouped.values()].sort((a, b) => getBillTimestamp(b) - getBillTimestamp(a));
   return sorted.map((bill) => ({
     ...bill,
     description:
