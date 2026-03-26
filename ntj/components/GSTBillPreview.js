@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -10,6 +11,7 @@ import {
   View,
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
+import * as Print from "expo-print";
 
 const FIRM = {
   leftMark: "NTJ",
@@ -73,7 +75,19 @@ export default function GSTBillPreview({ route, navigation }) {
 
   const initialRows = useMemo(() => {
     if (Array.isArray(params.billRows) && params.billRows.length > 0) {
-      return params.billRows.map((row, index) =>
+      return params.billRows
+        .filter((row) =>
+          [
+            row?.particular,
+            row?.weight,
+            row?.rate,
+            row?.taxableValue,
+            row?.cgst,
+            row?.sgst,
+            row?.total,
+          ].some((value) => String(value ?? "").trim() !== "" && String(value ?? "").trim() !== "0" && String(value ?? "").trim() !== "0.00" && String(value ?? "").trim() !== "0.000")
+        )
+        .map((row, index) =>
         buildRow(
           {
             sno: row.sno || String(index + 1),
@@ -89,8 +103,7 @@ export default function GSTBillPreview({ route, navigation }) {
           },
           sgstPct,
           cgstPct,
-        ),
-      );
+        ));
     }
 
     const firstRow = buildRow(
@@ -145,9 +158,122 @@ export default function GSTBillPreview({ route, navigation }) {
 
   const topDate = params.date || new Date().toLocaleDateString("en-GB");
   const invoiceNo = params.billNo || params.invoiceNo || "N/A";
-  const displayedInvoiceValue = params.totalInvoiceValue || fmt(subtotal.total, 2);
+  const displayedInvoiceValue =
+    toNum(params.totalInvoiceValue, 0) > 0 ? fmt(params.totalInvoiceValue, 2) : fmt(subtotal.total, 2);
   const customerAddress = [customer.addressLine1, customer.addressLine2, customer.address].filter(Boolean).join("\n") || customer.address || "";
   const customerGstin = customer.gstin || customer.gst || "N/A";
+  const escapedAddress = String(customerAddress || "N/A").replace(/\n/g, "<br/>");
+
+  const handlePrint = async () => {
+    try {
+      const rowsHtml = rows.map((row) => `
+        <tr>
+          <td>${row.sno || ""}</td>
+          <td>${row.particular || ""}</td>
+          <td>${row.hsn || ""}</td>
+          <td>${row.weight || ""}</td>
+          <td>${row.rate || ""}</td>
+          <td>${row.taxableValue || ""}</td>
+          <td>${row.cgstAmount || ""}</td>
+          <td>${row.sgstAmount || ""}</td>
+          <td>${row.total || ""}</td>
+        </tr>
+      `).join("");
+
+      const html = `
+        <html>
+          <head>
+            <meta charset="utf-8" />
+            <style>
+              body { font-family: Arial, sans-serif; padding: 16px; color: #111; }
+              .sheet { border: 1px solid #222; padding: 8px; }
+              .header { width: 100%; border-collapse: collapse; }
+              .header td { border: 1px solid #222; text-align: center; vertical-align: middle; }
+              .logo { width: 72px; font-weight: 800; font-size: 18px; }
+              .line { width: 26px; border-top: 1px solid #222; margin: 0 auto 10px; }
+              .firm-name { font-size: 16px; font-weight: 800; }
+              .firm-sub { font-size: 11px; }
+              .gst { font-size: 12px; font-weight: 700; margin-top: 4px; }
+              table { width: 100%; border-collapse: collapse; }
+              .meta td, .details td, .details th, .bank td, .sign td, .invoice td { border: 1px solid #222; }
+              .meta td, .bank td, .invoice td { padding: 6px; font-size: 12px; }
+              .cust { border: 1px solid #222; border-top: 0; padding: 8px; }
+              .cust-title { font-weight: 700; margin-bottom: 4px; }
+              .details th, .details td { padding: 6px 4px; font-size: 11px; text-align: center; }
+              .details th:nth-child(2), .details td:nth-child(2) { text-align: left; }
+              .invoice-label { font-weight: 800; }
+              .invoice-value { text-align: right; font-weight: 800; }
+              .bank-title { text-align: center; font-weight: 800; padding: 6px; }
+              .sign td { height: 70px; vertical-align: bottom; text-align: center; font-weight: 700; padding-bottom: 10px; }
+              .footer { border: 1px solid #222; border-top: 0; text-align: center; font-weight: 700; padding: 6px; }
+            </style>
+          </head>
+          <body>
+            <div class="sheet">
+              <table class="header">
+                <tr>
+                  <td class="logo"><div class="line"></div>${FIRM.leftMark}</td>
+                  <td>
+                    <div class="firm-name">${FIRM.name}</div>
+                    <div class="firm-sub">${FIRM.address1}</div>
+                    <div class="firm-sub">${FIRM.address2}</div>
+                    <div class="firm-sub">${FIRM.address3}</div>
+                    <div class="firm-sub">${FIRM.phone} ${FIRM.mobile}</div>
+                    <div class="firm-sub">${FIRM.email}</div>
+                    <div class="gst">GST : ${FIRM.gstin}</div>
+                  </td>
+                  <td class="logo"><div class="line"></div>${FIRM.rightMark}</td>
+                </tr>
+              </table>
+              <table class="meta">
+                <tr>
+                  <td><b>Invoice No</b></td><td>${invoiceNo}</td>
+                  <td><b>Date</b></td><td>${topDate}</td>
+                </tr>
+              </table>
+              <div class="cust">
+                <div class="cust-title">Customer Name & Address</div>
+                <div><b>${customer.name || customer.customerName || "N/A"}</b></div>
+                <div>${escapedAddress}</div>
+                <div style="margin-top:6px;"><b>GST NO : ${customerGstin}</b></div>
+              </div>
+              <table class="details">
+                <tr>
+                  <th>S No</th><th>Particular</th><th>HSN Code</th><th>Weight</th><th>Rate</th><th>Taxable Value</th><th>CGST</th><th>SGST</th><th>Total</th>
+                </tr>
+                ${rowsHtml}
+                <tr>
+                  <td></td><td><b>Sub Total</b></td><td></td>
+                  <td>${fmt(subtotal.weight, 3)}</td>
+                  <td></td>
+                  <td>${fmt(subtotal.taxableValue, 2)}</td>
+                  <td>${fmt(subtotal.cgstAmount, 2)}</td>
+                  <td>${fmt(subtotal.sgstAmount, 2)}</td>
+                  <td>${fmt(subtotal.total, 2)}</td>
+                </tr>
+              </table>
+              <table class="invoice">
+                <tr><td class="invoice-label">TOTAL INVOICE VALUE</td><td class="invoice-value">${displayedInvoiceValue}</td></tr>
+              </table>
+              <table class="bank">
+                <tr><td class="bank-title" colspan="2">Bank Details</td></tr>
+                <tr><td>Account Name</td><td>${bank.accountName || ""}</td></tr>
+                <tr><td>Account No</td><td>${bank.accountNo || ""}</td></tr>
+                <tr><td>IFSC</td><td>${bank.ifsc || ""}</td></tr>
+                <tr><td>Branch</td><td>${bank.branch || ""}</td></tr>
+              </table>
+              <table class="sign"><tr><td>${FIRM.signatureLeft}</td><td>${FIRM.signatureRight}</td></tr></table>
+              <div class="footer">${FIRM.footer}</div>
+            </div>
+          </body>
+        </html>`;
+
+      await Print.printAsync({ html });
+    } catch (error) {
+      console.error("GST print failed:", error);
+      Alert.alert("Error", "Failed to print GST bill.");
+    }
+  };
 
   return (
     <KeyboardAvoidingView
@@ -161,12 +287,16 @@ export default function GSTBillPreview({ route, navigation }) {
         <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate("Home")}>
           <Icon name="home" size={22} color="#1E88E5" />
         </TouchableOpacity>
+        <TouchableOpacity style={styles.headerBtn} onPress={handlePrint}>
+          <Icon name="printer" size={22} color="#1E88E5" />
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.page}>
-          <View style={styles.firmHeader}>
+	        <View style={styles.firmHeader}>
             <View style={styles.firmLogoCell}>
+              <View style={styles.logoTopLine} />
               <Text style={styles.firmLogoText}>{FIRM.leftMark}</Text>
             </View>
             <View style={styles.firmCenter}>
@@ -179,7 +309,8 @@ export default function GSTBillPreview({ route, navigation }) {
               </Text>
               <Text style={styles.firmGstin}>GST : {FIRM.gstin}</Text>
             </View>
-            <View style={styles.firmLogoCell}>
+            <View style={styles.firmLogoCellRight}>
+              <View style={styles.logoTopLine} />
               <Text style={styles.firmLogoText}>{FIRM.rightMark}</Text>
             </View>
           </View>
@@ -200,17 +331,17 @@ export default function GSTBillPreview({ route, navigation }) {
             <Text style={styles.customerGstin}>GST NO : {customerGstin}</Text>
           </View>
 
-          <View style={styles.table}>
-            <View style={[styles.tableRow, styles.tableHeader]}>
-              <Text style={[styles.cell, styles.snoCol]}>S No</Text>
-              <Text style={[styles.cell, styles.particularCol]}>Particular</Text>
-              <Text style={[styles.cell, styles.hsnCol]}>HSN Code</Text>
-              <Text style={[styles.cell, styles.weightCol]}>Weight</Text>
-              <Text style={[styles.cell, styles.rateCol]}>Rate</Text>
-              <Text style={[styles.cell, styles.moneyCol]}>Taxable Value</Text>
-              <Text style={[styles.cell, styles.moneyCol]}>CGST</Text>
-              <Text style={[styles.cell, styles.moneyCol]}>SGST</Text>
-              <Text style={[styles.cell, styles.moneyCol]}>TOTAL</Text>
+	          <View style={styles.table}>
+	            <View style={[styles.tableRow, styles.tableHeader]}>
+	              <Text style={[styles.cell, styles.snoCol]}>S{"\n"}No</Text>
+	              <Text style={[styles.cell, styles.particularCol]}>Particular</Text>
+	              <Text style={[styles.cell, styles.hsnCol]}>HSN{"\n"}Code</Text>
+	              <Text style={[styles.cell, styles.weightCol]}>Weight</Text>
+	              <Text style={[styles.cell, styles.rateCol]}>Rate</Text>
+	              <Text style={[styles.cell, styles.moneyCol]}>Taxable{"\n"}Value</Text>
+	              <Text style={[styles.cell, styles.moneyCol]}>CGST</Text>
+	              <Text style={[styles.cell, styles.moneyCol]}>SGST</Text>
+	              <Text style={[styles.cell, styles.moneyCol]}>TOTAL</Text>
             </View>
 
             {rows.map((row, index) => (
@@ -322,10 +453,14 @@ export default function GSTBillPreview({ route, navigation }) {
             </View>
           </View>
 
-          <View style={styles.signatureRow}>
-            <Text style={styles.signatureText}>{FIRM.signatureLeft}</Text>
-            <Text style={styles.signatureText}>{FIRM.signatureRight}</Text>
-          </View>
+	          <View style={styles.signatureRow}>
+	            <View style={styles.signatureCell}>
+	              <Text style={styles.signatureText}>{FIRM.signatureLeft}</Text>
+	            </View>
+	            <View style={styles.signatureCell}>
+	              <Text style={styles.signatureText}>{FIRM.signatureRight}</Text>
+	            </View>
+	          </View>
           <Text style={styles.footerText}>{FIRM.footer}</Text>
         </View>
       </ScrollView>
@@ -366,11 +501,26 @@ const styles = StyleSheet.create({
   },
   firmHeader: { flexDirection: "row", borderWidth: 1, borderColor: "#222" },
   firmLogoCell: {
-    width: 64,
+    width: 66,
     justifyContent: "center",
     alignItems: "center",
     borderRightWidth: 1,
     borderRightColor: "#222",
+    paddingVertical: 8,
+  },
+  firmLogoCellRight: {
+    width: 66,
+    justifyContent: "center",
+    alignItems: "center",
+    borderLeftWidth: 1,
+    borderLeftColor: "#222",
+    paddingVertical: 8,
+  },
+  logoTopLine: {
+    width: 24,
+    borderTopWidth: 1,
+    borderTopColor: "#222",
+    marginBottom: 10,
   },
   firmCenter: { flex: 1, alignItems: "center", paddingVertical: 6, paddingHorizontal: 8 },
   firmName: { fontSize: 14, fontWeight: "800", color: "#111", textAlign: "center" },
@@ -402,36 +552,38 @@ const styles = StyleSheet.create({
   customerName: { fontSize: 11, fontWeight: "700", color: "#111", marginBottom: 2 },
   customerText: { fontSize: 10, color: "#111", lineHeight: 14 },
   customerGstin: { fontSize: 10, fontWeight: "700", color: "#111", marginTop: 6 },
-  table: { borderWidth: 1, borderColor: "#222", borderTopWidth: 0 },
-  tableRow: { flexDirection: "row", borderTopWidth: 1, borderTopColor: "#222" },
+  table: { borderWidth: 1, borderColor: "#222", borderTopWidth: 0, overflow: "hidden" },
+  tableRow: { flexDirection: "row", borderTopWidth: 1, borderTopColor: "#222", alignItems: "stretch" },
   tableHeader: { backgroundColor: "#f2f2f2" },
   cell: {
-    paddingHorizontal: 4,
     paddingHorizontal: 3,
     paddingVertical: 4,
-    fontSize: 8.5,
+    fontSize: 7.5,
     color: "#111",
     borderRightWidth: 1,
     borderRightColor: "#222",
     textAlign: "center",
+    flexShrink: 1,
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
   cellInput: {
-    paddingHorizontal: 4,
     paddingHorizontal: 3,
     paddingVertical: 3,
-    fontSize: 8.5,
+    fontSize: 7.5,
     color: "#111",
     borderRightWidth: 1,
     borderRightColor: "#222",
     textAlign: "center",
     minHeight: 26,
+    includeFontPadding: false,
   },
-  snoCol: { width: 30 },
-  particularCol: { flex: 1.5 },
-  hsnCol: { width: 52 },
-  weightCol: { width: 50 },
-  rateCol: { width: 50 },
-  moneyCol: { width: 58 },
+  snoCol: { flex: 0.7 },
+  particularCol: { flex: 1.9 },
+  hsnCol: { flex: 1.15 },
+  weightCol: { flex: 1.0 },
+  rateCol: { flex: 1.05 },
+  moneyCol: { flex: 1.25 },
   subtotalRow: { backgroundColor: "#f7f7f7" },
   invoiceValueRow: {
     flexDirection: "row",
@@ -452,7 +604,19 @@ const styles = StyleSheet.create({
     borderTopWidth: 0,
     borderColor: "#222",
   },
-  signatureText: { flex: 1, paddingVertical: 10, textAlign: "center", fontSize: 11, fontWeight: "700", color: "#111" },
+  signatureCell: {
+    flex: 1,
+    minHeight: 64,
+    justifyContent: "flex-end",
+    alignItems: "center",
+    paddingBottom: 10,
+  },
+  signatureText: {
+    textAlign: "center",
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#111",
+  },
   footerText: {
     borderWidth: 1,
     borderTopWidth: 0,
