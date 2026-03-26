@@ -1,6 +1,6 @@
 // ntj/components/BillPreview.js
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, TextInput, Image, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, Linking } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, TextInput, Image, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, Linking, BackHandler } from "react-native";
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import QRCode from 'react-native-qrcode-svg';
@@ -274,6 +274,9 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const [savedNilFtValue, setSavedNilFtValue] = useState(initialNilFtValue);
   const [savedNilBalanceAmount, setSavedNilBalanceAmount] = useState(initialNilBalanceAmount);
   const [displayNilIssueAmount, setDisplayNilIssueAmount] = useState(0);
+  const [showB2BCashInput, setShowB2BCashInput] = useState(false);
+  const [b2bCashInput, setB2bCashInput] = useState("");
+  const [b2bSavedCashValue, setB2bSavedCashValue] = useState(null);
   const resolveSelectedResultType = (nilMode, isIssueSelected) => {
     if (nilMode === "NIL Balance") return "balance";
     if (nilMode === "NIL FT") return "ft";
@@ -585,7 +588,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const b2bAdvanceBalance = toNum(summaryAB, 0);
   const b2bTotalIssuePure = toNum(totalIssuePure, 0);
   const b2bTotalReceiptPure = toNum(totalReceiptPure, 0);
-  const b2bTotalCashPure = toNum(cashFromRows, 0);
+  const b2bTotalCashPure = toNum(displaySummary.cash, 0);
   const b2bAdvanceOnlySummary = buildBalanceSummary({
     oldBalance: 0,
     advanceBalance: b2bAdvanceBalance,
@@ -619,7 +622,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   };
 
   const shouldAutoSavePreview =
-    !isFromHistory && !order && !estimate && !suspense && !isB2CPreview;
+    !savedBillIdRef.current &&
+    !isFromHistory &&
+    !order &&
+    !estimate &&
+    !suspense &&
+    !isB2CPreview;
   const b2bAdvanceSummaryValues = {
     issue: formatB2BSummaryValue(b2bTotalIssuePure),
     advanceBalance: formatB2BSummaryValue(b2bAdvanceBalance),
@@ -645,7 +653,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const computedNilFtValue = rawSummaryFinalValue;
   const computedNilBalanceAmount = nilBaseBalanceValue * currentB2BFtRate;
   const displayNilFtValue =
-    savedNilFtValue > 0 && isFromHistory
+    savedNilFtValue > 0 && (isFromHistory || isActiveNilFT)
       ? savedNilFtValue
       : computedNilFtValue;
   const displayNilBalanceAmount =
@@ -676,6 +684,29 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
           ? nilBalanceResultText
           : "";
   const nilIssueButtonText = `NIL Issue : \u20B9 ${formatIndianNumber(Math.round(resolvedNilIssueAmount))}`;
+  const handleToggleB2BCashInput = () => {
+    if (customer?.type !== "B2B" || isDealerPreview) return;
+    setShowB2BCashInput((prev) => {
+      const next = !prev;
+      if (next) {
+        const defaultValue = Number.isFinite(b2bSavedCashValue)
+          ? b2bSavedCashValue
+          : displayNilBalanceAmount;
+        setB2bCashInput((current) => {
+          const trimmed = String(current || "").trim();
+          if (trimmed) return trimmed;
+          return toNum(defaultValue, 0).toFixed(2);
+        });
+      }
+      return next;
+    });
+  };
+  const handleSaveB2BCash = () => {
+    if (customer?.type !== "B2B" || isDealerPreview) return;
+    const value = toNum(b2bCashInput, 0);
+    setB2bSavedCashValue(value);
+    setB2bCashInput(toNum(value, 0).toFixed(2));
+  };
   const displayedIssuePureText = toNum(displaySummary.issue, 0).toFixed(3);
   const b2cRateFallback =
     toNum(safeCashTable?.[0]?.goldRate, 0) ||
@@ -1610,8 +1641,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                </tr>` : ''}
 	              </table>
 	            `}
-	            <h2>CASH:</h2>
-	            ${cashTable && cashTable.length > 0 ? `
+            <h2>CASH:</h2>
+            ${cashTable && cashTable.length > 0 ? `
               <table>
                 <tr>
                   <th>Amount</th>
@@ -1628,9 +1659,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                <tr class="total-row">
 	                  <td colspan="2" style="text-align: right; padding-right: 5px;"><strong>Total Cash Pure:</strong></td>
 	                  <td style="text-align:right;"><strong>${safeCashTable.reduce((sum, c) => sum + toNum(c?.pure, 0), 0).toFixed(3)}</strong></td>
-	                </tr>
-	              </table>
-	            ` : '<p>N/A</p>'}
+                </tr>
+              </table>
+            ` : '<p>N/A</p>'}
+            ${customer?.type === "B2B" && !isDealerPreview && Number.isFinite(b2bSavedCashValue) ? `
+              <p><strong>Cash:</strong> &#8377;${toNum(b2bSavedCashValue, 0).toFixed(2)}</p>
+            ` : ''}
             ${false && gst && (gst.enabled || (parseFloat(gst.amount) > 0)) ? `
               <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
               <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
@@ -1848,6 +1882,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     if (isFromHistory) return;
     if (order || estimate || suspense || isCashBill || isAdvanceBill) return;
     if (isB2CPreview) return;
+    if (savedBillIdRef.current) return;
+    if (baseBillNo) return;
     if (billNoRequestRef.current) return;
     billNoRequestRef.current = true;
     const controller = new AbortController();
@@ -1859,7 +1895,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       })
       .catch(() => {});
     return () => controller.abort();
-  }, [isFromHistory, order, estimate, suspense, isB2CPreview, isCashBill, isAdvanceBill]);
+  }, [isFromHistory, order, estimate, suspense, isB2CPreview, isCashBill, isAdvanceBill, baseBillNo]);
   const resolveFirstValidImageUri = (candidates = []) => {
     for (const candidate of candidates) {
       const uri = normalizeImageUri(candidate, base_url);
@@ -2373,6 +2409,9 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       <td>${safeCashTable.reduce((s, c) => s + toNum(c?.pure, 0), 0).toFixed(3)} g</td>
     </tr></tfoot>
   </table>
+  ${customer?.type === "B2B" && !isDealerPreview && Number.isFinite(b2bSavedCashValue) ? `
+    <div class="summary-row"><span class="summary-label">Cash</span><span class="summary-value">&#8377;${toNum(b2bSavedCashValue, 0).toFixed(2)}</span></div>
+  ` : ''}
 
   <!-- Summary -->
   <div class="section-title">SUMMARY</div>
@@ -3677,6 +3716,24 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     };
   }, [navigation, shouldAutoSavePreview]);
 
+  useEffect(() => {
+    const state = navigation.getState?.();
+    if (state && Array.isArray(state.routes) && state.routes.length > 1) {
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "BillPreview", params: route?.params }],
+      });
+    }
+  }, [navigation, route?.params]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => true;
+      const subscription = BackHandler.addEventListener("hardwareBackPress", onBackPress);
+      return () => subscription.remove();
+    }, [])
+  );
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -3687,19 +3744,19 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         {!isPrinting && (
           <View style={styles.buttonContainer}>
 	            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-	              <TouchableOpacity style={styles.headerBtn} onPress={() => {
-	                if (isCashBill || isAdvanceBill) {
-	                  navigation.navigate("CashPage");
-	                } else if (customer && (customer.customerId || customer.id) && !items) {
-	                  navigation.navigate("BillHistory", { customer: customer });
-	                } else {
-	                  navigation.navigate(order ? "Order" : estimate ? "Estimate" : isB2C ? "B2CCalculationPage" : "B2BCalculationPage" );
-	                }
-	              }}>
+              <TouchableOpacity style={styles.headerBtn} onPress={() => {}}>
                 <Icon name="arrow-left" size={22} color="#1E88E5" />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate("Home")}>
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() =>
+                  navigation.reset({
+                    index: 0,
+                    routes: [{ name: "Home" }],
+                  })
+                }
+              >
                 <Icon name="home" size={22} color="#1E88E5" />
               </TouchableOpacity>
 
@@ -4713,57 +4770,78 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             </>
           )}
 
-          {/* B2B / B2C and Print Again Buttons */}
-          <View style={styles.transferContainer}>
-            {customer?.type === "B2B" ? (
-              <>
+	          {/* B2B / B2C and Print Again Buttons */}
+	          <View style={styles.transferContainer}>
+	            {customer?.type === "B2B" ? (
+	              <>
 	                <TouchableOpacity
-	                  style={[
-	                    styles.transferBtnB2B,
-	                    { backgroundColor: activeNilMode === "NIL Balance" ? "#C62828" : "#2be916ff" },
-	                  ]}
-	                  onPress={() => handleSelectB2BNilMode("NIL Balance")}
+	                  style={[styles.transferBtnB2B, { backgroundColor: '#17a2b8' }]}
+	                  onPress={handlePrint}
 	                >
-	                  <Text style={styles.transferBtnText}>{nilBalanceButtonText}</Text>
+	                  <Icon name="printer" size={20} color="#fff" style={{ marginRight: 8 }} />
+	                  <Text style={styles.transferBtnText}>Print Again</Text>
 	                </TouchableOpacity>
-		                <TouchableOpacity
-		                  style={[
-		                    styles.transferBtnB2B,
-		                    { backgroundColor: activeNilMode === "NIL FT" ? "#EF6C00" : "#2be916ff" },
-		                  ]}
-		                  onPress={() => handleSelectB2BNilMode("NIL FT")}
-		                >
-		                  <Text style={styles.transferBtnText}>{nilFtButtonText}</Text>
-		                </TouchableOpacity>
+	                {!isDealerPreview ? (
+	                  <>
+	                    <TouchableOpacity
+	                      style={[
+	                        styles.transferBtnB2B,
+	                        { backgroundColor: activeNilMode === "NIL Balance" ? "#C62828" : "#2be916ff" },
+	                      ]}
+	                      onPress={() => handleSelectB2BNilMode("NIL Balance")}
+	                    >
+	                      <Text style={styles.transferBtnText}>{nilBalanceButtonText}</Text>
+	                    </TouchableOpacity>
+	                    <TouchableOpacity
+	                      style={[
+	                        styles.transferBtnB2B,
+	                        { backgroundColor: activeNilMode === "NIL FT" ? "#EF6C00" : "#2be916ff" },
+	                      ]}
+	                      onPress={() => handleSelectB2BNilMode("NIL FT")}
+	                    >
+	                      <Text style={styles.transferBtnText}>{nilFtButtonText}</Text>
+	                    </TouchableOpacity>
+	                    <TouchableOpacity
+	                      style={[
+	                        styles.transferBtnB2B,
+	                        { backgroundColor: isNilIssueSelected ? "#1565C0" : "#2be916ff" },
+	                      ]}
+	                      onPress={() =>
+	                        setIsNilIssueSelected((prev) => {
+	                          const next = !prev;
+	                          setSelectedResultType(resolveSelectedResultType(b2bNilMode, next));
+	                          return next;
+	                        })
+	                      }
+	                    >
+	                      <Text style={styles.transferBtnText}>{nilIssueButtonText}</Text>
+	                    </TouchableOpacity>
+	                  </>
+	                ) : null}
 	                <TouchableOpacity
-	                  style={[
-	                    styles.transferBtnB2B,
-	                    { backgroundColor: isNilIssueSelected ? "#1565C0" : "#2be916ff" },
-	                  ]}
-                  onPress={() =>
-                    setIsNilIssueSelected((prev) => {
-                      const next = !prev;
-                      setSelectedResultType(resolveSelectedResultType(b2bNilMode, next));
-                      return next;
-                    })
-                  }
-                >
-	                  <Text style={styles.transferBtnText}>{nilIssueButtonText}</Text>
+	                  style={styles.transferBtnB2B}
+	                  onPress={() => navigation.navigate("B2BCalculationPage", { printAgain: true, lastBill: route.params })}
+	                >
+	                  <Icon name="file-document-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+	                  <Text style={styles.transferBtnText}>B2B</Text>
 	                </TouchableOpacity>
-		              </>
-	            ) : null}
-            {customer?.type === "B2B" ? (
-              <TouchableOpacity
-                style={styles.transferBtnB2B}
-                onPress={() => navigation.navigate("B2BCalculationPage", { printAgain: true, lastBill: route.params })}
-              >
-                <Icon name="file-document-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.transferBtnText}>B2B</Text>
-              </TouchableOpacity>
-            ) : customer?.type === "B2C" ? (
-              <TouchableOpacity
-                style={styles.transferBtnB2C}
-                onPress={handleTransferToB2C}
+	                {!isDealerPreview ? (
+	                  <TouchableOpacity
+	                    style={[
+	                      styles.transferBtnB2B,
+	                      { backgroundColor: showB2BCashInput ? "#1565C0" : "#2be916ff" },
+	                    ]}
+	                    onPress={handleToggleB2BCashInput}
+	                  >
+	                    <Text style={styles.transferBtnText}>Cash</Text>
+	                  </TouchableOpacity>
+	                ) : null}
+			              </>
+		            ) : null}
+	            {customer?.type === "B2C" ? (
+	              <TouchableOpacity
+	                style={styles.transferBtnB2C}
+	                onPress={handleTransferToB2C}
               >
                 <Icon name="file-document-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
                 <Text style={styles.transferBtnText}>Transfer to B2C</Text>
@@ -4787,14 +4865,51 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
               </>
             ) : null}
 
-            <TouchableOpacity
-              style={[styles.transferBtnB2B, { backgroundColor: '#17a2b8' }]} // Teal for Print Again
-              onPress={handlePrint}
-            >
-              <Icon name="printer" size={20} color="#fff" style={{ marginRight: 8 }} />
-              <Text style={styles.transferBtnText}>Print Again</Text>
-            </TouchableOpacity>
-          </View>
+	            {customer?.type !== "B2B" ? (
+	              <TouchableOpacity
+	                style={[styles.transferBtnB2B, { backgroundColor: '#17a2b8' }]}
+	                onPress={handlePrint}
+	              >
+	                <Icon name="printer" size={20} color="#fff" style={{ marginRight: 8 }} />
+	                <Text style={styles.transferBtnText}>Print Again</Text>
+	              </TouchableOpacity>
+	            ) : null}
+	          </View>
+
+          {customer?.type === "B2B" && !isDealerPreview && showB2BCashInput ? (
+            <View style={{ paddingHorizontal: 16, marginTop: 6, marginBottom: 6 }}>
+              <View style={{ flexDirection: "row", gap: 10, alignItems: "center", justifyContent: "center" }}>
+                <TextInput
+                  style={[styles.input, { flex: 1, maxWidth: 240, paddingVertical: 8 }]}
+                  value={b2bCashInput}
+                  onChangeText={setB2bCashInput}
+                  keyboardType="numeric"
+                  placeholder="Cash"
+                  placeholderTextColor="#666"
+                />
+                <TouchableOpacity
+                  style={[styles.transferBtnB2B, { minHeight: 48, maxWidth: 130, paddingVertical: 10 }]}
+                  onPress={handleSaveB2BCash}
+                >
+                  <Text style={styles.transferBtnText}>Save Cash</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+
+          {customer?.type === "B2B" && !isDealerPreview && Number.isFinite(b2bSavedCashValue) ? (
+            <View style={styles.nilResultTable}>
+              <View style={styles.nilResultHeaderRow}>
+                <Text style={[styles.nilResultHeaderCell, { borderRightWidth: 1 }]}>RESULT TABLE</Text>
+                <Text style={styles.nilResultHeaderCell}>VALUE</Text>
+              </View>
+              <View style={styles.nilResultValueRow}>
+                <Text style={styles.nilResultValueCell}>
+                  {`Cash : \u20B9${toNum(b2bSavedCashValue, 0).toFixed(2)}`}
+                </Text>
+              </View>
+            </View>
+          ) : null}
           
 
           {/* Save Button */}
@@ -4809,43 +4924,16 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             </TouchableOpacity>
           </View>
 
-          {/* WhatsApp – Send A4 Bill PDF directly to customer chat */}
-          <View style={{ alignItems: 'center', marginTop: 10 }}>
-            <TouchableOpacity
-              style={[
-                styles.saveButton,
-                { backgroundColor: '#25D366', paddingHorizontal: 28 },
-                isSharing && { opacity: 0.6 },
-              ]}
-              onPress={sendA4BillViaWhatsApp}
-              disabled={isSharing}
-              activeOpacity={0.8}
-            >
-              <Icon name="whatsapp" size={22} color="#fff" />
-              <Text style={styles.homeButtonText}>
-                {isSharing ? 'Preparing PDF…' : 'Send Bill via WhatsApp'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Share Bill PDF (generic share sheet) */}
-          <View style={{ alignItems: 'center', marginTop: 10 }}>
-            <TouchableOpacity
-              style={[styles.saveButton, { backgroundColor: '#FF9800' }, isSharing && { opacity: 0.6 }]}
-              onPress={shareBillPdfOnly}
-              disabled={isSharing}
-              activeOpacity={0.8}
-            >
-              <Icon name="file-pdf-box" size={22} color="#fff" />
-              <Text style={styles.homeButtonText}>Share Bill PDF</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Bottom Home Button */}
+	          {/* Bottom Home Button */}
           <View style={styles.homeButtonWrapper}>
             <TouchableOpacity
               style={styles.homeButton}
-              onPress={() => navigation.navigate('Home')}
+              onPress={() =>
+                navigation.reset({
+                  index: 0,
+                  routes: [{ name: "Home" }],
+                })
+              }
               activeOpacity={0.8}
             >
               <Icon name="home-outline" size={22} color="#fff" />
