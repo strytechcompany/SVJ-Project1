@@ -2,7 +2,7 @@ const GSTCustomer = require("../models/GstCustomer");
 
 const getGstCustomers = async (req, res) => {
   try {
-    const customers = await GSTCustomer.find().sort({ createdAt: -1 });
+    const customers = await GSTCustomer.find().sort({ updatedAt: -1, createdAt: -1 });
     res.json(customers);
   } catch (err) {
     res.status(500).json({ message: err.message });
