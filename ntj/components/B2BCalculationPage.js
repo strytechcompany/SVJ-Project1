@@ -151,6 +151,8 @@ export default function CreateTransaction({ navigation }) {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [billTypeLabel, setBillTypeLabel] = useState("");
   const [phone, setPhone] = useState("");
+  const [showOthersInput, setShowOthersInput] = useState(false);
+  const [othersName, setOthersName] = useState("");
 
   const normalizeCustomerType = (value, fallback = "B2B") => {
     const raw = String(value || fallback || "").toUpperCase();
@@ -462,6 +464,83 @@ export default function CreateTransaction({ navigation }) {
   const handleSelectCustomer = useCallback((cust) => {
     setSelectedCustomer(cust);
   }, []);
+  const handleOthersConfirm = useCallback(async () => {
+    const value = String(othersName || "").trim();
+    if (!value) {
+      Alert.alert("Invalid Name", "Please enter a customer name.");
+      return;
+    }
+
+    const existing = customers.find(
+      (cust) =>
+        String(cust?.name || "").trim().toLowerCase() === value.toLowerCase() &&
+        String(cust?.company || cust?.shopName || "").trim().toLowerCase() === "others",
+    );
+    if (existing) {
+      setSelectedCustomer(existing);
+      setSearch(existing.name || value);
+      setCartSearch("");
+      setPhone(existing.phone || "");
+      setShowOthersInput(false);
+      setOthersName("");
+      return;
+    }
+
+      try {
+        const payload = {
+          customerName: value,
+          phoneNumber: "0000000000",
+          shopName: "Others",
+          address: "Others",
+          oldBalance: 0,
+          advanceBalance: 0,
+          gstin: "",
+          customerType: "B2B",
+        };
+      const response = await fetch(`${base_url}/customers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(errText || "Failed to save Others entry");
+      }
+      const saved = await response.json();
+      const newCustomer = {
+        ...saved,
+        customerType: normalizeCustomerType(saved.customerType, "B2B"),
+        customerNumber: saved.phoneNumber,
+        customerId: saved.customerId,
+        id: saved._id,
+        name: saved.customerName,
+        ob: Number(saved.oldBalance || 0),
+        ab: Number(saved.advanceBalance || 0),
+        company: saved.shopName || "",
+        phone: saved.phoneNumber || "",
+        email: saved.emailId || "",
+        address: saved.address || "",
+        gst: saved.gstin || "",
+        customerName: saved.customerName,
+        shopName: saved.shopName || "Others",
+        oldBalance: Number(saved.oldBalance || 0) || 0,
+        advanceBalance: Number(saved.advanceBalance || 0) || 0,
+        billCurrentBalance:
+          (Number(saved.oldBalance || 0) || 0) - (Number(saved.advanceBalance || 0) || 0),
+        updatedAt: saved.updatedAt || new Date().toISOString(),
+      };
+
+      setCustomers((prev) => [newCustomer, ...prev]);
+      setSelectedCustomer(newCustomer);
+      setSearch(newCustomer.name || value);
+      setCartSearch("");
+      setPhone(newCustomer.phone || "");
+      setShowOthersInput(false);
+      setOthersName("");
+    } catch (error) {
+      Alert.alert("Error", error?.message || "Failed to save Others entry");
+    }
+  }, [customers, normalizeCustomerType, othersName]);
 
   const handleSelectReceiptDropdownItem = useCallback((it) => {
     const buyingValue = it?.buyingTouch;
@@ -1780,8 +1859,18 @@ export default function CreateTransaction({ navigation }) {
     // ✅ FIX 1: Remove - advBalance from formula
     const finalDistinctBalance = saveBalanceSummary.netBalance;
 
+    const baseCustomerName = String(selectedCustomer.name || "").trim();
+    const isOthersCustomer = String(
+      selectedCustomer.shopName || selectedCustomer.company || "",
+    )
+      .trim()
+      .toLowerCase() === "others";
+    const customerNameForSave =
+      isOthersCustomer && baseCustomerName && !baseCustomerName.includes("(Others)")
+        ? `${baseCustomerName} (Others)`
+        : baseCustomerName;
     const transactionData = {
-      customerName: selectedCustomer.name,
+      customerName: customerNameForSave,
       customerId: resolveCustomerRecordId(selectedCustomer),
       customerType: normalizeCustomerType(selectedCustomer.customerType, "B2B"),
       type: normalizeCustomerType(selectedCustomer.customerType, "B2B"),
@@ -1820,8 +1909,8 @@ export default function CreateTransaction({ navigation }) {
       const customerType = normalizeCustomerType(selectedCustomer.customerType, "B2B");
       const isB2C = customerType === "B2C";
       const updateEndpoint = isB2C
-        ? `${base_url}/customersB2C/${selectedCustomer.id || selectedCustomer._id}`
-        : `${base_url}/customers/${selectedCustomer.id || selectedCustomer._id}`;
+        ? `${base_url}/customersB2C/${customerRecordId}`
+        : `${base_url}/customers/${customerRecordId}`;
 
       const newNet = saveBalanceSummary.netBalance;
       const finalState = deriveBalanceStateFromNet(newNet);
@@ -1850,13 +1939,18 @@ export default function CreateTransaction({ navigation }) {
         });
 
         if (!customerUpdateRes.ok) {
-          throw new Error("Failed to update customer balance in master.");
+          const errText = await customerUpdateRes.text().catch(() => "");
+          throw new Error(
+            errText
+              ? `Failed to update customer balance in master: ${errText}`
+              : "Failed to update customer balance in master.",
+          );
         }
       }
 
       const billSummaryData = {
         customerId: customerRecordId,
-        customerName: selectedCustomer.name,
+        customerName: customerNameForSave,
         customerType: customerType,
         billType: customerType === "B2C" ? "B2C" : "B2B",
         date: date,
@@ -1937,9 +2031,10 @@ export default function CreateTransaction({ navigation }) {
 
       await syncCustomerToGstPage(generatedBillNo);
 
-      const commonPreviewPayload = {
-        description: String(description || "").trim(),
-        customer: {
+	      const commonPreviewPayload = {
+	        savedBillId: savedBillSummary?._id || savedBillSummary?.id || "",
+	        description: String(description || "").trim(),
+	        customer: {
           name: selectedCustomer.name,
           id: selectedCustomer.id || selectedCustomer._id,
           customerId: customerRecordId,
@@ -2072,9 +2167,17 @@ export default function CreateTransaction({ navigation }) {
                 <Icon name="account-group" size={24} />
                 <Text style={styles.sectionTitle}>All Customers</Text>
               </View>
-              <TouchableOpacity onPress={handleRefresh}>
-                <Icon name="refresh" color="#000" size={30} />
-              </TouchableOpacity>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <TouchableOpacity
+                  style={[styles.searchBtn, { paddingVertical: 6, paddingHorizontal: 10 }]}
+                  onPress={() => setShowOthersInput((prev) => !prev)}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "700" }}>Others</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleRefresh}>
+                  <Icon name="refresh" color="#000" size={30} />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.searchRow}>
@@ -2117,6 +2220,19 @@ export default function CreateTransaction({ navigation }) {
                 <Text style={styles.infoText}>No customers found</Text>
               ) : null}
             </ScrollView>
+            {showOthersInput ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12 }}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  placeholder="Enter customer name"
+                  value={othersName}
+                  onChangeText={setOthersName}
+                />
+                <TouchableOpacity style={styles.searchBtn} onPress={handleOthersConfirm}>
+                  <Text style={{ color: "#fff", fontWeight: "700" }}>Confirm</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </View>
         )}
 
