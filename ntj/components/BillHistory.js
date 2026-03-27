@@ -492,7 +492,25 @@ const buildSummaryForPreview = (bill = {}, bal = { ob: 0, ab: 0, current: 0 }) =
 };
 
 export default function BillHistory({ navigation, route }) {
-  const [customer, setCustomer] = useState(route.params?.customer || {});
+  const routeCustomer = route.params?.customer || null;
+  const routeCustomerId =
+    route.params?.customerId ||
+    routeCustomer?._id ||
+    routeCustomer?.id ||
+    routeCustomer?.customerId ||
+    "";
+  const [customer, setCustomer] = useState(
+    routeCustomer ||
+      (routeCustomerId
+        ? {
+            _id: routeCustomerId,
+            id: routeCustomerId,
+            customerId: routeCustomerId,
+            customerType: route.params?.customerType || "B2B",
+            type: route.params?.customerType || "B2B",
+          }
+        : {})
+  );
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [fromDate, setFromDate] = useState("");
@@ -501,6 +519,22 @@ export default function BillHistory({ navigation, route }) {
   const [showToPicker, setShowToPicker] = useState(false);
   const [billSearch, setBillSearch] = useState("");
   const [sharingBillId, setSharingBillId] = useState(null);
+
+  useEffect(() => {
+    if (routeCustomer) {
+      setCustomer(routeCustomer);
+      return;
+    }
+    if (!routeCustomerId) return;
+    setCustomer((prev) => ({
+      ...prev,
+      _id: prev?._id || routeCustomerId,
+      id: prev?.id || routeCustomerId,
+      customerId: prev?.customerId || routeCustomerId,
+      customerType: prev?.customerType || route.params?.customerType || "B2B",
+      type: prev?.type || route.params?.customerType || "B2B",
+    }));
+  }, [route.params, routeCustomer, routeCustomerId]);
 
   useEffect(() => {
     const end = new Date();
@@ -581,7 +615,6 @@ export default function BillHistory({ navigation, route }) {
         customer
       );
       if (primary.length > 0) { setBills(primary); return; }
-      if (customerId) { setBills([]); return; }
 
       // Fallback 1: fetch bill summary list and match by customerName
       // (covers old records stored with wrong customerId like "N/A")
@@ -1332,6 +1365,45 @@ export default function BillHistory({ navigation, route }) {
     return null;
   };
 
+  const getBalanceComparison = (item, isLatest = false) => {
+    const currentBalance = getBalanceDisplay(item, isLatest);
+    const previousOldBalance = num(
+      item?.previousOldBalance ??
+        item?.previewSnapshot?.summary?.previousOldBalance ??
+        item?.previewSnapshot?.header?.oldBalance ??
+        item?.summary?.ob ??
+        item?.oldBalance ??
+        item?.ob,
+      0,
+    );
+    const previousAdvanceBalance = num(
+      item?.previousAdvanceBalance ??
+        item?.previewSnapshot?.summary?.previousAdvanceBalance ??
+        item?.previewSnapshot?.header?.advanceBalance ??
+        item?.summary?.ab ??
+        item?.advanceBalance ??
+        item?.advBal,
+      0,
+    );
+    const normalizedPrevious = normalizeBalanceState({
+      oldBalance: previousOldBalance,
+      advanceBalance: previousAdvanceBalance,
+    });
+    const previousBalance =
+      normalizedPrevious.advanceBalance > 0
+        ? { label: "AB", value: normalizedPrevious.advanceBalance }
+        : { label: "OB", value: normalizedPrevious.oldBalance };
+
+    return {
+      previous: previousBalance,
+      current:
+        currentBalance ||
+        (previousBalance.label === "AB"
+          ? { label: "AB", value: 0 }
+          : { label: "OB", value: 0 }),
+    };
+  };
+
   // ── RENDER CARD ─────────────────────────────────────────────────────
 	  const renderBillItem = ({ item }) => {
 	    const snapshot = item?.previewSnapshot || null;
@@ -1455,14 +1527,21 @@ export default function BillHistory({ navigation, route }) {
     const billNumber = snapshot?.header?.billNo || item.billNo || item.invoiceNo || "00000";
     const itemId = item?._id || item?.id || null;
     const isLatest = Boolean(latestEditableBillId && itemId && latestEditableBillId === itemId);
-    const balanceDisplay = getBalanceDisplay(item, isLatest);
+    const balanceComparison = getBalanceComparison(item, isLatest);
     const isSharing = sharingBillId === item._id;
     const displayCustomerNameRaw = snapshot?.header?.customerName || item.customerName || customer?.customerName || customer?.name || "N/A";
     const displayCustomerName = appendOthersSuffix(displayCustomerNameRaw, item, snapshot?.header, customer);
     const displayPhone = snapshot?.header?.phoneNumber || item.phoneNumber || item.phone || customer?.phoneNumber || customer?.phone || "N/A";
     const displayGstin = snapshot?.header?.gstin || item.gstin || customer?.gstin || "N/A";
     const displayTotalAmount = getSavedTotalAmount(item);
-    const previewSummary = buildSummaryForPreview(item, balanceDisplay || { ob: 0, ab: 0, current: 0 });
+    const previewSummary = buildSummaryForPreview(item, {
+      ob: balanceComparison.previous.label === "OB" ? balanceComparison.previous.value : 0,
+      ab: balanceComparison.previous.label === "AB" ? balanceComparison.previous.value : 0,
+      current:
+        balanceComparison.current.label === "AB"
+          ? -Math.abs(balanceComparison.current.value)
+          : Math.abs(balanceComparison.current.value),
+    });
     const issuePure = num(previewSummary?.issue, 0);
     const receiptPure = num(previewSummary?.receipt, 0);
 
@@ -1491,26 +1570,53 @@ export default function BillHistory({ navigation, route }) {
             </View>
           ) : null}
 
-          {balanceDisplay ? (
-            <View style={styles.balanceRow}>
+          <View style={styles.balanceComparisonRow}>
+            <View style={styles.balanceComparisonColumn}>
+              {/* <Text style={styles.balanceCaption}>Previous Balance</Text> */}
               <Text
                 style={[
                   styles.balanceLabel,
-                  balanceDisplay.label === "OB" ? styles.obLabel : styles.abLabel,
+                  balanceComparison.previous.label === "OB" ? styles.obLabel : styles.abLabel,
                 ]}
               >
-                {balanceDisplay.label === "OB" ? "Old Balance" : "Advance Balance"}
+                {balanceComparison.previous.label === "OB"
+                  ? "Previous Old Balance"
+                  : "Previous Advance Balance"}
               </Text>
               <Text
                 style={[
                   styles.balanceValue,
-                  balanceDisplay.label === "OB" ? styles.obValue : styles.abValue,
+                  balanceComparison.previous.label === "OB" ? styles.obValue : styles.abValue,
                 ]}
               >
-                {balanceDisplay.value.toFixed(3)} g
+                {balanceComparison.previous.value.toFixed(3)} g
               </Text>
             </View>
-          ) : null}
+
+            <View style={[styles.balanceComparisonColumn, styles.balanceComparisonColumnRight]}>
+              {/* <Text style={[styles.balanceCaption, styles.balanceTextRight]}>Current Balance</Text> */}
+              <Text
+                style={[
+                  styles.balanceLabel,
+                  styles.balanceTextRight,
+                  balanceComparison.current.label === "OB" ? styles.obLabel : styles.abLabel,
+                ]}
+              >
+                {balanceComparison.current.label === "OB"
+                  ? "Current Old Balance"
+                  : "Current Advance Balance"}
+              </Text>
+              <Text
+                style={[
+                  styles.balanceValue,
+                  styles.balanceTextRight,
+                  balanceComparison.current.label === "OB" ? styles.obValue : styles.abValue,
+                ]}
+              >
+                {balanceComparison.current.value.toFixed(3)} g
+              </Text>
+            </View>
+          </View>
           <View style={styles.pureTotalsRow}>
             <Text style={styles.issuePureText}>Total Issued Pure: {issuePure.toFixed(3)} g</Text>
             <Text style={styles.receiptPureText}>Total Receipt Pure: {receiptPure.toFixed(3)} g</Text>
@@ -1542,13 +1648,13 @@ export default function BillHistory({ navigation, route }) {
           ) : null}
 
           {/* View */}
-          <TouchableOpacity
+          {/* <TouchableOpacity
             style={styles.actionButton}
             onPress={() => handleViewBill(item)}
           >
             <Icon name="eye" size={16} color="#2196F3" />
             <Text style={[styles.actionText, { color: "#2196F3" }]}>View</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> */}
 
           {/* Delete */}
           <TouchableOpacity
@@ -1854,18 +1960,32 @@ const styles = StyleSheet.create({
   gstInfoText: { fontSize: 12, color: "#455A64", marginBottom: 2 },
 
   // ── Balance Row ──
-  balanceRow: {
+  balanceComparisonRow: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 6,
+    alignItems: "flex-start",
+    marginBottom: 8,
+    gap: 12,
+  },
+  balanceComparisonColumn: {
+    flex: 1,
+  },
+  balanceComparisonColumnRight: {
+    alignItems: "flex-end",
+  },
+  balanceCaption: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#607D8B",
+    marginBottom: 3,
   },
   balanceLabel: { fontSize: 13, fontWeight: "600" },
   balanceValue: { fontSize: 16, fontWeight: "bold" },
+  balanceTextRight: { textAlign: "right" },
   obLabel: { color: "#C62828" },
   obValue: { color: "#C62828" },
-  abLabel: { color: "#C62828" },
-  abValue: { color: "#C62828" },
+  abLabel: { color: "#2E7D32" },
+  abValue: { color: "#2E7D32" },
   pureTotalsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
