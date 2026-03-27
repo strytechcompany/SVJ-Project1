@@ -24,7 +24,11 @@ import { Foundation } from "@expo/vector-icons";
 import { AntDesign } from "@expo/vector-icons";
 import { base_url } from "./config";
 import CommonHeader from "./CommonHeader";
-import { buildReminderAlerts } from "./reminderService";
+import {
+  buildReminderAlerts,
+  loadReminderDismissed,
+  loadReminderSnoozes,
+} from "./reminderService";
 import {
   deriveBalanceStateFromNet,
   normalizeBalanceState,
@@ -109,6 +113,23 @@ export default function HomeScreen({ route }) {
       getSafeCustomerName(row?.dealer?.customerName) ||
       getSafeCustomerName(row?.dealer?.customer_name);
     return nested || "";
+  };
+
+  const appendOthersSuffix = (name, row = {}) => {
+    const baseName = String(name || "").trim();
+    if (!baseName || baseName.includes("(Others)")) return baseName || "";
+    const shop = String(
+      row?.shopName ||
+        row?.companyName ||
+        row?.company ||
+        row?.customer?.shopName ||
+        row?.customer?.companyName ||
+        row?.customer?.company ||
+        ""
+    )
+      .trim()
+      .toLowerCase();
+    return shop === "others" ? `${baseName} (Others)` : baseName;
   };
 
   useEffect(() => {
@@ -429,12 +450,13 @@ export default function HomeScreen({ route }) {
           _sortTs: toTs(t.updatedAt || t.createdAt || t.date || 0),
         }));
 
-      const billMapped = (Array.isArray(billRows) ? billRows : [])
-        .map((t) => {
-          const dealerHit = isDealerRecord(t);
-          const summaryCurrent = toBalanceNumber(t?.summary?.current, NaN);
-          const summaryOb = toBalanceNumber(t?.summary?.ob, NaN);
-          const summaryAb = toBalanceNumber(t?.summary?.ab, NaN);
+	      const billMapped = (Array.isArray(billRows) ? billRows : [])
+	        .map((t) => {
+	          const savedBillType = normalizeType(t);
+	          const dealerHit = savedBillType === "B2B" || savedBillType === "B2C" ? false : isDealerRecord(t);
+	          const summaryCurrent = toBalanceNumber(t?.summary?.current, NaN);
+	          const summaryOb = toBalanceNumber(t?.summary?.ob, NaN);
+	          const summaryAb = toBalanceNumber(t?.summary?.ab, NaN);
           const hasSummaryCurrent = Number.isFinite(summaryCurrent);
           const balanceStateFromSummary = hasSummaryCurrent
             ? deriveBalanceStateFromNet(summaryCurrent)
@@ -442,12 +464,12 @@ export default function HomeScreen({ route }) {
                 oldBalance: summaryOb,
                 advanceBalance: summaryAb,
               });
-          return {
-            ...t,
-            type: dealerHit ? "DEALER" : normalizeType(t),
-            isDealer: dealerHit,
-            displayName: extractCustomerName(t),
-            _sourcePriority: 3,
+	          return {
+	            ...t,
+	            type: dealerHit ? "DEALER" : savedBillType,
+	            isDealer: dealerHit,
+	            displayName: extractCustomerName(t),
+	            _sourcePriority: 3,
             _sortTs: toTs(t.updatedAt || t.createdAt || t.date || 0),
             currentBalance: hasSummaryCurrent ? summaryCurrent : (t.currentBalance ?? t.availableBalance),
             availableBalance: hasSummaryCurrent ? summaryCurrent : (t.availableBalance ?? t.currentBalance),
@@ -684,15 +706,21 @@ export default function HomeScreen({ route }) {
         ...(Array.isArray(retailRows) ? retailRows : []),
       ];
 
+      const [snoozes, dismissed] = await Promise.all([
+        loadReminderSnoozes(),
+        loadReminderDismissed(),
+      ]);
       const allAlerts = buildReminderAlerts({
         customers,
         transactions: transactionsForReminder,
         settings: { enabled: true, days: 3, inAppOnly: true },
+        snoozes,
+        dismissed,
         now: new Date(),
       });
 
       const pendingOldBalanceAlerts = allAlerts.filter(
-        (a) => Number(a.pendingBalance || 0) > 0 && Number(a.overdueDays || 0) > 3
+        (a) => Number(a.pendingBalance || 0) > 0 && a.notificationActive
       );
       if (pendingOldBalanceAlerts.length === 0) {
         setReminderBanner(null);
@@ -873,18 +901,18 @@ export default function HomeScreen({ route }) {
     }
   };
 
-  const resolveDisplayType = (txn = {}) => {
-    const raw = String(txn.type || txn.customerType || txn.dealerType || "").toUpperCase();
-    if (txn.isDealer || raw === "DEALER" || raw === "SUPPLIER") return "Dealer";
-    if (raw === "B2C") return "B2C";
-    if (raw === "B2B") return "B2B";
-    if (raw) return raw;
-    return "B2B";
-  };
+	  const resolveDisplayType = (txn = {}) => {
+	    const raw = String(txn.type || txn.customerType || txn.dealerType || "").toUpperCase();
+	    if (raw === "B2B") return "B2B";
+	    if (raw === "B2C") return "B2C";
+	    if (txn.isDealer || raw === "DEALER" || raw === "SUPPLIER") return "Dealer";
+	    if (raw) return raw;
+	    return "B2B";
+	  };
 
   const resolveDisplayName = (txn = {}) => {
     const name = extractCustomerName(txn);
-    return name || "Unknown";
+    return appendOthersSuffix(name, txn) || "Unknown";
   };
 
   const filteredTransactions = transactions.filter((txn) => {
@@ -1057,10 +1085,26 @@ export default function HomeScreen({ route }) {
 
           <TouchableOpacity
             style={styles.menuItem}
+            onPress={() => handleMenuNavigation("MiniStatement")}
+          >
+            <Icon name="alert-circle-outline" size={25} color="#fff" />
+            <Text style={styles.menuText}>Mini Statement</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItem}
             onPress={() => handleMenuNavigation("StockMaster")}
           >
             <Icon name="alert-circle-outline" size={25} color="#fff" />
             <Text style={styles.menuText}>Stock Master</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => handleMenuNavigation("ItemEntry")}
+          >
+            <Icon name="alert-circle-outline" size={25} color="#fff" />
+            <Text style={styles.menuText}>Item Entry</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
