@@ -649,7 +649,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const resultTableBalanceLabel = String(frozenSummaryData?.finalLabel || summaryFinalLabel || "");
   const resultTableBaseBalance = toNum(
     frozenSummaryData?.finalValue ?? frozenSummaryData?.balanceValue,
-    resultValueBaseBalance,
+    toNum(summaryFinalValue, 0),
   );
   const dealerOpeningOldBalance = toNum(summaryOB, 0);
   const dealerOpeningAdvanceBalance = toNum(summaryAB, 0);
@@ -921,10 +921,9 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       return;
     }
     if (isBillLocked) return;
-    const nextReturnValue = Math.max(baseBalance - normalizedReturnAmount, 0);
-    setReturnValue(nextReturnValue);
-    setFinalValue(nextReturnValue * normalizedResultFtRate);
-  }, [isBillLocked, isNilFt, normalizedReturnAmount, baseBalance, normalizedResultFtRate]);
+    setReturnValue(baseBalance);
+    setFinalValue(baseBalance * normalizedResultFtRate);
+  }, [isBillLocked, isNilFt, baseBalance, normalizedResultFtRate]);
 
   const renderResultValueTable = () => {
     if (!showResultValueTable) return null;
@@ -936,33 +935,13 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             <Text style={styles.resultValueFormulaText}>
               {`${resultValueBalanceLabel}: ${resultValueBaseBalance.toFixed(3)}`}
             </Text>
-            {isBillLocked ? (
-	              <View style={styles.resultValueInputRow}>
-	                <Text style={styles.resultValueInputLabel}>Return Input:</Text>
-	                <Text style={styles.resultValueStaticValue}>{normalizedReturnAmount.toFixed(3)}</Text>
-              </View>
-            ) : (
-              <View style={styles.resultValueInputRow}>
-                <Text style={styles.resultValueInputLabel}>Return Input (Editable):</Text>
-	                <TextInput
-	                  style={styles.resultValueInput}
-	                  value={returnInput}
-	                  onChangeText={handleReturnAmountChange}
-	                  keyboardType="decimal-pad"
-	                  placeholder="0.000"
-	                  placeholderTextColor="#666"
-	                  editable={!isBillLocked}
-	                />
-	              </View>
-	            )}
-	            {parsedReturnAmount > baseBalance && !isBillLocked ? (
-	              <Text style={styles.resultValueWarning}>
-	                Return input cannot exceed base balance.
-	              </Text>
-	            ) : null}
-	            <Text style={styles.resultValueEquals}>
-	              {`${baseBalance.toFixed(3)} - ${normalizedReturnAmount.toFixed(3)} = ${toNum(returnValue, 0).toFixed(3)}`}
-	            </Text>
+            <View style={styles.resultValueInputRow}>
+              <Text style={styles.resultValueInputLabel}>Ft Rate:</Text>
+              <Text style={styles.resultValueStaticValue}>{toNum(ftRate, 0).toFixed(2)}</Text>
+            </View>
+            <Text style={styles.resultValueEquals}>
+              {`Return Value (Nil Ft) = ${baseBalance.toFixed(3)}`}
+            </Text>
             <Text style={styles.resultValueCashReturn}>
               {`Return Value (Nil Ft): ${toNum(returnValue, 0).toFixed(3)}`}
             </Text>
@@ -1040,7 +1019,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             <td colspan="2"><strong>Return Value (Nil Ft): ${toNum(returnValue, 0).toFixed(3)}</strong></td>
           </tr>
           <tr>
-            <td colspan="2">${baseBalance.toFixed(3)} - ${normalizedReturnAmount.toFixed(3)} = ${toNum(returnValue, 0).toFixed(3)} (Nil Ft)</td>
+            <td colspan="2">Return Value (Nil Ft) = ${baseBalance.toFixed(3)}</td>
           </tr>
           <tr>
             <td>Ft Rate</td>
@@ -3298,11 +3277,16 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     try {
       setIsPrinting(true);
       const html = generateHTML();
-      await Print.printAsync({
-        html,
-        width: 204,
-        height: 842,
-      });
+      try {
+        await Print.printAsync({ html });
+      } catch (printError) {
+        console.warn("Default print failed, retrying with fixed page size.", printError);
+        await Print.printAsync({
+          html,
+          width: 204,
+          height: 842,
+        });
+      }
     } catch (error) {
       Alert.alert('Error', 'Failed to process bill');
       console.error("General bill processing error:", error);
@@ -3475,19 +3459,32 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     const nextMode = b2bNilMode === mode ? "" : mode;
     setSelectedResultType(resolveSelectedResultType(nextMode, isNilIssueSelected));
     if (nextMode === "NIL FT") {
+      const nextFtRate = normalizedResultFtRate > 0 ? normalizedResultFtRate : currentB2BFtRate;
+      setFtRate(nextFtRate);
       setIsNilFt(true);
       setReturnInput("");
       setReturnValue(resultValueBaseBalance);
-      setFinalValue(resultValueBaseBalance * normalizedResultFtRate);
+      setFinalValue(resultValueBaseBalance * nextFtRate);
       setSavedNilFtValue(resultValueBaseBalance);
       setIsNilBalance(false);
-    } else if (nextMode === "NIL Balance") {
-      const nextFtRate = normalizedResultFtRate > 0 ? normalizedResultFtRate : currentB2BFtRate;
-      setFtRate(nextFtRate);
-      setIsNilBalance(true);
-      setIsNilFt(false);
-      setSavedNilBalanceAmount(resultValueBaseBalance * nextFtRate);
-    } else {
+      setB2bLocalBalanceOverride({
+        oldBalance: null,
+        advanceBalance: null,
+      });
+      setB2bBalanceResetApplied(false);
+	    } else if (nextMode === "NIL Balance") {
+	      const nextFtRate = normalizedResultFtRate > 0 ? normalizedResultFtRate : currentB2BFtRate;
+	      setFtRate(nextFtRate);
+	      setIsNilBalance(true);
+	      setIsNilFt(false);
+	      setResultValue(resultValueBaseBalance * nextFtRate);
+	      setSavedNilBalanceAmount(resultValueBaseBalance * nextFtRate);
+	      setB2bLocalBalanceOverride({
+	        oldBalance: null,
+	        advanceBalance: null,
+	      });
+	      setB2bBalanceResetApplied(false);
+	    } else {
       setSavedNilFtValue(0);
       setSavedNilBalanceAmount(0);
       setIsNilBalance(false);
@@ -3503,12 +3500,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       setB2bBalanceResetApplied(false);
     }
 
-    if (nextMode) {
-      try {
-        await resetSelectedB2BCustomerBalance();
-      } catch (error) {
-        Alert.alert("Error", error?.message || "Failed to reset customer balance");
-        return;
+    if (nextMode && nextMode !== "NIL Balance" && nextMode !== "NIL FT") {
+	      try {
+	        await resetSelectedB2BCustomerBalance();
+	      } catch (error) {
+	        Alert.alert("Error", error?.message || "Failed to reset customer balance");
+	        return;
       }
     }
 
@@ -3589,14 +3586,17 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	        const isNilBalanceSelected = isB2BBill && !isDealerPreview && activeB2BNilMode === "NIL Balance";
 	        const isNilFTSelected = isB2BBill && !isDealerPreview && activeB2BNilMode === "NIL FT";
 	        const isNilIssueForSave = isB2BBill && !isDealerPreview && isNilIssueSelected;
-	        const shouldResetB2BBalances =
-	          isB2BBill && !isDealerPreview && (isNilBalanceSelected || isNilFTSelected || b2bBalanceResetApplied);
-	        const activeResultFtRate = isNilBalanceSelected ? toNum(ftRate, currentB2BFtRate) : currentB2BFtRate;
+		        const shouldResetB2BBalances =
+		          isB2BBill && !isDealerPreview && b2bBalanceResetApplied;
+        const activeResultFtRate =
+          isNilBalanceSelected || isNilFTSelected
+            ? toNum(ftRate, currentB2BFtRate)
+            : currentB2BFtRate;
 	        const baseBalanceForSave = isNilFTSelected || isNilBalanceSelected ? baseBalance : 0;
-	        const returnAmountForSave = isNilFTSelected ? Math.min(Math.max(parseFloat(returnInput) || 0, 0), baseBalanceForSave) : 0;
-	        const returnValueForSave = isNilFTSelected
-	          ? Math.max(baseBalanceForSave - returnAmountForSave, 0)
-	          : 0;
+		        const returnAmountForSave = 0;
+		        const returnValueForSave = isNilFTSelected
+		          ? baseBalanceForSave
+		          : 0;
 	        const finalAmountForSave = isNilFTSelected
 	          ? returnValueForSave * activeResultFtRate
 	          : isNilBalanceSelected
