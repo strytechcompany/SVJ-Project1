@@ -57,6 +57,7 @@ import PaymentsScreen from "./components/Payments.js";
 import PaymentHistory from "./components/PaymentHistory.js";
 
 import UPIControl from "./components/UPIControl.js";
+import MiniStatementPage from "./components/ministatementpage.js";
 
 import GSTPage from "./components/GSTPage.js";
 import CustomerGstPage from "./components/customerGstPage.js";
@@ -218,6 +219,7 @@ export default function App() {
         <Stack.Screen name="Payments" component={PaymentsScreen} />
         <Stack.Screen name="PaymentHistory" component={PaymentHistory} />
         <Stack.Screen name="UPIControl" component={UPIControl} />
+        <Stack.Screen name="MiniStatement" component={MiniStatementPage} />
         <Stack.Screen name="ThirukkuralSettings" component={ThirukkuralSettings} />
         <Stack.Screen name="ReminderSettings" component={ReminderSettings} />
         <Stack.Screen name="AdminNotifications" component={AdminNotifications} />
