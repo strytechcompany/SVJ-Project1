@@ -164,6 +164,33 @@ export default function CreateTransaction({ navigation }) {
   const resolveCustomerRecordId = (customer) =>
     customer?.id || customer?._id || customer?.customerId || "";
 
+  const openSelectedCustomerHistory = useCallback(() => {
+    if (!selectedCustomer) return;
+    const resolvedCustomerId = resolveCustomerRecordId(selectedCustomer);
+    if (!resolvedCustomerId) return;
+
+    const normalizedType = normalizeCustomerType(selectedCustomer?.customerType, "B2B");
+    navigation.navigate("BillHistory", {
+      customerId: resolvedCustomerId,
+      customerType: normalizedType,
+      customer: {
+        ...selectedCustomer,
+        _id: selectedCustomer?._id || resolvedCustomerId,
+        id: selectedCustomer?.id || resolvedCustomerId,
+        customerId: selectedCustomer?.customerId || resolvedCustomerId,
+        customerType: normalizedType,
+        type: normalizedType,
+        name: selectedCustomer?.name || selectedCustomer?.customerName || "",
+        customerName: selectedCustomer?.customerName || selectedCustomer?.name || "",
+        phone:
+          selectedCustomer?.phone ||
+          selectedCustomer?.phoneNumber ||
+          selectedCustomer?.customerNumber ||
+          "",
+      },
+    });
+  }, [navigation, selectedCustomer]);
+
   // ── TOTALS (after useState, before useEffect) ───────────────
   const totals = useMemo(() => {
     const totalIssuePure = issueItems.reduce(
@@ -2264,7 +2291,7 @@ export default function CreateTransaction({ navigation }) {
 
             <View style={styles.customerInfoRow}>
               <View style={styles.customerDetails}>
-                <TouchableOpacity onPress={() => {navigation.navigate('CustomerDataList', { customerId: selectedCustomer.id })}}>
+                <TouchableOpacity onPress={openSelectedCustomerHistory} disabled={!selectedCustomer}>
                   <Text style={styles.infoText}>{selectedCustomer.name}</Text>
                 </TouchableOpacity>
                 {/* <Text style={styles.infoText}>
@@ -2291,12 +2318,20 @@ export default function CreateTransaction({ navigation }) {
 
         {/* ISSUE ENTRY */}
         {selectedCustomer && (
-          <View style={styles.card}>
+          <View style={[styles.card, styles.issueEntryCard]}>
+            <View style={styles.issueReceiptOverlay}>
+              <Text style={styles.issueReceiptOverlayLine}>
+                Issue: {totalIssuePure.toFixed(3)}g
+              </Text>
+              <Text style={styles.issueReceiptOverlayLine}>
+                Receipt: {totalReceiptPure.toFixed(3)}g
+              </Text>
+            </View>
             <View style={styles.issueHeader}>
               <View style={styles.greenDot} />
               <Text style={styles.sectionTitle}>Issue Entry</Text>
               <View style={styles.cartContainer}>
-                <View style={{ position: 'relative' }}>
+                <View style={{ position: "relative" }}>
                   <Icon name="cart" size={28} color="#000" />
                   {issueItems.length > 0 && (
                     <View style={styles.badge}>
@@ -2304,10 +2339,10 @@ export default function CreateTransaction({ navigation }) {
                     </View>
                   )}
                 </View>
-	                <Text style={styles.cartText}>{totalIssuePure.toFixed(3)}g</Text>
+                <Text style={styles.cartText}>{totalIssuePure.toFixed(3)}g</Text>
                 <Text style={styles.cartText}>
-                  {"\u20B9"}<Text style={{ fontWeight: "bold" }}>{issueFtAmount.toFixed(2)}</Text> 
-                  {/* <Text style={{ fontSize: 12 }}>( {totalIssuePure.toFixed(3)} x {ftRateValue.toFixed(2)})</Text> */}
+                  {"\u20B9"}
+                  <Text style={{ fontWeight: "bold" }}>{issueFtAmount.toFixed(2)}</Text>
                 </Text>
               </View>
             </View>
@@ -2497,7 +2532,7 @@ export default function CreateTransaction({ navigation }) {
               <View style={[styles.greenDot, { backgroundColor: "#0aa76a" }]} />
               <Text style={styles.sectionTitle}>Receipt Entry</Text>
               <View style={styles.cartContainer}>
-                <View style={{ position: 'relative' }}>
+                <View style={{ position: "relative" }}>
                   <Icon name="cart" size={28} color="#000" />
                   {receiptItems.length > 0 && (
                     <View style={styles.badge}>
@@ -2507,8 +2542,8 @@ export default function CreateTransaction({ navigation }) {
                 </View>
                 <Text style={styles.cartText}>{totalReceiptPure.toFixed(3)}g</Text>
                 <Text style={styles.cartText}>
-                  {"\u20B9"}<Text style={{ fontWeight: "bold" }}>{receiptFtAmount.toFixed(2)}</Text> 
-                  {/* <Text style={{ fontSize: 12 }}>( {totalReceiptPure.toFixed(3)} x {ftRateValue.toFixed(2)})</Text> */}
+                  {"\u20B9"}
+                  <Text style={{ fontWeight: "bold" }}>{receiptFtAmount.toFixed(2)}</Text>
                 </Text>
               </View>
             </View>
