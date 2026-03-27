@@ -19,7 +19,12 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { base_url } from "./config";
-import { buildReminderAlerts, loadReminderSettings } from "./reminderService";
+import {
+  buildReminderAlerts,
+  loadReminderDismissed,
+  loadReminderSettings,
+  loadReminderSnoozes,
+} from "./reminderService";
 import {
   deriveBalanceStateFromNet,
   normalizeBalanceState,
@@ -885,10 +890,16 @@ export default function CustomerMasterList({ navigation, route }) {
       );
 
       const allCustomers = [...b2bCustomers, ...b2cCustomers, ...supplierCustomers];
+      const [snoozes, dismissed] = await Promise.all([
+        loadReminderSnoozes(),
+        loadReminderDismissed(),
+      ]);
       const reminders = buildReminderAlerts({
         customers: allCustomers,
         transactions: Array.isArray(txData) ? txData : [],
         settings: reminderSettings,
+        snoozes,
+        dismissed,
       });
       const reminderMap = new Map(reminders.map((r) => [String(r.customerId || r.customerName), r]));
       const decoratedCustomers = allCustomers.map((customer) => {
