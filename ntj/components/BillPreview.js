@@ -760,10 +760,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const resultValueBalanceLabel = resultTableBalanceLabel;
   const resultValueBaseBalance = resultTableBaseBalance > 0 ? resultTableBaseBalance : 0;
   const baseBalance = resultValueBaseBalance;
-  const normalizedResultFtRate = toNum(ftRate, 0);
   const parsedReturnAmount = Math.max(0, toNum(returnInput, 0));
   const normalizedReturnAmount = Math.min(parsedReturnAmount, baseBalance);
-  const computedNilFtValue = rawSummaryFinalValue;
+  const normalizedResultFtRate = toNum(ftRate, currentB2BFtRate);
+  const computedNilFtFinalGram = Math.max(0, baseBalance - normalizedReturnAmount);
+  const computedNilFtFinalAmount = computedNilFtFinalGram * normalizedResultFtRate;
   const computedNilBalanceAmount = baseBalance * currentB2BFtRate;
   const showResultValueTable =
     customer?.type === "B2B" &&
@@ -772,10 +773,10 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     baseBalance > 0;
   const displayNilFtValue =
     isActiveNilFT || isNilFt
-      ? toNum(finalValue, 0)
+      ? toNum(returnValue, computedNilFtFinalGram)
       : savedNilFtValue > 0 && isFromHistory
         ? savedNilFtValue
-        : computedNilFtValue;
+        : computedNilFtFinalGram;
   const displayNilBalanceAmount =
     isActiveNilBalance || isNilBalance
       ? toNum(resultValue, 0)
@@ -807,13 +808,6 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
           ? nilBalanceResultText
           : "";
   const nilIssueButtonText = `NIL Issue : \u20B9 ${formatIndianNumber(Math.round(resolvedNilIssueAmount))}`;
-  const handleResultFtRateChange = (text) => {
-    if (isBillLocked) return;
-    const cleaned = String(text || "").replace(/[^0-9.]/g, "");
-    const [head, ...rest] = cleaned.split(".");
-    const normalized = rest.length > 0 ? `${head}.${rest.join("")}` : head;
-    setFtRate(toNum(normalized, 0));
-  };
   const handleReturnAmountChange = (text) => {
     if (isBillLocked) return;
     const cleaned = String(text || "").replace(/[^0-9.]/g, "");
@@ -821,7 +815,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     setReturnInput(cleaned);
   };
   const handleToggleB2BCashInput = () => {
-    if (customer?.type !== "B2B" || isDealerPreview || isBillLocked) return;
+    if (customer?.type !== "B2B" || isDealerPreview) return;
     setShowB2BCashInput((prev) => {
       const next = !prev;
       if (next) {
@@ -838,7 +832,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     });
   };
   const handleSaveB2BCash = () => {
-    if (customer?.type !== "B2B" || isDealerPreview || isBillLocked) return;
+    if (customer?.type !== "B2B" || isDealerPreview) return;
     const value = toNum(b2bCashInput, 0);
     setB2bSavedCashValue(value);
     setB2bCashInput(toNum(value, 0).toFixed(2));
@@ -912,7 +906,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     }
     if (isBillLocked) return;
     setResultValue(resultValueBaseBalance * normalizedResultFtRate);
-  }, [isBillLocked, isNilBalance, normalizedResultFtRate, resultValueBaseBalance]);
+  }, [ftRate, isBillLocked, isNilBalance, resultValueBaseBalance]);
 
   useEffect(() => {
     if (!isNilFt) {
@@ -921,9 +915,9 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       return;
     }
     if (isBillLocked) return;
-    setReturnValue(baseBalance);
-    setFinalValue(baseBalance * normalizedResultFtRate);
-  }, [isBillLocked, isNilFt, baseBalance, normalizedResultFtRate]);
+    setReturnValue(computedNilFtFinalGram);
+    setFinalValue(computedNilFtFinalAmount);
+  }, [computedNilFtFinalAmount, computedNilFtFinalGram, isBillLocked, isNilFt]);
 
   const renderResultValueTable = () => {
     if (!showResultValueTable) return null;
@@ -935,21 +929,29 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             <Text style={styles.resultValueFormulaText}>
               {`${resultValueBalanceLabel}: ${resultValueBaseBalance.toFixed(3)}`}
             </Text>
-            <View style={styles.resultValueInputRow}>
-              <Text style={styles.resultValueInputLabel}>Ft Rate:</Text>
-              <Text style={styles.resultValueStaticValue}>{toNum(ftRate, 0).toFixed(2)}</Text>
+            <View style={styles.resultValueRow}>
+              <Text style={styles.resultValueFormulaText}>Input Value</Text>
+              <TextInput
+                style={styles.resultValueInput}
+                value={String(returnInput ?? "")}
+                onChangeText={handleReturnAmountChange}
+                keyboardType="numeric"
+                placeholder="0.000"
+                placeholderTextColor="#666"
+                editable={!isBillLocked}
+              />
             </View>
             <Text style={styles.resultValueEquals}>
-              {`Return Value (Nil Ft) = ${baseBalance.toFixed(3)}`}
+              {`${baseBalance.toFixed(3)} - ${normalizedReturnAmount.toFixed(3)} = ${computedNilFtFinalGram.toFixed(3)}`}
             </Text>
             <Text style={styles.resultValueCashReturn}>
               {`Return Value (Nil Ft): ${toNum(returnValue, 0).toFixed(3)}`}
             </Text>
             <Text style={styles.resultValueEquals}>
-              {`${toNum(returnValue, 0).toFixed(3)} × Ft Rate (${toNum(ftRate, 0).toFixed(3)}) = ${toNum(finalValue, 0).toFixed(3)}`}
+              {`${toNum(returnValue, 0).toFixed(3)} × Ft Rate (${toNum(ftRate, currentB2BFtRate).toFixed(2)})`}
             </Text>
             <Text style={styles.resultValueCashReturn}>
-              {`Final Amount (Nil Ft): ${toNum(finalValue, 0).toFixed(3)}`}
+              {`Final Amount (Nil Ft): ${toNum(finalValue, 0).toFixed(2)}`}
             </Text>
           </View>
         </View>
@@ -976,7 +978,13 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             <TextInput
               style={styles.resultValueInput}
               value={String(ftRate ?? "")}
-              onChangeText={handleResultFtRateChange}
+              onChangeText={(text) => {
+                if (isBillLocked) return;
+                const cleaned = String(text || "").replace(/[^0-9.]/g, "");
+                const [head, ...rest] = cleaned.split(".");
+                const normalized = rest.length > 0 ? `${head}.${rest.join("")}` : head;
+                setFtRate(toNum(normalized, 0));
+              }}
               keyboardType="numeric"
               placeholder="Ft Rate"
               placeholderTextColor="#666"
@@ -999,40 +1007,31 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     if (isNilFt) {
       return `
         <h2>Result Value Table:</h2>
-        <table>
-          <tr>
-            <th colspan="2">Result Value Table</th>
-          </tr>
-          <tr>
-            <td>Balance</td>
+	        <table>
+	          <tr>
+	            <th colspan="2">Result Value Table</th>
+	          </tr>
+	          <tr>
+	            <td>Balance</td>
 	            <td>${baseBalance.toFixed(3)}</td>
-          </tr>
-          <tr>
-            <td>Return Input</td>
-            <td>${normalizedReturnAmount.toFixed(3)}</td>
-          </tr>
-          <tr>
-            <td>Return Value</td>
-            <td>${toNum(returnValue, 0).toFixed(3)}</td>
-          </tr>
-          <tr>
-            <td colspan="2"><strong>Return Value (Nil Ft): ${toNum(returnValue, 0).toFixed(3)}</strong></td>
-          </tr>
-          <tr>
-            <td colspan="2">Return Value (Nil Ft) = ${baseBalance.toFixed(3)}</td>
-          </tr>
-          <tr>
-            <td>Ft Rate</td>
-            <td>${toNum(ftRate, 0).toFixed(3)}</td>
-          </tr>
-          <tr>
-            <td>Final Amount</td>
-            <td>${toNum(finalValue, 0).toFixed(3)}</td>
-          </tr>
-          <tr>
-            <td colspan="2">${toNum(returnValue, 0).toFixed(3)} × ${toNum(ftRate, 0).toFixed(3)} = ${toNum(finalValue, 0).toFixed(3)}</td>
-          </tr>
-        </table>
+	          </tr>
+	          <tr>
+	            <td>Input Value</td>
+	            <td>${normalizedReturnAmount.toFixed(3)}</td>
+	          </tr>
+	          <tr>
+	            <td colspan="2">${baseBalance.toFixed(3)} - ${normalizedReturnAmount.toFixed(3)} = ${computedNilFtFinalGram.toFixed(3)}</td>
+	          </tr>
+	          <tr>
+	            <td colspan="2"><strong>Return Value (Nil Ft): ${toNum(returnValue, 0).toFixed(3)}</strong></td>
+	          </tr>
+	          <tr>
+	            <td colspan="2">${toNum(returnValue, 0).toFixed(3)} × Ft Rate (${toNum(ftRate, currentB2BFtRate).toFixed(2)})</td>
+	          </tr>
+	          <tr>
+	            <td colspan="2"><strong>Final Amount (Nil Ft): ${toNum(finalValue, 0).toFixed(2)}</strong></td>
+	          </tr>
+	        </table>
       `;
     }
     return `
@@ -2128,38 +2127,77 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     return "";
   };
 
-  const resetSelectedB2BCustomerBalance = async () => {
-    if (customer?.type !== "B2B" || isDealerPreview) return false;
-    const customerId = getCustomerIdForSave();
-    if (!customerId) return false;
-
+  const updateB2BBalances = async ({
+    customerId,
+    oldBalance,
+    advanceBalance,
+    billId = "",
+    billType = "B2B",
+  }) => {
+    const safeOldBalance = toNum(oldBalance, 0);
+    const safeAdvanceBalance = toNum(advanceBalance, 0);
     const payload = {
-      oldBalance: 0,
-      advanceBalance: 0,
-      availableBalance: 0,
-      billCurrentBalance: 0,
+      oldBalance: safeOldBalance,
+      advanceBalance: safeAdvanceBalance,
+      availableBalance: safeOldBalance - safeAdvanceBalance,
+      billCurrentBalance: safeOldBalance - safeAdvanceBalance,
       lastTransactionDate: new Date().toISOString(),
-      lastTransactionType: "B2B",
-      customerType: "B2B",
+      lastTransactionType: billType,
+      customerType: billType,
+      ...(billId ? { billId } : {}),
     };
 
-    const response = await fetch(`${base_url}/customers/${customerId}`, {
+    return fetch(`${base_url}/customers/${customerId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+  };
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
-      throw new Error(errorText || "Failed to reset customer balance");
+  const applyLocalB2BNilModeState = (mode) => {
+    const isNilBalanceMode = mode === "NIL Balance";
+    const isNilFTMode = mode === "NIL FT";
+
+    setB2bNilMode(mode);
+    setSelectedResultType(resolveSelectedResultType(mode, isNilIssueSelected));
+    setIsNilBalance(isNilBalanceMode);
+    setIsNilFt(isNilFTMode);
+
+    if (isNilFTMode) {
+      setReturnInput("");
+      setReturnValue(resultValueBaseBalance);
+      setFinalValue(resultValueBaseBalance);
+      setSavedNilFtValue(resultValueBaseBalance);
+      setSavedNilBalanceAmount(0);
+      setB2bLocalBalanceOverride({ oldBalance: 0, advanceBalance: 0 });
+      setB2bBalanceResetApplied(true);
+      return;
     }
 
-    setB2bLocalBalanceOverride({
-      oldBalance: 0,
-      advanceBalance: 0,
-    });
-    setB2bBalanceResetApplied(true);
-    return true;
+    if (isNilBalanceMode) {
+      const nextFtRate = toNum(ftRate, 0) > 0 ? toNum(ftRate, 0) : currentB2BFtRate;
+      const nextNilBalanceAmount = resultValueBaseBalance * nextFtRate;
+      setFtRate(nextFtRate);
+      setResultValue(nextNilBalanceAmount);
+      setSavedNilBalanceAmount(nextNilBalanceAmount);
+      setSavedNilFtValue(0);
+      setB2bLocalBalanceOverride({ oldBalance: 0, advanceBalance: 0 });
+      setB2bBalanceResetApplied(true);
+      return;
+    }
+
+    setSavedNilFtValue(0);
+    setSavedNilBalanceAmount(0);
+    setResultValue(0);
+    setReturnInput("");
+    setReturnValue(0);
+    setFinalValue(0);
+    setB2bLocalBalanceOverride({ oldBalance: null, advanceBalance: null });
+    setB2bBalanceResetApplied(false);
+  };
+
+  const rollbackLocalB2BNilModeState = () => {
+    applyLocalB2BNilModeState("");
   };
 
   const [generatedBillNo, setGeneratedBillNo] = useState("");
@@ -3455,61 +3493,9 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   };
 
   const handleSelectB2BNilMode = async (mode) => {
-    if (customer?.type !== "B2B" || isBillLocked) return;
+    if (customer?.type !== "B2B") return;
     const nextMode = b2bNilMode === mode ? "" : mode;
-    setSelectedResultType(resolveSelectedResultType(nextMode, isNilIssueSelected));
-    if (nextMode === "NIL FT") {
-      const nextFtRate = normalizedResultFtRate > 0 ? normalizedResultFtRate : currentB2BFtRate;
-      setFtRate(nextFtRate);
-      setIsNilFt(true);
-      setReturnInput("");
-      setReturnValue(resultValueBaseBalance);
-      setFinalValue(resultValueBaseBalance * nextFtRate);
-      setSavedNilFtValue(resultValueBaseBalance);
-      setIsNilBalance(false);
-      setB2bLocalBalanceOverride({
-        oldBalance: null,
-        advanceBalance: null,
-      });
-      setB2bBalanceResetApplied(false);
-	    } else if (nextMode === "NIL Balance") {
-	      const nextFtRate = normalizedResultFtRate > 0 ? normalizedResultFtRate : currentB2BFtRate;
-	      setFtRate(nextFtRate);
-	      setIsNilBalance(true);
-	      setIsNilFt(false);
-	      setResultValue(resultValueBaseBalance * nextFtRate);
-	      setSavedNilBalanceAmount(resultValueBaseBalance * nextFtRate);
-	      setB2bLocalBalanceOverride({
-	        oldBalance: null,
-	        advanceBalance: null,
-	      });
-	      setB2bBalanceResetApplied(false);
-	    } else {
-      setSavedNilFtValue(0);
-      setSavedNilBalanceAmount(0);
-      setIsNilBalance(false);
-      setIsNilFt(false);
-      setResultValue(0);
-      setReturnInput("");
-      setReturnValue(0);
-      setFinalValue(0);
-      setB2bLocalBalanceOverride({
-        oldBalance: null,
-        advanceBalance: null,
-      });
-      setB2bBalanceResetApplied(false);
-    }
-
-    if (nextMode && nextMode !== "NIL Balance" && nextMode !== "NIL FT") {
-	      try {
-	        await resetSelectedB2BCustomerBalance();
-	      } catch (error) {
-	        Alert.alert("Error", error?.message || "Failed to reset customer balance");
-	        return;
-      }
-    }
-
-    setB2bNilMode(nextMode);
+    applyLocalB2BNilModeState(nextMode);
   };
 
   const updateB2CBalances = async ({ customerId, oldBalance, advanceBalance, billId = "" }) => {
@@ -3560,7 +3546,10 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       b2cSaveBalance = false,
       b2cForceZero = false,
       b2bNilMode: b2bNilModeOverride = "",
+      forceB2BZeroBalance = false,
       silent = false,
+      lockAfterSave = false,
+      showSuccessAlert = !silent,
       force = false,
     } = options || {};
 	    const saveTask = (async () => {
@@ -3586,16 +3575,17 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	        const isNilBalanceSelected = isB2BBill && !isDealerPreview && activeB2BNilMode === "NIL Balance";
 	        const isNilFTSelected = isB2BBill && !isDealerPreview && activeB2BNilMode === "NIL FT";
 	        const isNilIssueForSave = isB2BBill && !isDealerPreview && isNilIssueSelected;
-		        const shouldResetB2BBalances =
-		          isB2BBill && !isDealerPreview && b2bBalanceResetApplied;
-        const activeResultFtRate =
-          isNilBalanceSelected || isNilFTSelected
-            ? toNum(ftRate, currentB2BFtRate)
-            : currentB2BFtRate;
+	        const shouldResetB2BBalances =
+	          isB2BBill &&
+	          !isDealerPreview &&
+	          (forceB2BZeroBalance || b2bBalanceResetApplied || isNilBalanceSelected || isNilFTSelected);
+	        const activeResultFtRate = isNilBalanceSelected || isNilFTSelected
+	          ? toNum(ftRate, currentB2BFtRate)
+	          : currentB2BFtRate;
 	        const baseBalanceForSave = isNilFTSelected || isNilBalanceSelected ? baseBalance : 0;
-		        const returnAmountForSave = 0;
+		        const returnAmountForSave = isNilFTSelected ? normalizedReturnAmount : 0;
 		        const returnValueForSave = isNilFTSelected
-		          ? baseBalanceForSave
+		          ? Math.max(0, baseBalanceForSave - returnAmountForSave)
 		          : 0;
 	        const finalAmountForSave = isNilFTSelected
 	          ? returnValueForSave * activeResultFtRate
@@ -4011,18 +4001,18 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         date: normalizedBillDate,
       };
 
-      if (isB2CBill) {
-        const updateRes = await updateB2CBalances({
-          customerId,
-          oldBalance: toNum(oldBalanceForSave, 0),
-          advanceBalance: toNum(advanceBalanceForSave, 0),
-          billId: transactions?.[0]?._id || transactions?.[0]?.id || "",
+	      if (isB2CBill) {
+	        const updateRes = await updateB2CBalances({
+	          customerId,
+	          oldBalance: toNum(oldBalanceForSave, 0),
+	          advanceBalance: toNum(advanceBalanceForSave, 0),
+	          billId: transactions?.[0]?._id || transactions?.[0]?.id || "",
         });
         if (!updateRes.ok) {
           const err = await updateRes.text();
-          throw new Error(err || "Failed to update B2C customer balance");
-        }
-      }
+	          throw new Error(err || "Failed to update B2C customer balance");
+	        }
+	      }
 
       const existingBillId = savedBillIdRef.current || route.params?.savedBillId || route.params?.billId || "";
       const saveUrl = existingBillId
@@ -4040,19 +4030,41 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       }
 
 	      const savedBill = await res.json();
+	      if (isB2BBill && !isDealerPreview) {
+	        const updateRes = await updateB2BBalances({
+	          customerId,
+	          oldBalance: toNum(finalB2BOldBalance, 0),
+	          advanceBalance: toNum(finalB2BAdvanceBalance, 0),
+	          billId: savedBill?._id || savedBill?.id || existingBillId || "",
+	          billType,
+	        });
+	        if (!updateRes.ok) {
+	          const err = await updateRes.text().catch(() => "");
+	          throw new Error(err || "Failed to update B2B customer balance");
+	        }
+	      }
 	      savedBillIdRef.current = savedBill?._id || savedBill?.id || existingBillId || "";
 	      lastSavedSignatureRef.current = saveSignature;
 	      hasAutoSavedRef.current = true;
-	      if (!silent) {
+	      if (!silent || lockAfterSave) {
 	        setSummaryData(summaryDataForSave);
 	        setResultValue(isNilBalanceSelected ? finalValueForSave : resultValue);
 	        setReturnValue(returnValueForSave);
 	        setFinalValue(finalValueForSave);
 	        setReturnInput(returnAmountForSave > 0 ? String(returnAmountForSave) : "");
 	        setFtRate(activeResultFtRate);
-	        setIsBillLocked(true);
+	        if (isNilBalanceSelected || isNilFTSelected) {
+	          setB2bLocalBalanceOverride({
+	            oldBalance: 0,
+	            advanceBalance: 0,
+	          });
+	          setB2bBalanceResetApplied(true);
+	        }
+	        if (lockAfterSave || !silent) {
+	          setIsBillLocked(true);
+	        }
 	      }
-	      if (!silent) {
+	      if (showSuccessAlert) {
 	        Alert.alert("Success", "Bill saved successfully");
 	      }
       return savedBill;
@@ -5199,38 +5211,35 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                </TouchableOpacity>
 	                {!isDealerPreview ? (
 	                  <>
-		                    <TouchableOpacity
-		                      disabled={isBillLocked}
-		                      style={[
-		                        styles.transferBtnB2B,
-		                        { backgroundColor: activeNilMode === "NIL Balance" ? "#C62828" : "#2be916ff" },
-		                        isBillLocked && styles.disabledAction,
-		                      ]}
-		                      onPress={() => handleSelectB2BNilMode("NIL Balance")}
+			                    <TouchableOpacity
+			                      style={[
+			                        styles.transferBtnB2B,
+			                        { backgroundColor: activeNilMode === "NIL Balance" ? "#C62828" : "#2be916ff" },
+			                        activeNilMode !== "NIL Balance" && { opacity: 0.5 },
+			                      ]}
+			                      onPress={() => handleSelectB2BNilMode("NIL Balance")}
 	                    >
-	                      <Text style={styles.transferBtnText}>{nilBalanceButtonText}</Text>
+		                      <Text style={styles.transferBtnText}>{nilBalanceButtonText}</Text>
 	                    </TouchableOpacity>
-		                    <TouchableOpacity
-		                      disabled={isBillLocked}
-		                      style={[
-		                        styles.transferBtnB2B,
-		                        { backgroundColor: activeNilMode === "NIL FT" ? "#EF6C00" : "#2be916ff" },
-		                        isBillLocked && styles.disabledAction,
-		                      ]}
-		                      onPress={() => handleSelectB2BNilMode("NIL FT")}
+			                    <TouchableOpacity
+			                      style={[
+			                        styles.transferBtnB2B,
+			                        { backgroundColor: activeNilMode === "NIL FT" ? "#EF6C00" : "#2be916ff" },
+			                        activeNilMode !== "NIL FT" && { opacity: 0.5 },
+			                      ]}
+			                      onPress={() => handleSelectB2BNilMode("NIL FT")}
 	                    >
-	                      <Text style={styles.transferBtnText}>{nilFtButtonText}</Text>
+		                      <Text style={styles.transferBtnText}>{nilFtButtonText}</Text>
 	                    </TouchableOpacity>
-		                    <TouchableOpacity
-		                      disabled={isBillLocked}
-		                      style={[
-		                        styles.transferBtnB2B,
-		                        { backgroundColor: isNilIssueSelected ? "#1565C0" : "#2be916ff" },
-		                        isBillLocked && styles.disabledAction,
-		                      ]}
-	                      onPress={() =>
-	                        setIsNilIssueSelected((prev) => {
-	                          const next = !prev;
+			                    <TouchableOpacity
+			                      style={[
+			                        styles.transferBtnB2B,
+			                        { backgroundColor: isNilIssueSelected ? "#1565C0" : "#2be916ff" },
+			                        !isNilIssueSelected && { opacity: 0.5 },
+			                      ]}
+		                      onPress={() =>
+		                        setIsNilIssueSelected((prev) => {
+		                          const next = !prev;
 	                          setSelectedResultType(resolveSelectedResultType(b2bNilMode, next));
 	                          return next;
 	                        })
@@ -5248,15 +5257,14 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                  <Text style={styles.transferBtnText}>B2B</Text>
 	                </TouchableOpacity>
 	                {!isDealerPreview ? (
-		                  <TouchableOpacity
-		                    disabled={isBillLocked}
-		                    style={[
-		                      styles.transferBtnB2B,
-		                      { backgroundColor: showB2BCashInput ? "#1565C0" : "#2be916ff" },
-		                      isBillLocked && styles.disabledAction,
-		                    ]}
-		                    onPress={handleToggleB2BCashInput}
-	                  >
+			                  <TouchableOpacity
+			                    style={[
+			                      styles.transferBtnB2B,
+			                      { backgroundColor: showB2BCashInput ? "#1565C0" : "#2be916ff" },
+			                      !showB2BCashInput && { opacity: 0.5 },
+			                    ]}
+			                    onPress={handleToggleB2BCashInput}
+		                  >
 	                    <Text style={styles.transferBtnText}>Cash</Text>
 	                  </TouchableOpacity>
 	                ) : null}
@@ -6163,4 +6171,3 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 });
-
