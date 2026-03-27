@@ -1572,7 +1572,7 @@ export default function BillHistory({ navigation, route }) {
 
           <View style={styles.balanceComparisonRow}>
             <View style={styles.balanceComparisonColumn}>
-              {/* <Text style={styles.balanceCaption}>Previous Balance</Text> */}
+              <Text style={styles.balanceCaption}>Previous Balance</Text>
               <Text
                 style={[
                   styles.balanceLabel,
