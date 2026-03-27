@@ -85,6 +85,17 @@ export default function ReportScreen({ navigation }) {
   const [showActionsMenu, setShowActionsMenu] = useState(false);
 
   // ================= HELPER FUNCTION =================
+  const reportTabs = useMemo(() => {
+    const tabs = ["B2B", "Dealer", "B2C", "Kadai", "Purchase", "Receipt", "Cash", "Expense", "Stock", "All"];
+    const seen = new Set();
+    return tabs.filter((t) => {
+      const key = String(t || "").trim();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, []);
+
   const formatDate = (date) => {
     if (!date || isNaN(date.getTime())) return "N/A";
     const year = date.getFullYear();
@@ -479,18 +490,10 @@ export default function ReportScreen({ navigation }) {
 
     if (selectedDate) {
       const d = new Date(selectedDate);
-      d.setHours(0, 0, 0, 0); // Start of day
+      d.setHours(0, 0, 0, 0);
       setFromDateObj(d);
-
-      // Auto-update toDate if the new fromDate is later than the current toDate
-      if (toDateObj && toDateObj < d) {
-        const newTo = new Date(d);
-        newTo.setHours(23, 59, 59, 999);
-        setToDateObj(newTo);
-      }
     }
 
-    // Close picker immediately after selection on both iOS and Android
     setShowFromPicker(false);
   };
 
@@ -502,22 +505,15 @@ export default function ReportScreen({ navigation }) {
 
     if (selectedDate) {
       const d = new Date(selectedDate);
-      d.setHours(23, 59, 59, 999); // End of day
+      d.setHours(0, 0, 0, 0);
 
       if (fromDateObj && d < fromDateObj) {
         Alert.alert("Invalid Selection", "The 'To Date' cannot be earlier than the 'From Date'.");
-        // Revert it to match the fromDate
-        if (fromDateObj) {
-          const newTo = new Date(fromDateObj);
-          newTo.setHours(23, 59, 59, 999);
-          setToDateObj(newTo);
-        }
       } else {
         setToDateObj(d);
       }
     }
 
-    // Close picker immediately after selection on both iOS and Android
     setShowToPicker(false);
   };
 
@@ -1468,9 +1464,9 @@ export default function ReportScreen({ navigation }) {
 
         {/* TABS */}
         <View style={styles.tabRow}>
-          {["B2B", "Dealer", "B2C", "Kadai", "Purchase", "Receipt", "Cash", "Expense", "Stock", "All"].map(t => (
+          {reportTabs.map((t) => (
             <TouchableOpacity
-              key={t}
+              key={`report-tab-${t}`}
               style={[styles.tabBtn, activeTab === t && styles.activeTabBtn]}
               onPress={() => setActiveTab(t)}
             >
