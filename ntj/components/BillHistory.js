@@ -799,9 +799,10 @@ export default function BillHistory({ navigation, route }) {
       normalizeImageUri(customer?.lastTransaction?.image, base_url) ||
       "";
     if (snapshot) {
-      navigation.navigate("BillPreview", {
-        fromHistory: true,
-        savedBillId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
+	      navigation.navigate("BillPreview", {
+	        fromHistory: true,
+	        isReadOnly: true,
+	        savedBillId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
         billId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
         description: freshBill?.description || bill?.description || "",
         customer: {
@@ -838,9 +839,10 @@ export default function BillHistory({ navigation, route }) {
       return;
     }
     if (isB2B && !["DEALER", "SUPPLIER"].includes(isDealerLike) && (Number.isFinite(prevOB) || Number.isFinite(savedFinal))) {
-      navigation.navigate("BillPreview", {
-        fromHistory: true,
-        savedBillId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
+	      navigation.navigate("BillPreview", {
+	        fromHistory: true,
+	        isReadOnly: true,
+	        savedBillId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
         billId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
         description: freshBill?.description || "",
         customer: {
@@ -892,9 +894,10 @@ export default function BillHistory({ navigation, route }) {
       });
       return;
     }
-    navigation.navigate("BillPreview", {
-      fromHistory: true,
-      savedBillId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
+	    navigation.navigate("BillPreview", {
+	      fromHistory: true,
+	      isReadOnly: true,
+	      savedBillId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
       billId: freshBill?._id || freshBill?.id || bill?._id || bill?.id || "",
       description: freshBill?.description || "",
       customer: {
@@ -1041,6 +1044,7 @@ export default function BillHistory({ navigation, route }) {
     if (snapshot) {
       navigation.navigate("BillPreview", {
         fromHistory: true,
+        isReadOnly: true,
         savedBillId: bill?._id || bill?.id || "",
         billId: bill?._id || bill?.id || "",
         description: bill?.description || "",
@@ -1094,6 +1098,7 @@ export default function BillHistory({ navigation, route }) {
     if (isB2B && !["DEALER", "SUPPLIER"].includes(isDealerLike) && (Number.isFinite(prevOB) || Number.isFinite(savedFinal))) {
       navigation.navigate("BillPreview", {
         fromHistory: true,
+        isReadOnly: true,
         savedBillId: bill?._id || bill?.id || "",
         billId: bill?._id || bill?.id || "",
         description: bill?.description || "",
@@ -1149,6 +1154,7 @@ export default function BillHistory({ navigation, route }) {
     }
     navigation.navigate("BillPreview", {
       fromHistory: true,
+      isReadOnly: true,
       savedBillId: bill?._id || bill?.id || "",
       billId: bill?._id || bill?.id || "",
       description: bill?.description || "",
@@ -1346,8 +1352,31 @@ export default function BillHistory({ navigation, route }) {
 	        snapshot?.summary?.isNilIssue
 	    );
 	    const nilFtValue = num(
-	      item?.nilFtValue ??
+	      item?.returnValue ??
+	        snapshot?.summary?.returnValue ??
+	        item?.finalValue ??
+	        snapshot?.summary?.finalValue ??
+	        item?.nilFtValue ??
 	        snapshot?.summary?.nilFtValue,
+	      0
+	    );
+	    const baseBalance = num(
+	      item?.baseBalance ??
+	        snapshot?.summary?.baseBalance ??
+	        snapshot?.summaryData?.baseBalance ??
+	        item?.summaryData?.baseBalance,
+	      0
+	    );
+	    const returnAmount = num(
+	      item?.returnAmount ??
+	        snapshot?.summary?.returnAmount,
+	      0
+	    );
+	    const finalAmount = num(
+	      item?.finalAmount ??
+	        snapshot?.summary?.finalAmount ??
+	        item?.finalValue ??
+	        snapshot?.summary?.finalValue,
 	      0
 	    );
 	    const previousOldBalance = num(
@@ -1367,12 +1396,16 @@ export default function BillHistory({ navigation, route }) {
 	    const nilBalanceBasisValue = previousOldBalance > 0 ? previousOldBalance : previousAdvanceBalance;
 	    const ftRateValue = num(
 	      item?.ftRate ??
+	        item?.resultFtRate ??
 	        snapshot?.summary?.ftRate ??
+	        snapshot?.summary?.resultFtRate ??
 	        snapshot?.header?.ftRate,
 	      0
 	    );
 	    const nilBalanceAmount = num(
-	      item?.nilBalanceAmount ??
+	      item?.resultValue ??
+	        snapshot?.summary?.resultValue ??
+	        item?.nilBalanceAmount ??
 	        snapshot?.summary?.nilBalanceAmount,
 	      nilBalanceBasisValue * ftRateValue
 	    );
@@ -1403,9 +1436,9 @@ export default function BillHistory({ navigation, route }) {
 	        ? `NIL Issue : \u20B9 ${formatCurrencyValue(nilIssueAmount)}`
 	        : isNilBalance
 	          ? `Nil Balance : \u20B9 ${formatCurrencyValue(nilBalanceAmount)}`
-	          : isNilFT
-	            ? `NIL FT : ${nilFtValue.toFixed(3)}`
-	            : "";
+		        : isNilFT
+		            ? `NIL FT : ${nilFtValue.toFixed(3)}`
+		            : "";
 	    const activityDate = item.updatedAt || item.createdAt || null;
     const activityDateObj = activityDate ? new Date(activityDate) : null;
     const createdDate = snapshot?.header?.date ||
