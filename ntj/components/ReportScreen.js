@@ -1286,6 +1286,10 @@ export default function ReportScreen({ navigation }) {
     }
   );
   const b2bReceiptTotal = sumBy(filteredB2bRows, "receiptPure");
+  const b2bCashTotal = filteredB2bRows.reduce(
+    (sum, item) => sum + Number(item?.cash ?? item?.cashAmount ?? 0),
+    0
+  );
   const dealerReceiptTotal = sumBy(filteredDealerRows, "receiptPure");
 
   return (
@@ -1519,6 +1523,10 @@ export default function ReportScreen({ navigation }) {
               <View style={styles.summaryCard}>
                 <Text style={styles.summaryLabel}>Total Receipt Pure</Text>
                 <Text style={styles.summaryValue}>{b2bReceiptTotal.toFixed(3)}</Text>
+              </View>
+              <View style={styles.summaryCard}>
+                <Text style={styles.summaryLabel}>Total Cash</Text>
+                <Text style={styles.summaryValue}>Cash: {b2bCashTotal.toFixed(3)}</Text>
               </View>
             </View>
             {showB2bDropdown && (
