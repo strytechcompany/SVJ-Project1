@@ -1,6 +1,6 @@
 // ntj/components/BillPreview.js
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, TextInput, Image, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, Linking, BackHandler } from "react-native";
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, TextInput, Image, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, Linking, BackHandler, NativeModules } from "react-native";
 import { useFocusEffect } from '@react-navigation/native';
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import QRCode from 'react-native-qrcode-svg';
@@ -21,9 +21,21 @@ import {
 // Load it lazily so we can fall back to `expo-sharing` when unavailable.
 let _rnShare;
 let _rnShareTried = false;
+const hasRNShareNativeModule = () => {
+  try {
+    return Boolean(NativeModules?.RNShare);
+  } catch (_e) {
+    return false;
+  }
+};
+
 const getRNShare = () => {
   if (_rnShareTried) return _rnShare;
   _rnShareTried = true;
+  if (!hasRNShareNativeModule()) {
+    _rnShare = null;
+    return _rnShare;
+  }
   try {
     const mod = require('react-native-share');
     _rnShare = mod?.default ?? mod;
@@ -390,6 +402,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const hasAutoPrintedRef = useRef(false);
   const hasAutoSharedRef = useRef(false);
   const hasAutoSavedRef = useRef(false);
+  const lastAutoWhatsAppBillRef = useRef("");
   const lastAutoSaveKeyRef = useRef("");
   const preparedPdfUriRef = useRef("");
   const savedBillIdRef = useRef(
@@ -743,6 +756,26 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     finalLabel: summaryFinalLabel,
     expression: `${formatB2BSummaryValue(b2bAdvanceBalance)} + ${formatB2BSummaryValue(b2bTotalReceiptPure)} + ${formatB2BSummaryValue(b2bTotalCashPure)} - ${formatB2BSummaryValue(b2bTotalIssuePure)}`,
   };
+  const b2bFooterBalanceRows = customer?.type === "B2B"
+    ? [
+        toNum(rawB2BOldBalance, 0) > 0
+          ? {
+              key: "oldBalance",
+              label: "Old Balance",
+              value: `${formatB2BSummaryValue(rawB2BOldBalance)} gr`,
+            }
+          : null,
+        toNum(rawB2BAdvanceBalance, 0) > 0
+          ? {
+              key: "advanceBalance",
+              label: "Advance Balance",
+              value: `${formatB2BSummaryValue(rawB2BAdvanceBalance)} gr`,
+            }
+          : null,
+      ].filter(Boolean)
+    : [];
+  const showB2BBalanceFooter = b2bFooterBalanceRows.length > 0;
+  const isPrintableB2B = customer?.type === "B2B" && !isDealerPreview;
   const homeFtRateNum = toNum(homeFtRate, 0);
   const currentB2BFtRate =
     toNum(routeParams?.ftRate, 0) ||
@@ -1499,7 +1532,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
           <body>
             <h1>SUSPENSE BILL</h1>
             <div>
-              <p><strong>Name:</strong> ${customer.name}</p>
+              <p>Name: ${customer.name}</p>
               <p><strong>Phone:</strong> ${customer.phone}</p>
               <p><strong>Address:</strong> ${customer.address || 'N/A'}</p>
               <p><strong>GST No:</strong> ${customer.gstin || 'N/A'}</p>
@@ -1793,33 +1826,46 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	          <head>
 	            <style>
 	              @page { margin: 0; }
-	              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 11px; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-	              h1 { text-align: center; font-size: 17px; margin-bottom: 6px; color: #000; }
-	              h2 { margin-top: 9px; font-size: 12px; margin-bottom: 5px; color: #000; }
-	              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
-	              th, td { border: 1px solid #000; padding: 3px 2px; text-align: center; font-size: 9px; color: #000; vertical-align: middle; word-break: break-word; overflow-wrap: anywhere; }
-	              th { background-color: #ececec; font-weight: 700; }
-	              p { margin: 2px 0; font-size: 10px; color: #000; }
-	              .total-row td { font-weight: 700; background-color: #f3f3f3; }
-	              .summary-table td, .summary-table th { font-size: 8.5px; }
-	              .summary-balance { font-weight: 800; }
-	              .summary-expression { text-align: center; font-size: 8px; line-height: 1.25; white-space: normal; }
-	            </style>
-	          </head>
-          <body>
+		              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 11px; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+		              h1 { text-align: center; font-size: 17px; margin-bottom: 6px; color: #000; }
+		              h2 { margin-top: 9px; font-size: 12px; margin-bottom: 5px; color: #000; }
+		              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+		              th, td { b[order: 1px solid #000; padding: 3px 2px; text-align: center; font-size: 9px; color: #000; vertical-align: middle; word-break: break-word; overflow-wrap: anywhere; }
+		              th { background-color: #ececec; font-weight: 700; }
+		              p { margin: 2px 0; font-size: 10px; color: #000; }
+		              .total-row td { font-weight: 700; background-color: #f3f3f3; }
+		              .summary-table td, .summary-table th { font-size: 8.5px; }
+		              .summary-balance { font-weight: 800; }
+			              .summary-expression { text-align: center; font-size: 8px; line-height: 1.25; white-space: normal; }
+			              .balance-footer-section { margin-top: 10px; }
+			              .balance-footer-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; margin-top: 7px; border: 1px solid #000; border-radius: 999px; font-size: 10px; font-weight: 700; }
+			              .balance-footer-value { font-weight: 800; }
+			              .b2b-print { font-size: 12px; }
+			              .b2b-print h2 { font-size: 13px; font-weight: 600; letter-spacing: 0.2px; }
+			              .b2b-print p, .b2b-print td { font-size: 10.5px; }
+			              .b2b-print th { font-size: 10.5px; font-weight: 600; color: #2a2a2a; }
+			              .b2b-print .b2b-label-text, .b2b-print .b2b-meta-label { font-weight: 600; color: #2a2a2a; }
+			              .b2b-print .b2b-value-text { font-weight: 500; color: #1f1f1f; }
+			              .b2b-print .b2b-number-text, .b2b-print .summary-balance, .b2b-print .balance-footer-value, .b2b-print .total-row td { font-weight: 800; color: #000; }
+			              .b2b-print .b2b-strong-number { font-size: 11px; font-weight: 900; }
+			              .b2b-print .summary-table td, .b2b-print .summary-table th { font-size: 9.6px; }
+			              .b2b-print .summary-expression { font-size: 9px; font-weight: 700; color: #000; }
+			              .b2b-print .summary-balance { font-size: 11.5px; }
+			              .b2b-print .balance-footer-row { font-size: 11px; }
+			              .b2b-print .b2b-meta { margin-bottom: 3px; font-size: 11px; }
+		            </style>
+		          </head>
+	          <body class="${isPrintableB2B ? 'b2b-print' : ''}">
             <h1>BILL</h1>
-            <div>
-              <p><strong>Bill No:</strong> ${currentBillNo || 'N/A'}</p>
-              <p><strong>Name:</strong> ${customer.name}</p>
-              <p><strong>Phone:</strong> ${customer.phone}</p>
-              <p><strong>Address:</strong> ${customer.address || 'N/A'}</p>
-              <p><strong>GST No:</strong> ${customer.gstin || 'N/A'}</p>
-              <p><strong>Type:</strong> ${customer.type}</p>
-              <p><strong>Date:</strong> ${customer.date}</p>
-              <p><strong>Old Balance:</strong> ${customer.oldBalance}</p>
-              <p><strong>Advance Balance:</strong> ${customer.advanceBalance || 0}</p>
-              ${billDescription ? `<p><strong>Description:</strong> ${billDescription}</p>` : ''}
-            </div>
+	            <div>
+	              <p class="b2b-meta"><span class="b2b-meta-label">Bill No:</span> <span class="b2b-number-text">${currentBillNo || 'N/A'}</span></p>
+	              <p class="b2b-meta"><span class="b2b-meta-label">Name:</span> <span class="b2b-value-text">${customer.name || ''}</span></p>
+	              <p class="b2b-meta"><span class="b2b-meta-label">Phone:</span> <span class="b2b-number-text">${customer.phone || ''}</span></p>
+	              <p class="b2b-meta"><span class="b2b-meta-label">Date:</span> <span class="b2b-number-text">${customer.date || ''}</span></p>
+	              <p class="b2b-meta"><span class="b2b-meta-label">Old Balance:</span> <span class="b2b-number-text">${customer.oldBalance}</span></p>
+	              <p class="b2b-meta"><span class="b2b-meta-label">Advance Balance:</span> <span class="b2b-number-text">${customer.advanceBalance || 0}</span></p>
+	              ${billDescription ? `<p class="b2b-meta"><span class="b2b-meta-label">Description:</span> <span class="b2b-value-text">${billDescription}</span></p>` : ''}
+	            </div>
             ${isDealerPreview && dealerProofImageShowInBill && dealerProofImageUri ? `
               <div style="text-align:center; margin: 8px 0;">
                 <p><strong>Receipt Proof:</strong></p>
@@ -1857,12 +1903,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             <h2>ISSUE:</h2>
             <table>
               <tr>
-                <th>Name</th>
-                <th>G.Weight</th>
-                ${showIssueMColumn ? '<th>M</th>' : ''}
-                ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
-                <th>Calc</th>
-                <th>Pure</th>
+                <h2>Name</h2>
+                <h2>G.Weight</h2>
+                ${showIssueMColumn ? '<h2>M</h2>' : ''}
+                ${showIssueNetWeightColumn ? '<h2>N.Weight</h2>' : ''}
+                <h2>Calc</h2>
+                <h2>Pure</h2>
               </tr>
                 ${issueItems.map(row => `
                   <tr>
@@ -1884,84 +1930,84 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                </tr>
               </table>
             ` : `
-            <h2>ISSUE:</h2>
-            <table>
-              <tr>
-                <th>Name</th>
-                <th>G.Weight</th>
-                ${showIssueMColumn ? '<th>M</th>' : ''}
-                ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
-                <th>Calc</th>
-                <th>Pure</th>
-              </tr>
-                ${issueItems.map(row => `
-                  <tr>
-                    <td>${row.name}</td>
-                    <td>${row.gross}</td>
-                    ${showIssueMColumn ? `<td>${row.m}</td>` : ''}
-                    ${showIssueNetWeightColumn ? `<td>${row.net}</td>` : ''}
-                    <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
-                    <td><strong>${row.pure}</strong></td>
-                  </tr>
-	                `).join('')}
-	                <tr class="total-row">
-	                  <td style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
-	                  <td><strong>TW: ${totalIssueTW}</strong></td>
-	                  ${showIssueMColumn ? '<td>-</td>' : ''}
-	                  ${showIssueNetWeightColumn ? `<td><strong>N.W: ${totalIssueNW}</strong></td>` : ''}
-	                  <td>-</td>
-	                  <td><strong>Pure: ${displayedIssuePureText}</strong></td>
-	                </tr>
-              </table>
-            <h2>RECEIPT:</h2>
-            <table>
-              <tr>
-                <th>Name</th>
-                <th>Weight</th>
-                <th>Result</th>
-                <th>Calc</th>
-                <th>Pure</th>
-              </tr>
-                ${receiptItems && receiptItems.length > 0 ? receiptItems.map(row => `
-                  <tr>
-                    <td>${row.name}</td>
-                    <td>${row.weight}</td>
-                    <td>${row.result}</td>
-                    <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
-                    <td>${row.pure}</td>
-                  </tr>
-                `).join('') : '<tr><td colspan="5">No receipt items</td></tr>'}
-	                ${receiptItems && receiptItems.length > 0 ? `
-	                <tr class="total-row">
-	                  <td style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
-	                  <td><strong>TW: ${totalReceiptTW}</strong></td>
-	                  <td><strong>N.W: ${totalReceiptNW}</strong></td>
-	                  <td>-</td>
-	                  <td><strong>Pure: ${totalReceiptPure}</strong></td>
-	                </tr>` : ''}
-	              </table>
-	            `}
-            <h2>CASH:</h2>
-            ${cashTable && cashTable.length > 0 ? `
-              <table>
-                <tr>
-                  <th>Amount</th>
-                  <th>Rate</th>
-                  <th style="text-align:right;">Pure</th>
-                </tr>
-	                ${cashTable.map(c => `
+	            <h2>ISSUE:</h2>
+	            <table>
+	              <tr>
+	                <th class="b2b-label-text">Name</th>
+	                <th class="b2b-label-text">G.Weight</th>
+	                ${showIssueMColumn ? '<th>M</th>' : ''}
+	                ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
+	                <th class="b2b-label-text">Calc</th>
+	                <th class="b2b-label-text">Pure</th>
+	              </tr>
+	                ${issueItems.map(row => `
 	                  <tr>
-	                    <td>${c.rupees}</td>
-	                    <td>${c.goldRate}</td>
-	                    <td style="text-align:right;">${c.pure}</td>
+	                    <td class="b2b-label-text">${row.name}</td>
+	                    <td class="b2b-number-text">${row.gross}</td>
+	                    ${showIssueMColumn ? `<td class="b2b-number-text">${row.m}</td>` : ''}
+	                    ${showIssueNetWeightColumn ? `<td class="b2b-number-text">${row.net}</td>` : ''}
+	                    <td class="b2b-number-text">${parseFloat(row.calc || 0).toFixed(2)}</td>
+	                    <td class="b2b-number-text b2b-strong-number">${row.pure}</td>
 	                  </tr>
-	                `).join('')}
-	                <tr class="total-row">
-	                  <td colspan="2" style="text-align: right; padding-right: 5px;"><strong>Total Cash Pure:</strong></td>
-	                  <td style="text-align:right;"><strong>${safeCashTable.reduce((sum, c) => sum + toNum(c?.pure, 0), 0).toFixed(3)}</strong></td>
-                </tr>
-              </table>
-            ` : '<p>N/A</p>'}
+		                `).join('')}
+		                <tr class="total-row">
+		                  <td class="b2b-label-text" style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
+		                  <td class="b2b-number-text"><strong>TW: ${totalIssueTW}</strong></td>
+		                  ${showIssueMColumn ? '<td class="b2b-number-text">-</td>' : ''}
+		                  ${showIssueNetWeightColumn ? `<td class="b2b-number-text"><strong>N.W: ${totalIssueNW}</strong></td>` : ''}
+		                  <td class="b2b-number-text">-</td>
+		                  <td class="b2b-number-text b2b-strong-number"><strong>Pure: ${displayedIssuePureText}</strong></td>
+		                </tr>
+	              </table>
+	            <h2>RECEIPT:</h2>
+	            <table>
+	              <tr>
+	                <th class="b2b-label-text">Name</th>
+	                <th class="b2b-label-text">Weight</th>
+	                <th class="b2b-label-text">Result</th>
+	                <th class="b2b-label-text">Calc</th>
+	                <th class="b2b-label-text">Pure</th>
+	              </tr>
+	                ${receiptItems && receiptItems.length > 0 ? receiptItems.map(row => `
+	                  <tr>
+	                    <td class="b2b-label-text">${row.name}</td>
+	                    <td class="b2b-number-text">${row.weight}</td>
+	                    <td class="b2b-number-text">${row.result}</td>
+	                    <td class="b2b-number-text">${parseFloat(row.calc || 0).toFixed(2)}</td>
+	                    <td class="b2b-number-text b2b-strong-number">${row.pure}</td>
+	                  </tr>
+	                `).join('') : '<tr><td colspan="5">No receipt items</td></tr>'}
+		                ${receiptItems && receiptItems.length > 0 ? `
+		                <tr class="total-row">
+		                  <td class="b2b-label-text" style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
+		                  <td class="b2b-number-text"><strong>TW: ${totalReceiptTW}</strong></td>
+		                  <td class="b2b-number-text"><strong>N.W: ${totalReceiptNW}</strong></td>
+		                  <td class="b2b-number-text">-</td>
+		                  <td class="b2b-number-text b2b-strong-number"><strong>Pure: ${totalReceiptPure}</strong></td>
+		                </tr>` : ''}
+		              </table>
+	            `}
+	            <h2>CASH:</h2>
+	            ${cashTable && cashTable.length > 0 ? `
+	              <table>
+	                <tr>
+	                  <th class="b2b-label-text">Amount</th>
+	                  <th class="b2b-label-text">Rate</th>
+	                  <th class="b2b-label-text" style="text-align:right;">Pure</th>
+	                </tr>
+		                ${cashTable.map(c => `
+		                  <tr>
+		                    <td class="b2b-number-text">${c.rupees}</td>
+		                    <td class="b2b-number-text">${c.goldRate}</td>
+		                    <td class="b2b-number-text b2b-strong-number" style="text-align:right;">${c.pure}</td>
+		                  </tr>
+		                `).join('')}
+		                <tr class="total-row">
+		                  <td colspan="2" class="b2b-label-text" style="text-align: right; padding-right: 5px;"><strong>Total Cash Pure:</strong></td>
+		                  <td class="b2b-number-text b2b-strong-number" style="text-align:right;"><strong>${safeCashTable.reduce((sum, c) => sum + toNum(c?.pure, 0), 0).toFixed(3)}</strong></td>
+	                </tr>
+	              </table>
+	            ` : '<p>N/A</p>'}
             ${customer?.type === "B2B" && !isDealerPreview && Number.isFinite(b2bSavedCashValue) ? `
               <p><strong>Cash:</strong> &#8377;${toNum(b2bSavedCashValue, 0).toFixed(2)}</p>
             ` : ''}
@@ -2021,40 +2067,41 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		                </tr>
 		              ` : summaryOB !== 0 ? `
 		                <!-- OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | Old Balance -->
-	                <tr>
-	                  <th>Old Balance</th>
-	                  <th>ISSUE</th>
-	                  <th>RECEIPT</th>
-	                  <th>CASH</th>
-	                  <th>Old Balance</th>
-	                </tr>
 		                <tr>
-		                  <td>${summaryOB.toFixed(3)}</td>
-		                  <td>${displaySummary.issue}</td>
-		                  <td>${displaySummary.receipt}</td>
-		                  <td>${displaySummary.cash}</td>
-			                  <td class="summary-balance">${summaryFinalValue.toFixed(3)}</td>
+		                  <th class="b2b-label-text">Old Balance</th>
+		                  <th class="b2b-label-text">ISSUE</th>
+		                  <th class="b2b-label-text">RECEIPT</th>
+		                  <th class="b2b-label-text">CASH</th>
+		                  <th class="b2b-label-text">Old Balance</th>
 		                </tr>
+			                <tr>
+			                  <td class="b2b-number-text"><strong>${summaryOB.toFixed(3)}</strong></td>
+			                  <td class="b2b-number-text"><strong>${displaySummary.issue}</strong></td>
+			                  <td class="b2b-number-text"><strong>${displaySummary.receipt}</strong></td>
+			                  <td class="b2b-number-text"><strong>${displaySummary.cash}</strong></td>
+				                  <td class="summary-balance"><strong>${summaryFinalValue.toFixed(3)}</strong></td>
+			                </tr>
 		                <tr class="total-row">
 		                  <td colspan="4" class="summary-expression">${summaryOB.toFixed(3)} + ${displaySummary.issue} - (${displaySummary.receipt} + ${displaySummary.cash})</td>
-			                  <td class="summary-balance">= ${summaryFinalValue.toFixed(3)}</td>
+			                  <td class="summary-balance"><strong>${summaryFinalValue.toFixed(3)}</strong></td>
 		                </tr>
+                     bg bbbb 
 		              ` : `
 		                <!-- AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | Advance Balance -->
-	                <tr>
-	                  <th>ISSUE</th>
-	                  <th>Advance Balance</th>
-	                  <th>RECEIPT</th>
-	                  <th>CASH</th>
-	                  <th>${b2bAdvanceSummaryValues.finalLabel}</th>
-	                </tr>
 		                <tr>
-		                  <td>${displaySummary.issue}</td>
-		                  <td>${summaryAB.toFixed(3)}</td>
-		                  <td>${displaySummary.receipt}</td>
-		                  <td>${displaySummary.cash}</td>
-		                  <td class="summary-balance">${summaryFinalValue.toFixed(3)}</td>
+		                  <th class="b2b-label-text">ISSUE</th>
+		                  <th class="b2b-label-text">Advance Balance</th>
+		                  <th class="b2b-label-text">RECEIPT</th>
+		                  <th class="b2b-label-text">CASH</th>
+		                  <th class="b2b-label-text">${b2bAdvanceSummaryValues.finalLabel}</th>
 		                </tr>
+			                <tr>
+			                  <td class="b2b-number-text">${displaySummary.issue}</td>
+			                  <td class="b2b-number-text">${summaryAB.toFixed(3)}</td>
+			                  <td class="b2b-number-text">${displaySummary.receipt}</td>
+			                  <td class="b2b-number-text">${displaySummary.cash}</td>
+			                  <td class="summary-balance">${summaryFinalValue.toFixed(3)}</td>
+			                </tr>
 		                <tr class="total-row">
 		                  <td colspan="4" class="summary-expression">${summaryAB.toFixed(3)} + ${displaySummary.receipt} + ${displaySummary.cash} - ${displaySummary.issue}</td>
 		                  <td class="summary-balance">= ${summaryFinalValue.toFixed(3)}</td>
@@ -2074,6 +2121,16 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
               </table>
             ` : ''}
             ${buildResultValueTableHtml()}
+            ${showB2BBalanceFooter ? `
+              <div class="balance-footer-section">
+                ${b2bFooterBalanceRows.map((row) => `
+                  <div class="balance-footer-row">
+                    <span>${row.label}</span>
+                    <span class="balance-footer-value">${row.value}</span>
+                  </div>
+                `).join("")}
+              </div>
+            ` : ''}
             ${cashAmount ? `<p><strong>Cash Amount:</strong> â‚¹${cashAmount}</p>` : ''}          </body>
         </html>
     `;
@@ -2294,35 +2351,39 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     const custAddress = order ? (order.address || '') : (customer?.address || '');
     const custGST = order ? (order.gstin || '') : (customer?.gstin || '');
     const billNo = currentBillNo || order?.orderNo || '';
+    const wrapA4Value = (value, type = "text") => {
+      const className = type === "number" ? "info-value b2b-number-text" : "info-value b2b-value-text";
+      return `<span class="${className}">${value}</span>`;
+    };
 
     // ── Issue rows ──
     const issueRowsHtml = safeIssueItems.length > 0 ? safeIssueItems.map((row, i) => `
       <tr>
-        <td>${i + 1}</td>
-        <td>${row.name || ''}</td>
-        <td>${row.gross || ''}</td>
-        <td>${row.m || ''}</td>
-        <td>${row.net || ''}</td>
-        <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
-        <td><strong>${row.pure || ''}</strong></td>
+        <td class="b2b-number-text">${i + 1}</td>
+        <td class="b2b-label-text">${row.name || ''}</td>
+        <td class="b2b-number-text">${row.gross || ''}</td>
+        <td class="b2b-number-text">${row.m || ''}</td>
+        <td class="b2b-number-text">${row.net || ''}</td>
+        <td class="b2b-number-text">${parseFloat(row.calc || 0).toFixed(2)}</td>
+        <td class="b2b-number-text b2b-strong-number">${row.pure || ''}</td>
       </tr>`).join('') : '<tr><td colspan="7" style="text-align:center">No issue items</td></tr>';
 
     const receiptRowsHtml = safeReceiptItems.length > 0 ? safeReceiptItems.map((row, i) => `
       <tr>
-        <td>${i + 1}</td>
-        <td>${row.name || ''}</td>
-        <td>${row.weight || ''}</td>
-        <td>${row.result || ''}</td>
-        <td>${parseFloat(row.calc || 0).toFixed(2)}</td>
-        <td>${row.pure || ''}</td>
+        <td class="b2b-number-text">${i + 1}</td>
+        <td class="b2b-label-text">${row.name || ''}</td>
+        <td class="b2b-number-text">${row.weight || ''}</td>
+        <td class="b2b-number-text">${row.result || ''}</td>
+        <td class="b2b-number-text">${parseFloat(row.calc || 0).toFixed(2)}</td>
+        <td class="b2b-number-text b2b-strong-number">${row.pure || ''}</td>
       </tr>`).join('') : '<tr><td colspan="6" style="text-align:center">No receipt items</td></tr>';
 
     const cashRowsHtml = safeCashTable.length > 0 ? safeCashTable.map((c, i) => `
       <tr>
-        <td>${i + 1}</td>
-        <td>&#8377;${c.rupees || ''}</td>
-        <td>${c.goldRate || ''}</td>
-        <td>${c.pure || ''}</td>
+        <td class="b2b-number-text">${i + 1}</td>
+        <td class="b2b-number-text">&#8377;${c.rupees || ''}</td>
+        <td class="b2b-number-text">${c.goldRate || ''}</td>
+        <td class="b2b-number-text b2b-strong-number">${c.pure || ''}</td>
       </tr>`).join('') : '<tr><td colspan="4" style="text-align:center">No cash entries</td></tr>';
 
     // B2C items
@@ -2405,6 +2466,16 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       <tr><td>Weight</td><td>${order.weight || ''} GMS</td></tr>
       <tr><td>Payment</td><td>${order.payment || ''}</td></tr>
       <tr><td>Pending Balance</td><td>&#8377;${order.balance || ''}</td></tr>` : '';
+    const balanceFooterHtml = showB2BBalanceFooter ? `
+      <div class="balance-footer-section">
+        ${b2bFooterBalanceRows.map((row) => `
+          <div class="balance-footer-row">
+            <span class="balance-footer-label">${row.label}</span>
+            <span class="balance-footer-value">${row.value}</span>
+          </div>
+        `).join("")}
+      </div>
+    ` : '';
 
     return `
 <!DOCTYPE html>
@@ -2534,6 +2605,28 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     }
 
     /* ── Footer ── */
+    .balance-footer-section {
+      margin-top: 12px;
+    }
+    .balance-footer-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      margin-top: 8px;
+      border: 1px solid #1B4D1B;
+      border-radius: 999px;
+      background: #fff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .balance-footer-label {
+      color: #1B1B1B;
+    }
+    .balance-footer-value {
+      color: #1B4D1B;
+      font-weight: 800;
+    }
     .footer {
       text-align: center;
       margin-top: 18px;
@@ -2549,17 +2642,62 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       color: #1B4D1B;
       margin-bottom: 4px;
     }
-    .sign-row {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 30px;
-      font-size: 10px;
-    }
-    .sign-col { text-align: center; border-top: 1px solid #999; padding-top: 4px; min-width: 120px; }
-  </style>
-</head>
-<body>
-<div class="page">
+	    .sign-row {
+	      display: flex;
+	      justify-content: space-between;
+	      margin-top: 30px;
+	      font-size: 10px;
+	    }
+	    .sign-col { text-align: center; border-top: 1px solid #999; padding-top: 4px; min-width: 120px; }
+	    .b2b-print {
+	      font-size: 12px;
+	    }
+	    .b2b-print .info-row,
+	    .b2b-print .summary-row {
+	      font-size: 12px;
+	    }
+	    .b2b-print .info-label,
+	    .b2b-print .summary-label,
+	    .b2b-print .b2b-label-text,
+	    .b2b-print th,
+	    .b2b-print .section-title,
+	    .b2b-print .balance-footer-label {
+	      font-weight: 600;
+	      color: #2b2b2b;
+	    }
+	    .b2b-print table {
+	      font-size: 11px;
+	    }
+	    .b2b-print th {
+	      font-size: 11.5px;
+	    }
+	    .b2b-print td {
+	      font-size: 11.5px;
+	    }
+	    .b2b-print .info-value,
+	    .b2b-print .summary-value,
+	    .b2b-print .b2b-number-text,
+	    .b2b-print .balance-footer-value,
+	    .b2b-print .summary-total span,
+	    .b2b-print .total-row td {
+	      font-weight: 800;
+	      color: #000;
+	    }
+	    .b2b-print .b2b-strong-number,
+	    .b2b-print .summary-total,
+	    .b2b-print .summary-total span {
+	      font-size: 13px;
+	    }
+	    .b2b-print .summary-total {
+	      padding: 8px 12px;
+	    }
+	    .b2b-print .balance-footer-row {
+	      font-size: 12.5px;
+	    }
+	  </style>
+	</head>
+	<body>
+	<div class="page${isPrintableB2B ? ' b2b-print' : ''}">
 
   <!-- Shop Header -->
   <div class="header">
@@ -2570,20 +2708,20 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
   <!-- Customer & Bill Info -->
   <div class="info-grid">
-    <div class="info-col">
-      <div class="info-row"><span class="info-label">Name:</span> ${custName}</div>
-      <div class="info-row"><span class="info-label">Phone:</span> ${custPhone || 'N/A'}</div>
-      <div class="info-row"><span class="info-label">Address:</span> ${custAddress || 'N/A'}</div>
-      <div class="info-row"><span class="info-label">GST No:</span> ${custGST || 'N/A'}</div>
-    </div>
-    <div class="info-col">
-      ${billNo ? `<div class="info-row"><span class="info-label">Bill No:</span> ${billNo}</div>` : ''}
-      <div class="info-row"><span class="info-label">Date:</span> ${billDate}</div>
-      <div class="info-row"><span class="info-label">Type:</span> ${estimate ? 'Estimate' : order ? 'Order' : (customer?.type || '')}</div>
-      ${!estimate && !order && summaryOB ? `<div class="info-row"><span class="info-label">Old Balance:</span> ${summaryOB.toFixed(3)} g</div>` : ''}
-      ${!estimate && !order && summaryAB ? `<div class="info-row"><span class="info-label">Adv Balance:</span> ${summaryAB.toFixed(3)} g</div>` : ''}
-    </div>
-  </div>
+	    <div class="info-col">
+	      <div class="info-row"><span class="info-label b2b-label-text">Name:</span> ${wrapA4Value(custName)}</div>
+	      <div class="info-row"><span class="info-label b2b-label-text">Phone:</span> ${wrapA4Value(custPhone || 'N/A', 'number')}</div>
+	      <div class="info-row"><span class="info-label b2b-label-text">Address:</span> ${wrapA4Value(custAddress || 'N/A')}</div>
+	      <div class="info-row"><span class="info-label b2b-label-text">GST No:</span> ${wrapA4Value(custGST || 'N/A', 'number')}</div>
+	    </div>
+	    <div class="info-col">
+	      ${billNo ? `<div class="info-row"><span class="info-label b2b-label-text">Bill No:</span> ${wrapA4Value(billNo, 'number')}</div>` : ''}
+	      <div class="info-row"><span class="info-label b2b-label-text">Date:</span> ${wrapA4Value(billDate, 'number')}</div>
+	      <div class="info-row"><span class="info-label b2b-label-text">Type:</span> ${wrapA4Value(estimate ? 'Estimate' : order ? 'Order' : (customer?.type || ''))}</div>
+	      ${!estimate && !order && summaryOB ? `<div class="info-row"><span class="info-label b2b-label-text">Old Balance:</span> ${wrapA4Value(`${summaryOB.toFixed(3)} g`, 'number')}</div>` : ''}
+	      ${!estimate && !order && summaryAB ? `<div class="info-row"><span class="info-label b2b-label-text">Adv Balance:</span> ${wrapA4Value(`${summaryAB.toFixed(3)} g`, 'number')}</div>` : ''}
+	    </div>
+	  </div>
 
   ${estimate ? `
   <!-- Estimate Items -->
@@ -2778,11 +2916,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         <span>${summaryFinalValue.toFixed(3)} g</span>
       </div>
     `}
-  </div>
-  ${buildResultValueTableHtml()}
-  `}
+	  </div>
+	  ${buildResultValueTableHtml()}
+	  ${balanceFooterHtml}
+	  `}
 
-  <!-- Footer -->
+	  <!-- Footer -->
   <div class="footer">
     <div class="kural">${thirukkural}</div>
     <div>Thank you for your visit. Please visit again!</div>
@@ -2986,6 +3125,17 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	    form.append("phone", waPhone);
 	    form.append("filename", filename);
 	    form.append("caption", caption);
+	    form.append("customerId", String(getCustomerIdForLookup() || ""));
+	    form.append("customerName", String(customer?.name || customer?.customerName || ""));
+	    form.append("billId", String(savedBillIdRef.current || ""));
+	    form.append("billNo", String(billNoHint || ""));
+	    form.append(
+	      "templateBodyParameters",
+	      JSON.stringify([
+	        String(customer?.name || customer?.customerName || "").trim(),
+	        String(billNoHint || "").trim(),
+	      ].filter(Boolean))
+	    );
 	    form.append("pdf", {
 	      uri: pdfUri,
 	      name: filename,
@@ -3015,6 +3165,43 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	    }
 
 	    return json || { ok: true };
+	  };
+
+	  const autoSendB2BBillPdfInBackground = ({ savedBill, billType, silent, isDealer } = {}) => {
+	    if (silent || isDealer || String(billType || "").toUpperCase() !== "B2B") return;
+	    const savedBillId =
+	      String(
+	        savedBill?._id ||
+	        savedBill?.id ||
+	        savedBillIdRef.current ||
+	        ""
+	      ).trim();
+	    if (!savedBillId) return;
+	    if (lastAutoWhatsAppBillRef.current === savedBillId) return;
+	    lastAutoWhatsAppBillRef.current = savedBillId;
+
+	    setTimeout(async () => {
+	      try {
+	        const waPhone = await resolveCustomerWhatsAppPhone();
+	        if (!waPhone || String(waPhone).replace(/\D/g, "").length < 12) {
+	          console.log("Skipping auto WhatsApp bill send: invalid or missing customer number.");
+	          return;
+	        }
+	        const pdfUri = await prepareBillPdf({ force: true });
+	        if (!pdfUri) {
+	          console.log("Skipping auto WhatsApp bill send: PDF generation failed.");
+	          return;
+	        }
+	        const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
+	        if (cloudRes?.ok) {
+	          console.log("Auto WhatsApp bill PDF sent successfully.", cloudRes?.deliveryMethod || "document");
+	          return;
+	        }
+	        console.log("Auto WhatsApp bill send returned no success flag.");
+	      } catch (error) {
+	        console.warn("Auto WhatsApp bill send failed:", error?.message || error);
+	      }
+	    }, 0);
 	  };
 
 		  const shareBillPdfOnly = async () => {
@@ -4067,7 +4254,13 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	      if (showSuccessAlert) {
 	        Alert.alert("Success", "Bill saved successfully");
 	      }
-      return savedBill;
+	      autoSendB2BBillPdfInBackground({
+	        savedBill,
+	        billType,
+	        silent,
+	        isDealer: isDealerPreview,
+	      });
+	      return savedBill;
       } catch (error) {
       console.error("Save Bill error:", error);
         if (!silent) {
@@ -5193,13 +5386,24 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                         <Text style={styles.nilResultValueCell}>{selectedResultText}</Text>
                       </View>
                     </View>
-                  ) : null}
-                </View>
-            </>
-          )}
+		                  ) : null}
+		                </View>
+		            </>
+		          )}
 
-	          {/* B2B / B2C and Print Again Buttons */}
-	          <View style={styles.transferContainer}>
+              {showB2BBalanceFooter ? (
+                <View style={styles.balanceFooterSection}>
+                  {b2bFooterBalanceRows.map((row) => (
+                    <View key={row.key} style={styles.balanceFooterRow}>
+                      <Text style={styles.balanceFooterLabel}>{row.label}</Text>
+                      <Text style={styles.balanceFooterValue}>{row.value}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+	
+		          {/* B2B / B2C and Print Again Buttons */}
+		          <View style={styles.transferContainer}>
 	            {customer?.type === "B2B" ? (
 	              <>
 	                <TouchableOpacity
@@ -5455,6 +5659,32 @@ const styles = StyleSheet.create({
   cashBox: { padding: 5, marginBottom: 8, borderBottomWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
 
   summaryBox: { padding: 5, marginBottom: 8, borderTopWidth: 1, borderStyle: 'dashed', borderColor: '#000' },
+  balanceFooterSection: {
+    marginTop: 8,
+    marginBottom: 10,
+    gap: 8,
+  },
+  balanceFooterRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: "#000",
+    borderRadius: 999,
+    backgroundColor: "#fff",
+  },
+  balanceFooterLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#000",
+  },
+  balanceFooterValue: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#000",
+  },
 
   b2bSummaryTable: {
     marginTop: 4,
