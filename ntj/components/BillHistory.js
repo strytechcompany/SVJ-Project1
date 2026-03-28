@@ -183,6 +183,9 @@ const getBillTimestamp = (bill = {}) => {
   return Number.isFinite(t) ? t : 0;
 };
 
+const isNilSheetBill = (bill = {}) =>
+  String(bill?.nilMode || bill?.previewSnapshot?.summary?.nilMode || "").trim() === "NIL Sheet";
+
   const resolveBillTypeFromContext = (bill = {}, customer = {}) => {
     const contextType = String(customer?.customerType || customer?.type || "").toUpperCase();
     if (contextType === "B2C") return "B2C";
@@ -207,10 +210,12 @@ const getBillTimestamp = (bill = {}) => {
     return { label: "OB", value: 0 };
   };
 
-  const getLatestBillFromList = (billList = []) => {
-    if (!Array.isArray(billList) || billList.length === 0) return null;
-    return [...billList].sort((a, b) => getBillTimestamp(b) - getBillTimestamp(a))[0] || null;
-  };
+	  const getLatestBillFromList = (billList = []) => {
+	    if (!Array.isArray(billList) || billList.length === 0) return null;
+	    return [...billList]
+        .filter((bill) => !isNilSheetBill(bill))
+        .sort((a, b) => getBillTimestamp(b) - getBillTimestamp(a))[0] || null;
+	  };
 
   const resolveHeaderBalanceFromLatestBill = (billList = [], cust = {}) => {
     const latest = getLatestBillFromList(billList);
@@ -978,10 +983,14 @@ export default function BillHistory({ navigation, route }) {
   };
 
   // ── EDIT ────────────────────────────────────────────────────────────
-  const handleEditBill = (bill) => {
-    if (!bill?._id) {
-      Alert.alert("Error", "This bill cannot be edited because its bill record ID is missing.");
+	  const handleEditBill = (bill) => {
+    if (isNilSheetBill(bill)) {
+      Alert.alert("Edit Blocked", "This bill was closed through Nil Sheet and cannot be edited.");
       return;
+    }
+	    if (!bill?._id) {
+	      Alert.alert("Error", "This bill cannot be edited because its bill record ID is missing.");
+	      return;
     }
     const billType = resolveBillTypeFromContext(bill, customer);
     const custType = String(
@@ -1405,11 +1414,12 @@ export default function BillHistory({ navigation, route }) {
   };
 
   // ── RENDER CARD ─────────────────────────────────────────────────────
-	  const renderBillItem = ({ item }) => {
-	    const snapshot = item?.previewSnapshot || null;
-	    const normalizedBillType = resolveBillTypeFromContext(item, customer);
-	    const isB2BRecord = normalizedBillType === "B2B";
-	    const isNilBalance = Boolean(
+		  const renderBillItem = ({ item }) => {
+		    const snapshot = item?.previewSnapshot || null;
+		    const normalizedBillType = resolveBillTypeFromContext(item, customer);
+		    const isB2BRecord = normalizedBillType === "B2B";
+        const isNilSheet = isNilSheetBill(item);
+		    const isNilBalance = Boolean(
 	      item?.isNilBalance ??
 	        snapshot?.summary?.isNilBalance ??
 	        (String(item?.nilMode || snapshot?.summary?.nilMode || "").trim() === "NIL Balance")
@@ -1496,9 +1506,11 @@ export default function BillHistory({ navigation, route }) {
 	        snapshot?.summary?.nilResultValue,
 	      NaN
 	    );
-	    const nilBadgeText = storedNilResultType && Number.isFinite(storedNilResultValue)
-	      ? (storedNilResultType === "NIL FT"
-	          ? `NIL FT : ${storedNilResultValue.toFixed(3)}`
+		    const nilBadgeText = storedNilResultType === "NIL Sheet"
+          ? "NIL Sheet"
+		      : storedNilResultType && Number.isFinite(storedNilResultValue)
+		      ? (storedNilResultType === "NIL FT"
+		          ? `NIL FT : ${storedNilResultValue.toFixed(3)}`
 	          : storedNilResultType === "NIL Issue"
 	            ? `NIL Issue : \u20B9 ${formatCurrencyValue(storedNilResultValue)}`
 	            : storedNilResultType === "NIL Balance"
@@ -1526,7 +1538,7 @@ export default function BillHistory({ navigation, route }) {
     const itemType = gstBill ? "GST" : (snapshot?.header?.type || resolveDisplayTypeFromContext(item, customer));
     const billNumber = snapshot?.header?.billNo || item.billNo || item.invoiceNo || "00000";
     const itemId = item?._id || item?.id || null;
-    const isLatest = Boolean(latestEditableBillId && itemId && latestEditableBillId === itemId);
+	    const isLatest = Boolean(!isNilSheet && latestEditableBillId && itemId && latestEditableBillId === itemId);
     const balanceComparison = getBalanceComparison(item, isLatest);
     const isSharing = sharingBillId === item._id;
     const displayCustomerNameRaw = snapshot?.header?.customerName || item.customerName || customer?.customerName || customer?.name || "N/A";
@@ -2122,4 +2134,3 @@ const styles = StyleSheet.create({
   badgeLabel: { fontSize: 10, fontWeight: "bold", color: "#455A64" },
   badgeValue: { fontSize: 16, fontWeight: "bold", color: "#333" },
 });
-
