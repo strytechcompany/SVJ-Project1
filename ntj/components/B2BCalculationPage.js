@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Alert,
   Modal,
+  Pressable,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
@@ -23,6 +24,8 @@ import {
   deriveBalanceStateFromNet,
   normalizeBalanceState,
 } from "./balanceUtils";
+
+const B2B_HOLD_STORAGE_KEY = "B2B_HELD_TRANSACTIONS";
 
 /**
  * CreateTransaction (Full)
@@ -153,6 +156,8 @@ export default function CreateTransaction({ navigation }) {
   const [phone, setPhone] = useState("");
   const [showOthersInput, setShowOthersInput] = useState(false);
   const [othersName, setOthersName] = useState("");
+  const [heldTransactions, setHeldTransactions] = useState([]);
+  const [activeHoldId, setActiveHoldId] = useState("");
 
   const normalizeCustomerType = (value, fallback = "B2B") => {
     const raw = String(value || fallback || "").toUpperCase();
@@ -190,6 +195,259 @@ export default function CreateTransaction({ navigation }) {
       },
     });
   }, [navigation, selectedCustomer]);
+
+  const openSelectedCustomerMiniStatement = useCallback(() => {
+    if (!selectedCustomer) return;
+    navigation.navigate("MiniStatement", {
+      customer: {
+        ...selectedCustomer,
+        id: selectedCustomer?.id || selectedCustomer?._id || selectedCustomer?.customerId || "",
+        customerId:
+          selectedCustomer?.customerId || selectedCustomer?.id || selectedCustomer?._id || "",
+        name: selectedCustomer?.name || selectedCustomer?.customerName || "",
+        customerName: selectedCustomer?.customerName || selectedCustomer?.name || "",
+        phone:
+          selectedCustomer?.phone ||
+          selectedCustomer?.phoneNumber ||
+          selectedCustomer?.customerNumber ||
+          "",
+      },
+    });
+  }, [navigation, selectedCustomer]);
+
+  const loadHeldTransactions = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(B2B_HOLD_STORAGE_KEY);
+      const parsed = JSON.parse(raw || "[]");
+      setHeldTransactions(
+        (Array.isArray(parsed) ? parsed : []).sort(
+          (a, b) => Number(b?.updatedAtMs || 0) - Number(a?.updatedAtMs || 0)
+        )
+      );
+    } catch (error) {
+      console.error("Failed to load held transactions:", error);
+      setHeldTransactions([]);
+    }
+  }, []);
+
+  const persistHeldTransactions = useCallback(async (updater) => {
+    const raw = await AsyncStorage.getItem(B2B_HOLD_STORAGE_KEY);
+    const parsed = JSON.parse(raw || "[]");
+    const current = Array.isArray(parsed) ? parsed : [];
+    const next = updater(current);
+    await AsyncStorage.setItem(B2B_HOLD_STORAGE_KEY, JSON.stringify(next));
+    setHeldTransactions(
+      next.sort((a, b) => Number(b?.updatedAtMs || 0) - Number(a?.updatedAtMs || 0))
+    );
+    return next;
+  }, []);
+
+  const clearDraftInputsOnly = useCallback(() => {
+    setWeight("");
+    setStone("0");
+    setTouch("");
+    setReceiptWeight("");
+    setReceiptStone("0");
+    setReceiptTouch("");
+    setIssueItemSearch("");
+    setReceiptItemSearch("");
+    setSelectedIssueItem(null);
+    setSelectedReceiptItem(null);
+    setIssueDetails("");
+    setIssueItemDropdownOpen(false);
+    setReceiptItemDropdownOpen(false);
+    setEditingIssueId(null);
+    setEditingReceiptId(null);
+    setRupees("");
+    setCashPureInput("0.000");
+  }, []);
+
+  const resetHeldWorkingProcess = useCallback(() => {
+    setSelectedCustomer(null);
+    setSearch("");
+    setPhone("");
+    setIssueItems([]);
+    setReceiptItems([]);
+    setCashTable([]);
+    setDescription("");
+    setGoldRate("");
+    setDate(new Date().toLocaleDateString("en-GB"));
+    setSgst("");
+    setCgst("");
+    setIgst("");
+    setGstPercentage("");
+    setGstAmount("");
+    setGstEnabled(false);
+    setShowGstInBill(true);
+    setIsSgstEnabled(false);
+    setIsCgstEnabled(false);
+    setIsIgstEnabled(false);
+    setActiveHoldId("");
+    clearDraftInputsOnly();
+  }, [clearDraftInputsOnly]);
+
+  const applyHeldTransaction = useCallback((draft = {}) => {
+    const draftCustomer = draft?.selectedCustomer || null;
+    if (draftCustomer) {
+      const customerId =
+        draftCustomer?.id || draftCustomer?._id || draftCustomer?.customerId || "";
+      const foundCustomer =
+        customers.find((cust) => String(cust.id || cust._id || cust.customerId) === String(customerId)) ||
+        customers.find((cust) => String(cust.name || "").trim() === String(draftCustomer.name || "").trim());
+      const resolvedCustomer = foundCustomer || draftCustomer;
+      setSelectedCustomer(resolvedCustomer);
+      setSearch(resolvedCustomer?.name || "");
+      setPhone(
+        resolvedCustomer?.phone ||
+          resolvedCustomer?.phoneNumber ||
+          resolvedCustomer?.customerNumber ||
+          ""
+      );
+    }
+
+    setDate(draft?.date || new Date().toLocaleDateString("en-GB"));
+    setIssueItems(Array.isArray(draft?.issueItems) ? draft.issueItems : []);
+    setReceiptItems(Array.isArray(draft?.receiptItems) ? draft.receiptItems : []);
+    setCashTable(Array.isArray(draft?.cashTable) ? draft.cashTable : []);
+    setDescription(String(draft?.description || ""));
+    setGoldRate(String(draft?.goldRate || ""));
+    setCashPureInput(String(draft?.cashPureInput || "0.000"));
+    setRupees(String(draft?.rupees || ""));
+    setWeight(String(draft?.weight || ""));
+    setStone(String(draft?.stone ?? "0"));
+    setTouch(String(draft?.touch || ""));
+    setReceiptWeight(String(draft?.receiptWeight || ""));
+    setReceiptStone(String(draft?.receiptStone ?? "0"));
+    setReceiptTouch(String(draft?.receiptTouch || ""));
+    setIssueItemSearch(String(draft?.issueItemSearch || ""));
+    setReceiptItemSearch(String(draft?.receiptItemSearch || ""));
+    setSelectedIssueItem(draft?.selectedIssueItem || null);
+    setSelectedReceiptItem(draft?.selectedReceiptItem || null);
+    setIssueDetails(String(draft?.issueDetails || ""));
+    setGstEnabled(Boolean(draft?.gstEnabled));
+    setShowGstInBill(draft?.showInBill !== false);
+    setSgst(String(draft?.sgst || ""));
+    setCgst(String(draft?.cgst || ""));
+    setIgst(String(draft?.igst || ""));
+    setGstPercentage(String(draft?.gstPercentage || ""));
+    setGstAmount(String(draft?.gstAmount || ""));
+    setIsSgstEnabled(Boolean(draft?.isSgstEnabled));
+    setIsCgstEnabled(Boolean(draft?.isCgstEnabled));
+    setIsIgstEnabled(Boolean(draft?.isIgstEnabled));
+    setActiveHoldId(String(draft?.id || ""));
+    setIssueItemDropdownOpen(false);
+    setReceiptItemDropdownOpen(false);
+  }, [customers]);
+
+  const removeHeldTransaction = useCallback(async (holdId) => {
+    if (!holdId) return;
+    await persistHeldTransactions((current) =>
+      current.filter((item) => String(item?.id || "") !== String(holdId))
+    );
+    if (String(activeHoldId || "") === String(holdId)) {
+      setActiveHoldId("");
+    }
+  }, [activeHoldId, persistHeldTransactions]);
+
+  const handleHoldTransaction = useCallback(async () => {
+    if (!selectedCustomer) {
+      Alert.alert("Select Customer", "Please select a customer before holding the process.");
+      return;
+    }
+    if (!issueItems.length && !receiptItems.length && !cashTable.length && !description.trim()) {
+      Alert.alert("No Process", "Add at least one entry before holding this transaction.");
+      return;
+    }
+
+    const holdId = String(activeHoldId || `${Date.now()}`);
+    const holdPayload = {
+      id: holdId,
+      customerId: resolveCustomerRecordId(selectedCustomer),
+      customerName: selectedCustomer?.name || selectedCustomer?.customerName || "Unknown",
+      phone:
+        selectedCustomer?.phone ||
+        selectedCustomer?.phoneNumber ||
+        selectedCustomer?.customerNumber ||
+        "",
+      selectedCustomer,
+      issueItems,
+      receiptItems,
+      cashTable,
+      description: String(description || ""),
+      date,
+      goldRate: String(goldRate || ""),
+      rupees: String(rupees || ""),
+      cashPureInput: String(cashPureInput || "0.000"),
+      weight: String(weight || ""),
+      stone: String(stone ?? "0"),
+      touch: String(touch || ""),
+      receiptWeight: String(receiptWeight || ""),
+      receiptStone: String(receiptStone ?? "0"),
+      receiptTouch: String(receiptTouch || ""),
+      issueItemSearch: String(issueItemSearch || ""),
+      receiptItemSearch: String(receiptItemSearch || ""),
+      selectedIssueItem,
+      selectedReceiptItem,
+      issueDetails: String(issueDetails || ""),
+      gstEnabled,
+      showInBill: showGstInBill,
+      sgst: String(sgst || ""),
+      cgst: String(cgst || ""),
+      igst: String(igst || ""),
+      gstPercentage: String(gstPercentage || ""),
+      gstAmount: String(gstAmount || ""),
+      isSgstEnabled,
+      isCgstEnabled,
+      isIgstEnabled,
+      updatedAtMs: Date.now(),
+    };
+
+    await persistHeldTransactions((current) => {
+      const filtered = current.filter((item) => String(item?.id || "") !== holdId);
+      return [holdPayload, ...filtered];
+    });
+    resetHeldWorkingProcess();
+    Alert.alert("Held", "Process saved temporarily. You can resume it from the held list.");
+  }, [
+    activeHoldId,
+    cashPureInput,
+    cashTable,
+    cgst,
+    date,
+    description,
+    gstAmount,
+    gstEnabled,
+    gstPercentage,
+    goldRate,
+    igst,
+    isCgstEnabled,
+    isIgstEnabled,
+    isSgstEnabled,
+    issueDetails,
+    issueItemSearch,
+    issueItems,
+    persistHeldTransactions,
+    receiptItemSearch,
+    receiptItems,
+    receiptStone,
+    receiptTouch,
+    receiptWeight,
+    rupees,
+    selectedCustomer,
+    selectedIssueItem,
+    selectedReceiptItem,
+    sgst,
+    showGstInBill,
+    stone,
+    touch,
+    weight,
+    resetHeldWorkingProcess,
+  ]);
+
+  const handleResumeHeldTransaction = useCallback((draft) => {
+    applyHeldTransaction(draft);
+    Alert.alert("Resumed", "Held process loaded successfully.");
+  }, [applyHeldTransaction]);
 
   // ── TOTALS (after useState, before useEffect) ───────────────
   const totals = useMemo(() => {
@@ -352,7 +610,8 @@ export default function CreateTransaction({ navigation }) {
     useCallback(() => {
       fetchLatestB2BGstSettings({ applyEnabled: true });
       fetchItems(); // ✅ Refresh items from database when page is focused
-    }, [fetchLatestB2BGstSettings])
+      loadHeldTransactions();
+    }, [fetchLatestB2BGstSettings, loadHeldTransactions])
   );
 
   useEffect(() => {
@@ -2130,6 +2389,9 @@ export default function CreateTransaction({ navigation }) {
 	        },
       };
 
+      if (activeHoldId) {
+        await removeHeldTransaction(activeHoldId);
+      }
       navigation.navigate("BillPreview", commonPreviewPayload);
     } catch (error) {
       console.error("❌ Error saving transaction:", error);
@@ -2141,12 +2403,7 @@ export default function CreateTransaction({ navigation }) {
   // UI rendering
   // -----------------------
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: "#F7F7F7" }}
-      nestedScrollEnabled={true}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={{ flex: 1, backgroundColor: "#F7F7F7" }}>
       <CommonHeader
         title="Create Transaction"
         backgroundColor="#F7F7F7"
@@ -2184,7 +2441,24 @@ export default function CreateTransaction({ navigation }) {
         }
       />
 
-      <View style={{ paddingHorizontal: 16, paddingBottom: 300 }}>
+      {selectedCustomer && (
+        <View style={styles.stickyIssueReceiptBar}>
+          <Text style={styles.stickyIssueReceiptLine}>
+            Issue: {totalIssuePure.toFixed(3)}g
+          </Text>
+          <Text style={styles.stickyIssueReceiptLine}>
+            Receipt: {totalReceiptPure.toFixed(3)}g
+          </Text>
+        </View>
+      )}
+
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 300 }}
+        nestedScrollEnabled={true}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
 
         {/* CUSTOMER CART */}
         {!selectedCustomer && !loadingCustomers && (
@@ -2291,8 +2565,8 @@ export default function CreateTransaction({ navigation }) {
 
             <View style={styles.customerInfoRow}>
               <View style={styles.customerDetails}>
-                <TouchableOpacity onPress={openSelectedCustomerHistory} disabled={!selectedCustomer}>
-                  <Text style={styles.infoText}>{selectedCustomer.name}</Text>
+                <TouchableOpacity onPress={openSelectedCustomerMiniStatement} disabled={!selectedCustomer}>
+                  <Text style={[styles.infoText, styles.customerLinkText]}>{selectedCustomer.name}</Text>
                 </TouchableOpacity>
                 {/* <Text style={styles.infoText}>
                   Company: {selectedCustomer.company}
@@ -2309,24 +2583,53 @@ export default function CreateTransaction({ navigation }) {
               </View>
 
               <View style={styles.balanceContainer}>
-                <Text style={[styles.balanceText, { color: "#455A64" }]}>Old: {fmt(customerOldBalance)}g</Text>
-                <Text style={[styles.balanceText, { color: "#455A64" }]}>Adv: {fmt(customerAdvanceBalance)}g</Text>
+                <Pressable onPress={openSelectedCustomerHistory} disabled={!selectedCustomer}>
+                  <Text style={[styles.balanceText, styles.balanceLinkText]}>Old: {fmt(customerOldBalance)}g</Text>
+                </Pressable>
+                <Pressable onPress={openSelectedCustomerHistory} disabled={!selectedCustomer}>
+                  <Text style={[styles.balanceText, styles.balanceLinkText]}>Adv: {fmt(customerAdvanceBalance)}g</Text>
+                </Pressable>
               </View>
             </View>
+          </View>
+        )}
+
+        {!selectedCustomer && heldTransactions.length > 0 && (
+          <View style={styles.card}>
+            <View style={styles.sectionHeader}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Icon name="pause-circle-outline" size={24} />
+                <Text style={styles.sectionTitle}>Held Processes</Text>
+              </View>
+            </View>
+            {heldTransactions.map((item) => (
+              <View key={item.id} style={styles.heldProcessCard}>
+                <TouchableOpacity
+                  style={{ flex: 1 }}
+                  onPress={() => handleResumeHeldTransaction(item)}
+                >
+                  <Text style={styles.heldProcessName}>{item.customerName || "Unknown Customer"}</Text>
+                  <Text style={styles.heldProcessMeta}>
+                    Issue: {Number(item?.issueItems?.reduce((sum, row) => sum + Number(row?.purity || 0), 0) || 0).toFixed(3)}g | Receipt: {Number(item?.receiptItems?.reduce((sum, row) => sum + Number(row?.purity || 0), 0) || 0).toFixed(3)}g
+                  </Text>
+                  <Text style={styles.heldProcessMeta}>
+                    Updated: {new Date(item.updatedAtMs || Date.now()).toLocaleString()}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => removeHeldTransaction(item.id)}
+                  style={styles.heldDeleteBtn}
+                >
+                  <Icon name="delete-outline" size={20} color="#C62828" />
+                </TouchableOpacity>
+              </View>
+            ))}
           </View>
         )}
 
         {/* ISSUE ENTRY */}
         {selectedCustomer && (
           <View style={[styles.card, styles.issueEntryCard]}>
-            <View style={styles.issueReceiptOverlay}>
-              <Text style={styles.issueReceiptOverlayLine}>
-                Issue: {totalIssuePure.toFixed(3)}g
-              </Text>
-              <Text style={styles.issueReceiptOverlayLine}>
-                Receipt: {totalReceiptPure.toFixed(3)}g
-              </Text>
-            </View>
             <View style={styles.issueHeader}>
               <View style={styles.greenDot} />
               <Text style={styles.sectionTitle}>Issue Entry</Text>
@@ -2458,6 +2761,11 @@ export default function CreateTransaction({ navigation }) {
             <TouchableOpacity style={styles.addBtn} onPress={addIssueItem}>
               <Text style={styles.addBtnText}>
                 {editingIssueId ? "Update Issue Item" : "+ Add New Item (Issue)"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.holdBtn} onPress={handleHoldTransaction}>
+              <Text style={styles.holdBtnText}>
+                {activeHoldId ? "Update Hold" : "Hold Process"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -3055,7 +3363,7 @@ export default function CreateTransaction({ navigation }) {
             </TouchableOpacity>
           </View>
         )}
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
