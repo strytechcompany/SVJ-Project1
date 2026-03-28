@@ -40,6 +40,8 @@ const toNum = (v, fallback = 0) => {
 const fmt3      = (v) => toNum(v, 0).toFixed(3);
 const normText  = (v) => String(v || "").trim().toLowerCase();
 const normId    = (v) => String(v || "").trim().toLowerCase();
+const signedBalanceFromPair = (oldBalance, advanceBalance) =>
+  toNum(oldBalance, 0) - toNum(advanceBalance, 0);
 
 const fmtDate = (v) => {
   if (!v) return "-";
@@ -69,6 +71,22 @@ const parseDate = (v) => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
+const parseTransactionDate = (row = {}) => {
+  const candidates = [
+    row?.date,
+    row?.raw?.date,
+    row?.createdAt,
+    row?.raw?.createdAt,
+    row?.updatedAt,
+    row?.raw?.updatedAt,
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseDate(candidate);
+    if (parsed) return parsed;
+  }
+  return null;
+};
+
 const dayOnly = (d) => {
   if (!(d instanceof Date) || Number.isNaN(d.getTime())) return null;
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -96,6 +114,38 @@ const pickBillBalance = (row = {}) => {
   return NaN;
 };
 
+const pickOpeningBalance = (row = {}) => {
+  const explicit = [
+    row?.previousBalance,
+    row?.openingBalance,
+    row?.startBalance,
+  ];
+  for (const c of explicit) {
+    const n = toNum(c, NaN);
+    if (Number.isFinite(n)) return n;
+  }
+  const hasOpeningPair =
+    row?.previousOldBalance !== undefined ||
+    row?.previousAdvanceBalance !== undefined ||
+    row?.ob !== undefined ||
+    row?.advBal !== undefined ||
+    row?.summaryData?.oldBalance !== undefined ||
+    row?.summaryData?.advanceBalance !== undefined;
+  if (hasOpeningPair) {
+    return signedBalanceFromPair(
+      row?.previousOldBalance ?? row?.ob ?? row?.summaryData?.oldBalance,
+      row?.previousAdvanceBalance ?? row?.advBal ?? row?.summaryData?.advanceBalance,
+    );
+  }
+  const current = pickBillBalance(row);
+  if (Number.isFinite(current)) {
+    return current - toNum(row?.issuePure ?? row?.totalIssueWeight ?? row?.issue, 0)
+      + toNum(row?.receiptPure ?? row?.totalReceiptWeight ?? row?.receipt, 0)
+      + toNum(row?.cashPure ?? row?.cashAmount ?? row?.cash, 0);
+  }
+  return NaN;
+};
+
 const normalizeCustomer = (c = {}) => ({
   ...c,
   id:         c?._id || c?.id || c?.customerId || "",
@@ -108,17 +158,24 @@ const normalizeRows = (rows = []) =>
   (Array.isArray(rows) ? rows : []).map((row, i) => {
     const issue   = toNum(row?.issue ?? row?.issuePure ?? row?.totalIssueWeight ?? 0, 0);
     const receipt = toNum(row?.receipt ?? row?.receiptPure ?? row?.totalReceiptWeight ?? 0, 0);
+    const cash    = toNum(row?.cash ?? row?.cashPure ?? row?.cashAmount ?? 0, 0);
     const balance = pickBillBalance(row);
+    const openingBalance = pickOpeningBalance(row);
+    const parsedDate = parseTransactionDate(row);
     const rawDate = row?.date || row?.createdAt || row?.updatedAt || null;
-    const pd      = rawDate ? new Date(rawDate) : null;
     return {
       id:         row?._id || row?.id || `${i}`,
       serialNo:   i + 1,
+      billNo:     row?.billNo || row?.invoiceNo || "",
+      openingBalance,
       issue,
       receipt,
+      cash,
       balance,
       date:       fmtDate(rawDate),
-      parsedDate: pd && !Number.isNaN(pd.getTime()) ? pd : null,
+      parsedDate,
+      createdAtMs: parseDate(row?.createdAt)?.getTime() || 0,
+      updatedAtMs: parseDate(row?.updatedAt)?.getTime() || 0,
       raw:        row,
     };
   });
@@ -158,8 +215,8 @@ export default function MiniStatementPage({ navigation, route }) {
   const [allRows,          setAllRows]          = useState([]);
   const [loadingCusts,     setLoadingCusts]     = useState(false);
   const [loadingStmt,      setLoadingStmt]      = useState(false);
-  const [fromDate,         setFromDate]         = useState(toInputDate(params?.fromDate));
-  const [toDate,           setToDate]           = useState(toInputDate(params?.toDate || new Date()));
+  const [fromDate,         setFromDate]         = useState(params?.fromDate ? toInputDate(params?.fromDate) : "");
+  const [toDate,           setToDate]           = useState(params?.toDate ? toInputDate(params?.toDate) : "");
   const [hasFetched,       setHasFetched]       = useState(false);
 
   // Autocomplete
@@ -169,6 +226,37 @@ export default function MiniStatementPage({ navigation, route }) {
     return customers.filter((c) => normText(c.name).includes(q)).slice(0, 8);
   }, [customers, search, selectedCustomer]);
 
+  const statementRows = useMemo(() => {
+    const ordered = [...allRows].sort((a, b) => {
+      const aTime = a.parsedDate?.getTime() || 0;
+      const bTime = b.parsedDate?.getTime() || 0;
+      if (aTime !== bTime) return aTime - bTime;
+      if (a.createdAtMs !== b.createdAtMs) return a.createdAtMs - b.createdAtMs;
+      if (a.updatedAtMs !== b.updatedAtMs) return a.updatedAtMs - b.updatedAtMs;
+      return String(a.id).localeCompare(String(b.id));
+    });
+    let runningClosing = NaN;
+    return ordered.map((row, i) => {
+      const explicitOpening = toNum(row.openingBalance, NaN);
+      const openingBalance = Number.isFinite(explicitOpening)
+        ? explicitOpening
+        : Number.isFinite(runningClosing)
+          ? runningClosing
+          : 0;
+      const explicitClosing = toNum(row.balance, NaN);
+      const closingBalance = Number.isFinite(explicitClosing)
+        ? explicitClosing
+        : openingBalance + toNum(row.issue, 0) - toNum(row.receipt, 0) - toNum(row.cash, 0);
+      runningClosing = closingBalance;
+      return {
+        ...row,
+        openingBalance,
+        closingBalance,
+        serialNo: i + 1,
+      };
+    });
+  }, [allRows]);
+
   // Date-filtered rows
   const stmtRows = useMemo(() => {
     const rawFrom = parseDate(fromDate);
@@ -177,7 +265,7 @@ export default function MiniStatementPage({ navigation, route }) {
     if (rawFrom && rawTo && rawFrom > rawTo) return [];
     const dFrom = dayOnly(rawFrom);
     const dTo   = dayOnly(rawTo);
-    return allRows
+    return statementRows
       .filter((row) => {
         const rd = dayOnly(row.parsedDate);
         if (!dFrom && !dTo) return true;
@@ -187,19 +275,16 @@ export default function MiniStatementPage({ navigation, route }) {
         return true;
       })
       .map((row, i) => ({ ...row, serialNo: i + 1 }));
-  }, [allRows, fromDate, toDate]);
+  }, [statementRows, fromDate, toDate]);
 
   const safeData = stmtRows;
 
-  // Current balance from the most recent bill (latest updatedAt)
+  // Current balance from the filtered range, otherwise latest statement balance
   const currentBalanceInfo = useMemo(() => {
-    if (!allRows.length) return null;
-    const latest = [...allRows].sort(
-      (a, b) =>
-        new Date(b.raw?.updatedAt || b.raw?.createdAt || 0).getTime() -
-        new Date(a.raw?.updatedAt || a.raw?.createdAt || 0).getTime()
-    )[0];
-    const bal = pickBillBalance(latest?.raw || {});
+    const sourceRows = safeData.length ? safeData : statementRows;
+    if (!sourceRows.length) return null;
+    const latest = sourceRows[sourceRows.length - 1];
+    const bal = toNum(latest?.closingBalance, NaN);
     if (!Number.isFinite(bal)) return null;
     const derived = deriveBalanceStateFromNet(bal);
     const isAB    = derived.advanceBalance > 0;
@@ -209,13 +294,27 @@ export default function MiniStatementPage({ navigation, route }) {
       isAB,
       raw:       bal,
     };
-  }, [allRows]);
+  }, [safeData, statementRows]);
 
-  // Totals (Issue & Receipt only — Final Balance = same as Current Balance)
+  const openingBalanceInfo = useMemo(() => {
+    if (!safeData.length) return null;
+    const opening = toNum(safeData[0]?.openingBalance, NaN);
+    if (!Number.isFinite(opening)) return null;
+    const derived = deriveBalanceStateFromNet(opening);
+    const isAB = derived.advanceBalance > 0;
+    return {
+      value: Math.abs(opening).toFixed(3),
+      label: isAB ? "Advance Balance" : "Old Balance",
+      isAB,
+      raw: opening,
+    };
+  }, [safeData]);
+
   const totals = useMemo(() => {
     const totalIssue   = safeData.reduce((s, r) => s + toNum(r.issue,   0), 0);
     const totalReceipt = safeData.reduce((s, r) => s + toNum(r.receipt, 0), 0);
-    return { totalIssue, totalReceipt };
+    const totalCash    = safeData.reduce((s, r) => s + toNum(r.cash,    0), 0);
+    return { totalIssue, totalReceipt, totalCash };
   }, [safeData]);
 
   const hasDateError = useMemo(() => {
@@ -264,7 +363,6 @@ export default function MiniStatementPage({ navigation, route }) {
         setLoadingStmt(true);
         const raw  = await fetchRows(selectedCustomer);
         const norm = normalizeRows(raw);
-        norm.sort((a, b) => (a.parsedDate?.getTime() || 0) - (b.parsedDate?.getTime() || 0));
         setAllRows(norm);
         setHasFetched(true);
       } catch (e) {
@@ -296,14 +394,19 @@ export default function MiniStatementPage({ navigation, route }) {
     const rows = safeData.map((r) => `
       <tr>
         <td>${r.serialNo}</td>
+        <td>${esc(fmt3(r.openingBalance))}</td>
         <td>${esc(fmt3(r.issue))}</td>
         <td>${esc(fmt3(r.receipt))}</td>
-        <td>${esc(Number.isFinite(r.balance) ? fmt3(r.balance) : "-")}</td>
+        <td>${esc(fmt3(r.cash))}</td>
+        <td>${esc(fmt3(r.closingBalance))}</td>
         <td>${esc(r.date)}</td>
       </tr>`).join("");
 
     const curBal    = currentBalanceInfo
       ? `${currentBalanceInfo.label}: ${currentBalanceInfo.value} g`
+      : "-";
+    const openingBal = openingBalanceInfo
+      ? `${openingBalanceInfo.label}: ${openingBalanceInfo.value} g`
       : "-";
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
@@ -329,17 +432,20 @@ tr:last-child td{border-bottom:1px solid #000}
 <div class="meta"><span>Phone:</span><span>${esc(selectedCustomer?.phone || "-")}</span></div>
 <div class="meta"><span>From:</span><span>${esc(fromDate || "-")}</span></div>
 <div class="meta"><span>To:</span><span>${esc(toDate || "-")}</span></div>
-<div class="meta"><span>Cur. Bal:</span><span>${esc(curBal)}</span></div>
+<div class="meta"><span>Opening:</span><span>${esc(openingBal)}</span></div>
+<div class="meta"><span>Closing:</span><span>${esc(curBal)}</span></div>
 <div class="div"></div>
 <table>
-<thead><tr><th>#</th><th>Issue</th><th>Receipt</th><th>Bal</th><th>Date</th></tr></thead>
+<thead><tr><th>#</th><th>Open</th><th>Issue</th><th>Receipt</th><th>Cash</th><th>Close</th><th>Date</th></tr></thead>
 <tbody>${rows}</tbody>
 </table>
 <div class="div"></div>
+<div class="sr"><span>Opening Balance:</span><span>${esc(openingBalanceInfo ? openingBalanceInfo.value : "-")} g</span></div>
 <div class="sr"><span>Total Issue:</span><span>${esc(fmt3(totals.totalIssue))} g</span></div>
 <div class="sr"><span>Total Receipt:</span><span>${esc(fmt3(totals.totalReceipt))} g</span></div>
+<div class="sr"><span>Total Cash:</span><span>${esc(fmt3(totals.totalCash))} g</span></div>
 <div class="div"></div>
-<div class="sr fin"><span>Final Balance (${esc(currentBalanceInfo?.label || "Balance")}):</span><span>${esc(currentBalanceInfo ? currentBalanceInfo.value : "-")} g</span></div>
+<div class="sr fin"><span>Closing Balance (${esc(currentBalanceInfo?.label || "Balance")}):</span><span>${esc(currentBalanceInfo ? currentBalanceInfo.value : "-")} g</span></div>
 <div class="div"></div>
 <div class="foot">Thank you for your business!</div>
 </body></html>`;
@@ -463,40 +569,52 @@ tr:last-child td{border-bottom:1px solid #000}
                 </View>
                 <View style={styles.infoFieldFull}>
                   <Text style={styles.infoLabel}>Period</Text>
-                  <Text style={styles.infoValue}>{fromDate || "-"}  →  {toDate || "-"}</Text>
+                  <Text style={styles.infoValue}>{fromDate || "All"}  →  {toDate || "All"}</Text>
                 </View>
               </View>
 
               {/* Transactions Table */}
               <View style={styles.tableCard}>
                 <Text style={styles.cardLabel}>Transactions</Text>
-                {/* Header */}
-                <View style={[styles.tableRow, styles.tableHead]}>
-                  <Text style={[styles.cell, styles.hCell, styles.snoCol]}>#</Text>
-                  <Text style={[styles.cell, styles.hCell]}>Issue</Text>
-                  <Text style={[styles.cell, styles.hCell]}>Receipt</Text>
-                  <Text style={[styles.cell, styles.hCell]}>Balance</Text>
-                  <Text style={[styles.cell, styles.hCell, styles.dateCol]}>Date</Text>
-                </View>
-                {safeData.map((row, idx) => (
-                  <View
-                    key={row.id}
-                    style={[styles.tableRow, idx % 2 === 1 && styles.tableRowAlt]}
-                  >
-                    <Text style={[styles.cell, styles.snoCol]}>{row.serialNo}</Text>
-                    <Text style={styles.cell}>{fmt3(row.issue)}</Text>
-                    <Text style={styles.cell}>{fmt3(row.receipt)}</Text>
-                    <Text style={styles.cell}>
-                      {Number.isFinite(row.balance) ? fmt3(row.balance) : "-"}
-                    </Text>
-                    <Text style={[styles.cell, styles.dateCol]}>{row.date}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={styles.tableWrap}>
+                    <View style={[styles.tableRow, styles.tableHead]}>
+                      <Text style={[styles.cell, styles.hCell, styles.snoCol]}>#</Text>
+                      <Text style={[styles.cell, styles.hCell]}>Opening</Text>
+                      <Text style={[styles.cell, styles.hCell]}>Issue</Text>
+                      <Text style={[styles.cell, styles.hCell]}>Receipt</Text>
+                      <Text style={[styles.cell, styles.hCell]}>Cash</Text>
+                      <Text style={[styles.cell, styles.hCell]}>Closing</Text>
+                      <Text style={[styles.cell, styles.hCell, styles.dateCol]}>Date</Text>
+                    </View>
+                    {safeData.map((row, idx) => (
+                      <View
+                        key={row.id}
+                        style={[styles.tableRow, idx % 2 === 1 && styles.tableRowAlt]}
+                      >
+                        <Text style={[styles.cell, styles.snoCol]}>{row.serialNo}</Text>
+                        <Text style={styles.cell}>{fmt3(row.openingBalance)}</Text>
+                        <Text style={styles.cell}>{fmt3(row.issue)}</Text>
+                        <Text style={styles.cell}>{fmt3(row.receipt)}</Text>
+                        <Text style={styles.cell}>{fmt3(row.cash)}</Text>
+                        <Text style={styles.cell}>{fmt3(row.closingBalance)}</Text>
+                        <Text style={[styles.cell, styles.dateCol]}>{row.date}</Text>
+                      </View>
+                    ))}
                   </View>
-                ))}
+                </ScrollView>
               </View>
 
               {/* Balance Summary */}
               <View style={styles.summaryCard}>
                 <Text style={styles.summaryTitle}>Balance Summary</Text>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLbl}>Opening Balance</Text>
+                  <Text style={styles.summaryVal}>
+                    {openingBalanceInfo ? `${openingBalanceInfo.value} g` : "-"}
+                  </Text>
+                </View>
+                <View style={styles.divLine} />
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLbl}>Total Issue</Text>
                   <Text style={styles.summaryVal}>{fmt3(totals.totalIssue)} g</Text>
@@ -507,9 +625,14 @@ tr:last-child td{border-bottom:1px solid #000}
                   <Text style={styles.summaryVal}>{fmt3(totals.totalReceipt)} g</Text>
                 </View>
                 <View style={styles.divLine} />
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLbl}>Total Cash</Text>
+                  <Text style={styles.summaryVal}>{fmt3(totals.totalCash)} g</Text>
+                </View>
+                <View style={styles.divLine} />
                 <View style={[styles.summaryRow, { paddingTop: 12 }]}>
                   <Text style={styles.finalLbl}>
-                    Final Balance{"\n"}
+                    Closing Balance{"\n"}
                     <Text style={{ fontSize: 10, fontWeight: "600", color: C.textMid }}>
                       {currentBalanceInfo?.label || "Current Balance"}
                     </Text>
@@ -729,6 +852,9 @@ const styles = StyleSheet.create({
     borderColor: C.border,
     elevation: 2,
     overflow: "hidden",
+  },
+  tableWrap: {
+    minWidth: 640,
   },
   tableHead: {
     backgroundColor: C.primary,
