@@ -97,7 +97,7 @@ export const styles = StyleSheet.create({
   issueEntryCard: {
     position: "relative",
     overflow: "visible",
-    paddingTop: 52,
+    paddingTop: 18,
   },
   issueReceiptOverlay: {
     position: "absolute",
@@ -122,6 +122,31 @@ export const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     lineHeight: 18,
+  },
+  stickyIssueReceiptBar: {
+    marginHorizontal: 28,
+    marginTop: 8,
+    marginBottom: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#D8E6D8",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    zIndex: 20,
+  },
+  stickyIssueReceiptLine: {
+    color: "#2C3E50",
+    fontSize: 13,
+    fontWeight: "700",
   },
   greenDot: {
     width: 12,
@@ -192,6 +217,20 @@ export const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "700",
     color: "#135F25",
+  },
+  holdBtn: {
+    backgroundColor: "#FFF3CD",
+    padding: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "#F2C94C",
+  },
+  holdBtnText: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#8A5A00",
   },
   addBtn2: {
     backgroundColor: "#13A857",
@@ -397,6 +436,37 @@ export const styles = StyleSheet.create({
   customerDetails: {
     flex: 1,
   },
+  customerLinkText: {
+    color: "#1565C0",
+    textDecorationLine: "underline",
+    fontWeight: "700",
+  },
+  heldProcessCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: "#F8FBF8",
+    borderWidth: 1,
+    borderColor: "#D9E8D9",
+    marginTop: 10,
+  },
+  heldProcessName: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#1F2D3D",
+  },
+  heldProcessMeta: {
+    fontSize: 12,
+    color: "#607080",
+    marginTop: 3,
+  },
+  heldDeleteBtn: {
+    marginLeft: 12,
+    padding: 6,
+  },
   balanceContainer: {
     alignItems: "flex-end",
   },
@@ -405,6 +475,11 @@ export const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#7F8C8D",
     marginTop: 4,
+  },
+  balanceLinkText: {
+    color: "#1565C0",
+    textDecorationLine: "underline",
+    fontWeight: "700",
   },
   cartContainer: {
     position: "relative",
