@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import * as Print from "expo-print";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { base_url } from "./config";
 import { deriveBalanceStateFromNet } from "./balanceUtils";
@@ -47,6 +48,18 @@ const fmtDate = (v) => {
   if (!v) return "-";
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString("en-GB");
+};
+
+const fmtTime = (v) => {
+  if (!v) return "-";
+  const d = new Date(v);
+  return Number.isNaN(d.getTime())
+    ? "-"
+    : d.toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
 };
 
 const toInputDate = (v) => {
@@ -85,6 +98,83 @@ const parseTransactionDate = (row = {}) => {
     if (parsed) return parsed;
   }
   return null;
+};
+
+const extractItemNames = (row = {}) => {
+  const itemGroups = [
+    row?.issueItems,
+    row?.items,
+    row?.receiptItems,
+    row?.raw?.issueItems,
+    row?.raw?.items,
+    row?.raw?.receiptItems,
+  ];
+  for (const group of itemGroups) {
+    if (!Array.isArray(group) || !group.length) continue;
+    const names = group
+      .map((item) => item?.displayItemName || item?.itemName || item?.name || item?.item || "")
+      .map((name) => String(name || "").trim())
+      .filter(Boolean);
+    if (names.length) {
+      return names.join(", ");
+    }
+  }
+  return String(row?.description || row?.raw?.description || "-").trim() || "-";
+};
+
+const getItemDisplayName = (item = {}) =>
+  String(item?.displayItemName || item?.itemName || item?.name || item?.item || "")
+    .trim();
+
+const getIssueItemWeight = (item = {}) =>
+  toNum(item?.weight ?? item?.gross ?? item?.net ?? 0, 0);
+
+const getReceiptItemWeight = (item = {}) =>
+  toNum(item?.weight ?? item?.gross ?? item?.net ?? 0, 0);
+
+const getItemSellingTouch = (item = {}) =>
+  toNum(item?.sellingTouch ?? item?.touch ?? item?.calc ?? item?.sellTouch ?? 0, 0);
+
+const extractItemDetails = (row = {}) => {
+  const issueItems = [
+    ...(Array.isArray(row?.issueItems) ? row.issueItems : []),
+    ...(Array.isArray(row?.raw?.issueItems) ? row.raw.issueItems : []),
+  ];
+  const receiptItems = [
+    ...(Array.isArray(row?.receiptItems) ? row.receiptItems : []),
+    ...(Array.isArray(row?.raw?.receiptItems) ? row.raw.receiptItems : []),
+  ];
+
+  const detailMap = new Map();
+  const ensureEntry = (name) => {
+    const key = String(name || "").trim();
+    if (!key) return null;
+    if (!detailMap.has(key)) {
+      detailMap.set(key, { name: key, issue: null, receipt: null });
+    }
+    return detailMap.get(key);
+  };
+
+  issueItems.forEach((item) => {
+    const entry = ensureEntry(getItemDisplayName(item));
+    if (!entry) return;
+    entry.issue = `I: ${fmt3(getIssueItemWeight(item))} * ${fmt3(getItemSellingTouch(item))}`;
+  });
+
+  receiptItems.forEach((item) => {
+    const entry = ensureEntry(getItemDisplayName(item));
+    if (!entry) return;
+    entry.receipt = `R: ${fmt3(getReceiptItemWeight(item))} * ${fmt3(getItemSellingTouch(item))}`;
+  });
+
+  const details = Array.from(detailMap.values());
+  if (details.length) return details;
+
+  const fallbackName = extractItemNames(row);
+  if (fallbackName && fallbackName !== "-") {
+    return [{ name: fallbackName, issue: null, receipt: null }];
+  }
+  return [{ name: "-", issue: null, receipt: null }];
 };
 
 const dayOnly = (d) => {
@@ -156,24 +246,28 @@ const normalizeCustomer = (c = {}) => ({
 
 const normalizeRows = (rows = []) =>
   (Array.isArray(rows) ? rows : []).map((row, i) => {
-    const issue   = toNum(row?.issue ?? row?.issuePure ?? row?.totalIssueWeight ?? 0, 0);
-    const receipt = toNum(row?.receipt ?? row?.receiptPure ?? row?.totalReceiptWeight ?? 0, 0);
-    const cash    = toNum(row?.cash ?? row?.cashPure ?? row?.cashAmount ?? 0, 0);
-    const balance = pickBillBalance(row);
-    const openingBalance = pickOpeningBalance(row);
-    const parsedDate = parseTransactionDate(row);
-    const rawDate = row?.date || row?.createdAt || row?.updatedAt || null;
-    return {
+	    const issue   = toNum(row?.issue ?? row?.issuePure ?? row?.totalIssueWeight ?? 0, 0);
+	    const receipt = toNum(row?.receipt ?? row?.receiptPure ?? row?.totalReceiptWeight ?? 0, 0);
+	    const cash    = toNum(row?.cash ?? row?.cashPure ?? row?.cashAmount ?? 0, 0);
+	    const balance = pickBillBalance(row);
+	    const openingBalance = pickOpeningBalance(row);
+	    const parsedDate = parseTransactionDate(row);
+	    const rawDate = row?.date || row?.createdAt || row?.updatedAt || null;
+      const rawTime = row?.createdAt || row?.updatedAt || row?.date || row?.raw?.createdAt || row?.raw?.updatedAt || null;
+	    return {
       id:         row?._id || row?.id || `${i}`,
       serialNo:   i + 1,
       billNo:     row?.billNo || row?.invoiceNo || "",
       openingBalance,
       issue,
-      receipt,
-      cash,
-      balance,
-      date:       fmtDate(rawDate),
-      parsedDate,
+	      receipt,
+	      cash,
+	      balance,
+	      itemNames:  extractItemNames(row),
+        itemDetails: extractItemDetails(row),
+		      date:       fmtDate(rawDate),
+        time:       fmtTime(rawTime),
+	      parsedDate,
       createdAtMs: parseDate(row?.createdAt)?.getTime() || 0,
       updatedAtMs: parseDate(row?.updatedAt)?.getTime() || 0,
       raw:        row,
@@ -218,6 +312,8 @@ export default function MiniStatementPage({ navigation, route }) {
   const [fromDate,         setFromDate]         = useState(params?.fromDate ? toInputDate(params?.fromDate) : "");
   const [toDate,           setToDate]           = useState(params?.toDate ? toInputDate(params?.toDate) : "");
   const [hasFetched,       setHasFetched]       = useState(false);
+  const [showFromPicker,   setShowFromPicker]   = useState(false);
+  const [showToPicker,     setShowToPicker]     = useState(false);
 
   // Autocomplete
   const filteredCusts = useMemo(() => {
@@ -389,18 +485,46 @@ export default function MiniStatementPage({ navigation, route }) {
     setAllRows([]); setHasFetched(false);
   };
 
+  const handlePickerChange = (field, _event, selectedValue) => {
+    if (field === "from") {
+      setShowFromPicker(Platform.OS === "ios");
+    } else {
+      setShowToPicker(Platform.OS === "ios");
+    }
+    if (!selectedValue) return;
+    const nextValue = toInputDate(selectedValue);
+    if (field === "from") {
+      setFromDate(nextValue);
+      return;
+    }
+    setToDate(nextValue);
+  };
+
   // Thermal print HTML
   const thermalHTML = () => {
     const rows = safeData.map((r) => `
-      <tr>
-        <td>${r.serialNo}</td>
-        <td>${esc(fmt3(r.openingBalance))}</td>
-        <td>${esc(fmt3(r.issue))}</td>
-        <td>${esc(fmt3(r.receipt))}</td>
-        <td>${esc(fmt3(r.cash))}</td>
-        <td>${esc(fmt3(r.closingBalance))}</td>
-        <td>${esc(r.date)}</td>
-      </tr>`).join("");
+      <div class="txn">
+        <div class="txn-top">
+          <span class="txn-no">#${esc(r.serialNo)}</span>
+          <span>${esc(r.date)} ${esc(r.time)}</span>
+        </div>
+        <div class="txn-items">
+          ${(Array.isArray(r.itemDetails) ? r.itemDetails : []).map((detail) => `
+            <div class="item-block">
+              <div class="item-name">${esc(detail?.name || "-")}</div>
+              ${detail?.issue ? `<div class="item-sub">${esc(detail.issue)}</div>` : ""}
+              ${detail?.receipt ? `<div class="item-sub">${esc(detail.receipt)}</div>` : ""}
+            </div>
+          `).join("")}
+        </div>
+        <div class="metric-grid">
+          <div class="metric"><span>Open</span><span>${esc(fmt3(r.openingBalance))}</span></div>
+          <div class="metric"><span>Issue</span><span>${esc(fmt3(r.issue))}</span></div>
+          <div class="metric"><span>Receipt</span><span>${esc(fmt3(r.receipt))}</span></div>
+          <div class="metric"><span>Cash</span><span>${esc(fmt3(r.cash))}</span></div>
+        </div>
+        <div class="txn-close"><span>Closing</span><span>${esc(fmt3(r.closingBalance))}</span></div>
+      </div>`).join("");
 
     const curBal    = currentBalanceInfo
       ? `${currentBalanceInfo.label}: ${currentBalanceInfo.value} g`
@@ -412,15 +536,22 @@ export default function MiniStatementPage({ navigation, route }) {
     return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',monospace;font-size:11px;color:#000;background:#fff;width:80mm;margin:0 auto;padding:4mm 3mm}
+body{font-family:'Courier New',monospace;font-size:10px;color:#000;background:#fff;width:58mm;max-width:58mm;margin:0 auto;padding:2.5mm 2mm}
 .c{text-align:center}.b{font-weight:bold}
 .div{border-top:1px dashed #000;margin:4px 0}
-.shop{font-size:15px;font-weight:bold;text-align:center;text-transform:uppercase;letter-spacing:1px}
-.meta{display:flex;justify-content:space-between;font-size:10px;margin:1px 0}
-table{width:100%;border-collapse:collapse;margin:4px 0;font-size:10px}
-th{border-top:1px solid #000;border-bottom:1px solid #000;padding:2px 1px;text-align:center;font-weight:bold}
-td{padding:2px 1px;text-align:center}
-tr:last-child td{border-bottom:1px solid #000}
+.shop{font-size:13px;font-weight:bold;text-align:center;text-transform:uppercase;letter-spacing:.6px}
+.meta{display:flex;justify-content:space-between;gap:6px;font-size:9px;margin:1px 0}
+.txn{border:1px solid #000;border-radius:4px;padding:4px 4px 3px;margin:5px 0;page-break-inside:avoid}
+.txn-top{display:flex;justify-content:space-between;gap:4px;font-size:8px;font-weight:bold;border-bottom:1px dashed #000;padding-bottom:2px;margin-bottom:3px}
+.txn-no{min-width:18px}
+.txn-items{text-align:left}
+.item-block{padding-bottom:3px;margin-bottom:3px;border-bottom:1px dotted #bbb}
+.item-block:last-child{padding-bottom:0;margin-bottom:0;border-bottom:0}
+.item-name{font-size:10px;font-weight:bold;line-height:1.2}
+.item-sub{font-size:8px;line-height:1.2;margin-top:1px}
+.metric-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:8px;row-gap:2px;margin-top:4px}
+.metric,.txn-close{display:flex;justify-content:space-between;gap:6px;font-size:9px}
+.txn-close{margin-top:4px;padding-top:3px;border-top:1px solid #000;font-weight:bold}
 .sr{display:flex;justify-content:space-between;font-size:11px;margin:2px 0}
 .sr.fin{font-weight:bold;font-size:12px}
 .foot{text-align:center;font-size:9px;margin-top:6px}
@@ -435,10 +566,7 @@ tr:last-child td{border-bottom:1px solid #000}
 <div class="meta"><span>Opening:</span><span>${esc(openingBal)}</span></div>
 <div class="meta"><span>Closing:</span><span>${esc(curBal)}</span></div>
 <div class="div"></div>
-<table>
-<thead><tr><th>#</th><th>Open</th><th>Issue</th><th>Receipt</th><th>Cash</th><th>Close</th><th>Date</th></tr></thead>
-<tbody>${rows}</tbody>
-</table>
+${rows}
 <div class="div"></div>
 <div class="sr"><span>Opening Balance:</span><span>${esc(openingBalanceInfo ? openingBalanceInfo.value : "-")} g</span></div>
 <div class="sr"><span>Total Issue:</span><span>${esc(fmt3(totals.totalIssue))} g</span></div>
@@ -508,34 +636,54 @@ tr:last-child td{border-bottom:1px solid #000}
         </View>
 
         {/* Date Filter Card (shows after customer selected) */}
-        {selectedCustomer && (
-          <View style={styles.card}>
-            <Text style={styles.cardLabel}>Date Filter</Text>
-            <View style={styles.filterRow}>
-              <View style={styles.filterFieldLeft}>
-                <Text style={styles.filterLabel}>From</Text>
-                <TextInput
-                  value={fromDate}
-                  onChangeText={setFromDate}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9BB09B"
-                  style={styles.filterInput}
+	        {selectedCustomer && (
+	          <View style={styles.card}>
+	            <Text style={styles.cardLabel}>Date Filter</Text>
+	            <View style={styles.filterRow}>
+	              <View style={styles.filterFieldLeft}>
+	                <Text style={styles.filterLabel}>From</Text>
+                  <TouchableOpacity
+                    style={styles.filterInput}
+                    activeOpacity={0.82}
+                    onPress={() => setShowFromPicker(true)}
+                  >
+                    <Text style={[styles.filterInputText, !fromDate && styles.filterPlaceholder]}>
+                      {fromDate || "Select From Date"}
+                    </Text>
+                  </TouchableOpacity>
+	              </View>
+	              <View style={styles.filterFieldRight}>
+	                <Text style={styles.filterLabel}>To</Text>
+                  <TouchableOpacity
+                    style={styles.filterInput}
+                    activeOpacity={0.82}
+                    onPress={() => setShowToPicker(true)}
+                  >
+                    <Text style={[styles.filterInputText, !toDate && styles.filterPlaceholder]}>
+                      {toDate || "Select To Date"}
+                    </Text>
+                  </TouchableOpacity>
+	              </View>
+	            </View>
+              {showFromPicker && (
+                <DateTimePicker
+                  value={parseDate(fromDate) || new Date()}
+                  mode="date"
+                  display={Platform.OS === "ios" ? "spinner" : "default"}
+                  onChange={(event, value) => handlePickerChange("from", event, value)}
                 />
-              </View>
-              <View style={styles.filterFieldRight}>
-                <Text style={styles.filterLabel}>To</Text>
-                <TextInput
-                  value={toDate}
-                  onChangeText={setToDate}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9BB09B"
-                  style={styles.filterInput}
+              )}
+              {showToPicker && (
+                <DateTimePicker
+                  value={parseDate(toDate) || parseDate(fromDate) || new Date()}
+                  mode="date"
+                  display={Platform.OS === "ios" ? "spinner" : "default"}
+                  onChange={(event, value) => handlePickerChange("to", event, value)}
                 />
-              </View>
-            </View>
-            {hasDateError && <Text style={styles.dateError}>⚠ Invalid date range.</Text>}
-          </View>
-        )}
+              )}
+	            {hasDateError && <Text style={styles.dateError}>⚠ Invalid date range.</Text>}
+	          </View>
+	        )}
 
         {/* Statement content */}
         {selectedCustomer && (
@@ -576,32 +724,50 @@ tr:last-child td{border-bottom:1px solid #000}
               {/* Transactions Table */}
               <View style={styles.tableCard}>
                 <Text style={styles.cardLabel}>Transactions</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.tableWrap}>
-                    <View style={[styles.tableRow, styles.tableHead]}>
-                      <Text style={[styles.cell, styles.hCell, styles.snoCol]}>#</Text>
-                      <Text style={[styles.cell, styles.hCell]}>Opening</Text>
-                      <Text style={[styles.cell, styles.hCell]}>Issue</Text>
-                      <Text style={[styles.cell, styles.hCell]}>Receipt</Text>
-                      <Text style={[styles.cell, styles.hCell]}>Cash</Text>
-                      <Text style={[styles.cell, styles.hCell]}>Closing</Text>
-                      <Text style={[styles.cell, styles.hCell, styles.dateCol]}>Date</Text>
-                    </View>
-                    {safeData.map((row, idx) => (
-                      <View
-                        key={row.id}
-                        style={[styles.tableRow, idx % 2 === 1 && styles.tableRowAlt]}
-                      >
-                        <Text style={[styles.cell, styles.snoCol]}>{row.serialNo}</Text>
-                        <Text style={styles.cell}>{fmt3(row.openingBalance)}</Text>
-                        <Text style={styles.cell}>{fmt3(row.issue)}</Text>
-                        <Text style={styles.cell}>{fmt3(row.receipt)}</Text>
-                        <Text style={styles.cell}>{fmt3(row.cash)}</Text>
-                        <Text style={styles.cell}>{fmt3(row.closingBalance)}</Text>
-                        <Text style={[styles.cell, styles.dateCol]}>{row.date}</Text>
-                      </View>
-                    ))}
-                  </View>
+		                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+		                  <View style={styles.tableWrap}>
+		                    <View style={[styles.tableRow, styles.tableHead]}>
+		                      <View style={[styles.cellBox, styles.hCellBox, styles.snoCol]}><Text style={[styles.cellText, styles.hCellText]}>#</Text></View>
+	                        <View style={[styles.cellBox, styles.hCellBox, styles.itemCol]}><Text style={[styles.cellText, styles.hCellText, styles.itemText]}>Item Name</Text></View>
+		                      <View style={[styles.cellBox, styles.hCellBox, styles.valueCol]}><Text style={[styles.cellText, styles.hCellText]}>Opening</Text></View>
+		                      <View style={[styles.cellBox, styles.hCellBox, styles.valueCol]}><Text style={[styles.cellText, styles.hCellText]}>Issue</Text></View>
+		                      <View style={[styles.cellBox, styles.hCellBox, styles.valueCol]}><Text style={[styles.cellText, styles.hCellText]}>Receipt</Text></View>
+		                      <View style={[styles.cellBox, styles.hCellBox, styles.valueCol]}><Text style={[styles.cellText, styles.hCellText]}>Cash</Text></View>
+		                      <View style={[styles.cellBox, styles.hCellBox, styles.valueCol]}><Text style={[styles.cellText, styles.hCellText]}>Closing</Text></View>
+		                      <View style={[styles.cellBox, styles.hCellBox, styles.dateCol]}><Text style={[styles.cellText, styles.hCellText]}>Date</Text></View>
+	                        <View style={[styles.cellBox, styles.hCellBox, styles.timeCol, styles.lastCell]}><Text style={[styles.cellText, styles.hCellText]}>Time</Text></View>
+		                    </View>
+		                    {safeData.map((row, idx) => (
+		                      <View
+		                        key={row.id}
+		                        style={[styles.tableRow, idx % 2 === 1 && styles.tableRowAlt]}
+		                      >
+		                        <View style={[styles.cellBox, styles.snoCol]}><Text style={styles.cellText}>{row.serialNo}</Text></View>
+	                          <View style={[styles.cellBox, styles.itemCol, styles.itemCellBox]}>
+                              {(Array.isArray(row.itemDetails) ? row.itemDetails : []).map((detail, detailIdx) => (
+                                <View
+                                  key={`${row.id}-item-${detailIdx}`}
+                                  style={[
+                                    styles.itemDetailBlock,
+                                    detailIdx === (row.itemDetails?.length || 0) - 1 && styles.itemDetailBlockLast,
+                                  ]}
+                                >
+                                  <Text style={[styles.cellText, styles.itemText, styles.itemNameText]}>{detail?.name || "-"}</Text>
+                                  {detail?.issue ? <Text style={[styles.cellText, styles.itemSubText]}> {detail.issue}</Text> : null}
+                                  {detail?.receipt ? <Text style={[styles.cellText, styles.itemSubText]}> {detail.receipt}</Text> : null}
+                                </View>
+                              ))}
+                            </View>
+		                        <View style={[styles.cellBox, styles.valueCol]}><Text style={styles.cellText}>{fmt3(row.openingBalance)}</Text></View>
+		                        <View style={[styles.cellBox, styles.valueCol]}><Text style={styles.cellText}>{fmt3(row.issue)}</Text></View>
+		                        <View style={[styles.cellBox, styles.valueCol]}><Text style={styles.cellText}>{fmt3(row.receipt)}</Text></View>
+		                        <View style={[styles.cellBox, styles.valueCol]}><Text style={styles.cellText}>{fmt3(row.cash)}</Text></View>
+		                        <View style={[styles.cellBox, styles.valueCol]}><Text style={styles.cellText}>{fmt3(row.closingBalance)}</Text></View>
+		                        <View style={[styles.cellBox, styles.dateCol]}><Text style={styles.cellText}>{row.date}</Text></View>
+	                          <View style={[styles.cellBox, styles.timeCol, styles.lastCell]}><Text style={styles.cellText}>{row.time}</Text></View>
+		                      </View>
+		                    ))}
+		                  </View>
                 </ScrollView>
               </View>
 
@@ -772,9 +938,18 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 9,
+    minHeight: 42,
+    justifyContent: "center",
+    backgroundColor: C.white,
+  },
+  filterInputText: {
     fontSize: 13,
     color: C.textDark,
-    backgroundColor: C.white,
+    fontWeight: "600",
+  },
+  filterPlaceholder: {
+    color: "#9BB09B",
+    fontWeight: "500",
   },
   dateError: { marginTop: 6, color: C.danger, fontSize: 11, fontWeight: "600" },
 
@@ -854,37 +1029,67 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   tableWrap: {
-    minWidth: 640,
+    minWidth: 980,
+    borderWidth: 1,
+    borderColor: "#D8E7D8",
+    borderRadius: 10,
+    overflow: "hidden",
   },
   tableHead: {
     backgroundColor: C.primary,
-    borderRadius: 8,
-    marginBottom: 2,
   },
   tableRow: {
     flexDirection: "row",
     borderBottomWidth: 1,
-    borderBottomColor: "#E0EEE0",
+    borderBottomColor: "#D8E7D8",
+    alignItems: "stretch",
   },
   tableRowAlt: { backgroundColor: "#F5FAF5" },
-  cell: {
+  cellBox: {
     flex: 1,
     paddingVertical: 8,
-    paddingHorizontal: 3,
+    paddingHorizontal: 4,
+    borderRightWidth: 1,
+    borderRightColor: "#D8E7D8",
+    justifyContent: "center",
+    alignSelf: "stretch",
+  },
+  cellText: {
     fontSize: 11,
     color: C.textDark,
     textAlign: "center",
-    borderRightWidth: 1,
-    borderRightColor: "#E0EEE0",
+    includeFontPadding: false,
+    textAlignVertical: "center",
   },
-  hCell: {
+  hCellBox: {
+    borderRightColor: "rgba(255,255,255,0.2)",
+  },
+  hCellText: {
     color: C.white,
     fontWeight: "800",
     fontSize: 11,
-    borderRightColor: "rgba(255,255,255,0.2)",
   },
   snoCol:  { flex: 0.4 },
-  dateCol: { flex: 1.6, borderRightWidth: 0 },
+  itemCol: { flex: 2.6, textAlign: "left" },
+  valueCol: { flex: 1.05 },
+  dateCol: { flex: 1.2 },
+  timeCol: { flex: 1.05 },
+  itemText: { textAlign: "left" },
+  itemCellBox: { justifyContent: "flex-start" },
+  itemNameText: { fontWeight: "700", color: C.textDark },
+  itemSubText: { textAlign: "left", fontSize: 10, color: C.textMid, marginTop: 2 },
+  itemDetailBlock: {
+    paddingBottom: 6,
+    marginBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E4EFE4",
+  },
+  itemDetailBlockLast: {
+    paddingBottom: 0,
+    marginBottom: 0,
+    borderBottomWidth: 0,
+  },
+  lastCell: { borderRightWidth: 0 },
 
   // ── Summary card
   summaryCard: {
