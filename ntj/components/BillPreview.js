@@ -358,7 +358,9 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   const [returnInput, setReturnInput] = useState(initialReturnInput);
   const [returnValue, setReturnValue] = useState(initialReturnValue);
   const [finalValue, setFinalValue] = useState(initialFinalAmount || initialFinalValue);
-  const [isBillLocked, setIsBillLocked] = useState(Boolean(isFromHistory || routeParams?.isReadOnly));
+  const [isBillLocked, setIsBillLocked] = useState(
+    Boolean(isFromHistory || routeParams?.isReadOnly || initialNilMode === "NIL Sheet")
+  );
   const [summaryData, setSummaryData] = useState(initialSummaryData);
   const [displayNilIssueAmount, setDisplayNilIssueAmount] = useState(0);
   const [showB2BCashInput, setShowB2BCashInput] = useState(false);
@@ -419,6 +421,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
   const [upiId, setUpiId] = useState("kaliyamoorthirengaraj@okaxis");
   const [additionalPhone, setAdditionalPhone] = useState('');
+  const [manualWhatsappPhone, setManualWhatsappPhone] = useState("");
   const [additionalCash, setAdditionalCash] = useState('');
   const [kadaiAmount, setKadaiAmount] = useState(() => {
     const existing = transactions?.[0]?.kadaiAmount ?? customer?.kadaiAmount ?? "";
@@ -542,26 +545,39 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     return () => clearTimeout(timer);
   }, [printAgain]);
 
-  const finalBalance = toNum(summary?.current, 0);
+  const shouldUseStoredB2BSnapshot = Boolean(isFromHistory || isBillLocked);
+  const liveCustomerOldBalance = toNum(customer?.oldBalance, 0);
+  const liveCustomerAdvanceBalance = toNum(customer?.advanceBalance, 0);
+  const snapshotOldBalance = toNum(summary?.ob, liveCustomerOldBalance);
+  const snapshotAdvanceBalance = toNum(summary?.ab, liveCustomerAdvanceBalance);
+  const finalBalance = shouldUseStoredB2BSnapshot
+    ? toNum(summary?.current, 0)
+    : liveCustomerOldBalance - liveCustomerAdvanceBalance;
   const effectiveB2BOldBalance =
     b2bLocalBalanceOverride.oldBalance !== null
       ? b2bLocalBalanceOverride.oldBalance
-      : customer?.oldBalance;
+      : (shouldUseStoredB2BSnapshot ? snapshotOldBalance : liveCustomerOldBalance);
   const effectiveB2BAdvanceBalance =
     b2bLocalBalanceOverride.advanceBalance !== null
       ? b2bLocalBalanceOverride.advanceBalance
-      : customer?.advanceBalance;
-  const rawB2BOldBalance = toNum(summary?.ob, toNum(customer?.oldBalance, 0));
-  const rawB2BAdvanceBalance = toNum(summary?.ab, toNum(customer?.advanceBalance, 0));
+      : (shouldUseStoredB2BSnapshot ? snapshotAdvanceBalance : liveCustomerAdvanceBalance);
+  const rawB2BOldBalance = shouldUseStoredB2BSnapshot
+    ? snapshotOldBalance
+    : liveCustomerOldBalance;
+  const rawB2BAdvanceBalance = shouldUseStoredB2BSnapshot
+    ? snapshotAdvanceBalance
+    : liveCustomerAdvanceBalance;
   const summaryOB =
     b2bLocalBalanceOverride.oldBalance !== null
       ? toNum(b2bLocalBalanceOverride.oldBalance, 0)
-      : toNum(summary?.ob, toNum(effectiveB2BOldBalance, 0));
+      : toNum(effectiveB2BOldBalance, 0);
   const summaryAB =
     b2bLocalBalanceOverride.advanceBalance !== null
       ? toNum(b2bLocalBalanceOverride.advanceBalance, 0)
-      : toNum(summary?.ab, toNum(effectiveB2BAdvanceBalance, 0));
-  const summaryCurrent = toNum(summary?.current, NaN);
+      : toNum(effectiveB2BAdvanceBalance, 0);
+  const summaryCurrent = shouldUseStoredB2BSnapshot
+    ? toNum(summary?.current, NaN)
+    : toNum(finalBalance, NaN);
   const hasSummaryCurrent = Number.isFinite(summaryCurrent);
 
 
@@ -618,7 +634,10 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     receiptPlusCash: (summaryReceipt + summaryCash).toFixed(3),
     ob: summaryOB.toFixed(3),
     ab: summaryAB.toFixed(3),
-    current: toNum(summary?.current, computedCurrent).toFixed(3),
+    current: (shouldUseStoredB2BSnapshot
+      ? toNum(summary?.current, computedCurrent)
+      : computedCurrent
+    ).toFixed(3),
   };
   const activeNilMode = String(b2bNilMode || "").trim();
   const isActiveNilBalance = activeNilMode === "NIL Balance";
@@ -756,20 +775,23 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     finalLabel: summaryFinalLabel,
     expression: `${formatB2BSummaryValue(b2bAdvanceBalance)} + ${formatB2BSummaryValue(b2bTotalReceiptPure)} + ${formatB2BSummaryValue(b2bTotalCashPure)} - ${formatB2BSummaryValue(b2bTotalIssuePure)}`,
   };
+  const headerOldBalanceValue = isAdvanceBill
+    ? toNum(advanceBill?.presentOldBalance, 0)
+    : isCashBill
+      ? toNum(cashBill?.oldBalance, 0)
+      : toNum(rawB2BOldBalance, 0);
+  const headerAdvanceBalanceValue = isAdvanceBill
+    ? toNum(advanceBill?.presentAdvanceBalance, 0)
+    : isCashBill
+      ? toNum(cashBill?.advanceBalance, 0)
+      : toNum(rawB2BAdvanceBalance, 0);
   const b2bFooterBalanceRows = customer?.type === "B2B"
     ? [
-        toNum(rawB2BOldBalance, 0) > 0
+        toNum(summaryFinalValue, 0) > 0
           ? {
-              key: "oldBalance",
-              label: "Old Balance",
-              value: `${formatB2BSummaryValue(rawB2BOldBalance)} gr`,
-            }
-          : null,
-        toNum(rawB2BAdvanceBalance, 0) > 0
-          ? {
-              key: "advanceBalance",
-              label: "Advance Balance",
-              value: `${formatB2BSummaryValue(rawB2BAdvanceBalance)} gr`,
+              key: "finalBalance",
+              label: summaryFinalLabel,
+              value: `${formatB2BSummaryValue(summaryFinalValue)} gr`,
             }
           : null,
       ].filter(Boolean)
@@ -841,6 +863,13 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
           ? nilBalanceResultText
           : "";
   const nilIssueButtonText = `NIL Issue : \u20B9 ${formatIndianNumber(Math.round(resolvedNilIssueAmount))}`;
+  const handleFtRateChange = (text) => {
+    if (isBillLocked) return;
+    const cleaned = String(text || "").replace(/[^0-9.]/g, "");
+    const [head, ...rest] = cleaned.split(".");
+    const normalized = rest.length > 0 ? `${head}.${rest.join("")}` : head;
+    setFtRate(toNum(normalized, 0));
+  };
   const handleReturnAmountChange = (text) => {
     if (isBillLocked) return;
     const cleaned = String(text || "").replace(/[^0-9.]/g, "");
@@ -974,6 +1003,18 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                 editable={!isBillLocked}
               />
             </View>
+            <View style={styles.resultValueRow}>
+              <Text style={styles.resultValueFormulaText}>FT Rate</Text>
+              <TextInput
+                style={styles.resultValueInput}
+                value={String(ftRate ?? "")}
+                onChangeText={handleFtRateChange}
+                keyboardType="numeric"
+                placeholder="Ft Rate"
+                placeholderTextColor="#666"
+                editable={!isBillLocked}
+              />
+            </View>
             <Text style={styles.resultValueEquals}>
               {`${baseBalance.toFixed(3)} - ${normalizedReturnAmount.toFixed(3)} = ${computedNilFtFinalGram.toFixed(3)}`}
             </Text>
@@ -1011,13 +1052,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             <TextInput
               style={styles.resultValueInput}
               value={String(ftRate ?? "")}
-              onChangeText={(text) => {
-                if (isBillLocked) return;
-                const cleaned = String(text || "").replace(/[^0-9.]/g, "");
-                const [head, ...rest] = cleaned.split(".");
-                const normalized = rest.length > 0 ? `${head}.${rest.join("")}` : head;
-                setFtRate(toNum(normalized, 0));
-              }}
+              onChangeText={handleFtRateChange}
               keyboardType="numeric"
               placeholder="Ft Rate"
               placeholderTextColor="#666"
@@ -1048,13 +1083,17 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	            <td>Balance</td>
 	            <td>${baseBalance.toFixed(3)}</td>
 	          </tr>
-	          <tr>
-	            <td>Input Value</td>
-	            <td>${normalizedReturnAmount.toFixed(3)}</td>
-	          </tr>
-	          <tr>
-	            <td colspan="2">${baseBalance.toFixed(3)} - ${normalizedReturnAmount.toFixed(3)} = ${computedNilFtFinalGram.toFixed(3)}</td>
-	          </tr>
+		          <tr>
+		            <td>Input Value</td>
+		            <td>${normalizedReturnAmount.toFixed(3)}</td>
+		          </tr>
+              <tr>
+                <td>FT Rate</td>
+                <td>${toNum(ftRate, currentB2BFtRate).toFixed(2)}</td>
+              </tr>
+		          <tr>
+		            <td colspan="2">${baseBalance.toFixed(3)} - ${normalizedReturnAmount.toFixed(3)} = ${computedNilFtFinalGram.toFixed(3)}</td>
+		          </tr>
 	          <tr>
 	            <td colspan="2"><strong>Return Value (Nil Ft): ${toNum(returnValue, 0).toFixed(3)}</strong></td>
 	          </tr>
@@ -2138,8 +2177,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   }
 
 
-  const getCustomerPhone = () => {
-    return (
+	  const getCustomerPhone = () => {
+	    return (
       order?.phone ||
       customer?.phone ||
       customer?.phoneNumber ||
@@ -2148,10 +2187,18 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       customer?.customerNumber ||
       customer?.customerPhone ||
       ""
-    );
-  };
+	    );
+	  };
 
-  const getCustomerIdForLookup = () =>
+  useEffect(() => {
+    if (String(manualWhatsappPhone || "").trim()) return;
+    const defaultPhone = getCustomerPhone();
+    if (defaultPhone) {
+      setManualWhatsappPhone(String(defaultPhone).replace(/\D/g, ""));
+    }
+  }, [customer?.phone, customer?.phoneNumber, customer?.mobileNumber, customer?.mobile, customer?.customerNumber, order?.phone]);
+
+	  const getCustomerIdForLookup = () =>
     customer?.id ||
     customer?._id ||
     customer?.customerId ||
@@ -2226,8 +2273,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       setFinalValue(resultValueBaseBalance);
       setSavedNilFtValue(resultValueBaseBalance);
       setSavedNilBalanceAmount(0);
-      setB2bLocalBalanceOverride({ oldBalance: 0, advanceBalance: 0 });
-      setB2bBalanceResetApplied(true);
+      setB2bLocalBalanceOverride({ oldBalance: null, advanceBalance: null });
+      setB2bBalanceResetApplied(false);
       return;
     }
 
@@ -2238,8 +2285,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
       setResultValue(nextNilBalanceAmount);
       setSavedNilBalanceAmount(nextNilBalanceAmount);
       setSavedNilFtValue(0);
-      setB2bLocalBalanceOverride({ oldBalance: 0, advanceBalance: 0 });
-      setB2bBalanceResetApplied(true);
+      setB2bLocalBalanceOverride({ oldBalance: null, advanceBalance: null });
+      setB2bBalanceResetApplied(false);
       return;
     }
 
@@ -3062,7 +3109,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	    return normalizePhoneWithCountryCode(registeredPhone || getCustomerPhone());
 	  };
 
-		  const sharePdfViaDeviceWhatsApp = async ({ waPhone, pdfUri, isAuto = false } = {}) => {
+	  const sharePdfViaDeviceWhatsApp = async ({ waPhone, pdfUri, isAuto = false } = {}) => {
 		    const canShare = await Sharing.isAvailableAsync();
 		    if (!canShare) {
 		      throw new Error("File sharing is not available on this device.");
@@ -3109,7 +3156,32 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		          "Unable to open share sheet. Please try again."
 		      );
 		    }
-		  };
+			  };
+
+  const ensureLatestBillSavedForShare = async () => {
+    if (isFromHistory || routeParams?.isReadOnly || isBillLocked) return savedBillIdRef.current || true;
+    const savedBill = await handleSaveBill({
+      silent: true,
+      showSuccessAlert: false,
+    });
+    return savedBill;
+  };
+
+  const prepareLatestBillPdfForShare = async ({ a4 = true } = {}) => {
+    const savedBill = await ensureLatestBillSavedForShare();
+    if (savedBill === null) {
+      throw new Error("Latest bill could not be saved.");
+    }
+    preparedPdfUriRef.current = "";
+    if (a4) {
+      const pdfUri = await generateA4BillPdf();
+      if (!pdfUri) throw new Error("Could not generate bill PDF.");
+      return pdfUri;
+    }
+    const pdfUri = await prepareBillPdf({ force: true });
+    if (!pdfUri) throw new Error("Could not generate bill PDF.");
+    return pdfUri;
+  };
 
 	  const sendBillPdfViaWhatsAppCloudApi = async ({ waPhone, pdfUri } = {}) => {
 	    const billNoHint =
@@ -3204,42 +3276,53 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	    }, 0);
 	  };
 
-		  const shareBillPdfOnly = async () => {
+	  const shareBillPdfOnly = async () => {
 		    if (isSharingRef.current) return;
 		    try {
 		      isSharingRef.current = true;
-		      const pdfUri = await prepareBillPdf();
+          setIsSharing(true);
+		      const pdfUri = await prepareLatestBillPdfForShare({ a4: true });
 		      if (!pdfUri) throw new Error("Could not generate bill PDF.");
-		      const waPhone = await resolveCustomerWhatsAppPhone();
-
-		      // 1. Try direct Cloud API delivery first (most direct)
-		      let sentViaCloud = false;
-		      if (waPhone) {
-		        try {
-		          const cloudRes = await sendBillPdfViaWhatsAppCloudApi({ waPhone, pdfUri });
-		          if (cloudRes?.ok) {
-		            sentViaCloud = true;
-		            console.log("Success", `Bill PDF sent directly to ${waPhone}`);
-		            await openWhatsAppChat(waPhone); // Open chat to show the sent document
-		            return;
-		          }
-		        } catch (e) {
-		          console.log("Cloud API skipped/failed");
-		        }
-		      }
-
-		      // 2. Fallback: Share the PDF via the OS share sheet.
-		      // Note: WhatsApp deep-links cannot pre-attach files reliably; opening WhatsApp first
-		      // often prevents the share sheet from appearing (app goes background).
-		      if (!sentViaCloud) {
-		        await sharePdfViaDeviceWhatsApp({ waPhone, pdfUri, isAuto: false });
-		      }
+          await Sharing.shareAsync(pdfUri, {
+            mimeType: "application/pdf",
+            dialogTitle: "Share Bill PDF",
+            UTI: "com.adobe.pdf",
+          });
 		    } catch (error) {
 		      Alert.alert("Error", error.message || "Failed to share PDF.");
 		    } finally {
+          setIsSharing(false);
 		      isSharingRef.current = false;
 		    }
 		  };
+
+  const handleManualWhatsappPhoneChange = (text) => {
+    setManualWhatsappPhone(String(text || "").replace(/\D/g, ""));
+  };
+
+  const handleSendPdfToManualWhatsApp = async () => {
+    if (isSharingRef.current) return;
+    const waPhone = normalizePhoneWithCountryCode(manualWhatsappPhone);
+    if (!waPhone || waPhone.length < 10) {
+      Alert.alert("Invalid Phone", "Please enter a valid WhatsApp number.");
+      return;
+    }
+    try {
+      isSharingRef.current = true;
+      setIsSharing(true);
+      const pdfUri = await prepareLatestBillPdfForShare({ a4: true });
+      await shareA4PdfToWhatsApp(pdfUri, waPhone);
+      Alert.alert(
+        "WhatsApp Opened",
+        `Bill is prepared for ${waPhone}. Review once and tap send in WhatsApp.`
+      );
+    } catch (error) {
+      Alert.alert("Error", error?.message || "Failed to send bill PDF.");
+    } finally {
+      setIsSharing(false);
+      isSharingRef.current = false;
+    }
+  };
 
 	  const openCustomerChatOnly = async () => {
 	    try {
@@ -3415,7 +3498,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	  };
 
 	  // ─── Core helper: share A4 PDF directly into WhatsApp ───────────────────
-	  const shareA4PdfToWhatsApp = async (fileUri, waPhone) => {
+		  const shareA4PdfToWhatsApp = async (fileUri, waPhone) => {
 	    // react-native-share can target WhatsApp directly and attach a file.
 	    // On Android the uri must be a base64 data-uri OR a content:// uri.
 	    // Expo's FileSystem gives us a file:// uri — we read it as base64 first.
@@ -3428,14 +3511,15 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	      });
 	      const dataUri = `data:application/pdf;base64,${base64}`;
 
-	      await RNShare.shareSingle({
-	        social: RNShare.Social.WHATSAPP,
-	        url: dataUri,
-	        type: 'application/pdf',
-	        filename: `NTJ_Bill.pdf`,
-	        title: 'NTJ Bill PDF',
-	        message: waPhone ? `Bill for ${waPhone}` : 'Please find your bill attached.',
-	      });
+		      await RNShare.shareSingle({
+		        social: RNShare.Social.WHATSAPP,
+		        url: dataUri,
+		        type: 'application/pdf',
+		        filename: `NTJ_Bill.pdf`,
+		        title: 'NTJ Bill PDF',
+            whatsAppNumber: waPhone || undefined,
+		        message: waPhone ? `Bill for ${waPhone}` : 'Please find your bill attached.',
+		      });
 	    } catch (rnShareErr) {
 	      // RNShare throws if user cancels or WhatsApp not installed — fall back to generic sheet
 	      console.warn('RNShare WhatsApp failed, falling back to expo-sharing:', rnShareErr?.message);
@@ -3498,7 +3582,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	    await shareBillToCustomerWhatsApp({ isAuto: false });
 	  }
 
-  const handlePrint = async () => {
+	  const handlePrint = async () => {
     try {
       setIsPrinting(true);
       const html = generateHTML();
@@ -3518,6 +3602,91 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
     } finally {
       setIsPrinting(false);
     }
+	  };
+
+  const handlePrintAgain = async () => {
+    if (
+      customer?.type === "B2B" &&
+      !isDealerPreview &&
+      (activeNilMode === "NIL Balance" || activeNilMode === "NIL FT")
+    ) {
+      const savedBill = await handleSaveBill({
+        silent: true,
+        showSuccessAlert: false,
+      });
+      if (savedBill === null) return;
+    }
+    await handlePrint();
+  };
+
+  const handleEditPreview = () => {
+    if (isBillLocked) return;
+    const editTransactionPayload = {
+      _id:
+        savedBillIdRef.current ||
+        route.params?.savedBillId ||
+        route.params?.billId ||
+        transactions?.[0]?._id ||
+        transactions?.[0]?.id ||
+        "",
+      customerId: getCustomerIdForLookup() || customer?.customerId || customer?.id || customer?._id || "",
+      customerName: customer?.customerName || customer?.name || "",
+      customerType: customer?.customerType || customer?.type || "B2B",
+      date: customer?.date || routeParams?.date || new Date().toLocaleDateString("en-GB"),
+      description: String(billDescription || "").trim(),
+      issueItems: safeIssueItems.map((item, idx) => ({
+        id: item?.id || `issue-${idx}-${Date.now()}`,
+        name: item?.name || item?.item || "",
+        item: item?.name || item?.item || "",
+        gross: item?.gross ?? item?.weight ?? 0,
+        weight: item?.gross ?? item?.weight ?? 0,
+        m: item?.m ?? item?.stone ?? 0,
+        stone: item?.m ?? item?.stone ?? 0,
+        calc: item?.calc ?? item?.touch ?? 0,
+        touch: item?.calc ?? item?.touch ?? 0,
+        pure: item?.pure ?? item?.purity ?? 0,
+        purity: item?.pure ?? item?.purity ?? 0,
+      })),
+      receiptItems: safeReceiptItems.map((item, idx) => ({
+        id: item?.id || `receipt-${idx}-${Date.now()}`,
+        name: item?.name || item?.item || "",
+        item: item?.name || item?.item || "",
+        weight: item?.weight ?? item?.gross ?? 0,
+        result: item?.result ?? item?.stone ?? 0,
+        stone: item?.result ?? item?.stone ?? 0,
+        calc: item?.calc ?? item?.touch ?? 0,
+        touch: item?.calc ?? item?.touch ?? 0,
+        pure: item?.pure ?? item?.purity ?? 0,
+        purity: item?.pure ?? item?.purity ?? 0,
+      })),
+      cashTable: Array.isArray(safeCashTable) ? safeCashTable : [],
+    };
+
+    const editCustomerPayload = {
+      ...customer,
+      _id: customer?._id || customer?.id || customer?.customerId || "",
+      id: customer?.id || customer?._id || customer?.customerId || "",
+      customerId: customer?.customerId || customer?.id || customer?._id || "",
+      customerName: customer?.customerName || customer?.name || "",
+      name: customer?.name || customer?.customerName || "",
+      phone:
+        customer?.phone ||
+        customer?.phoneNumber ||
+        customer?.customerNumber ||
+        "",
+      customerType: customer?.customerType || customer?.type || "B2B",
+      type: customer?.type || customer?.customerType || "B2B",
+      gst: customer?.gst || customer?.gstin || "",
+      address: customer?.address || "",
+    };
+
+    navigation.navigate("B2BCalculationPage", {
+      editTransaction: editTransactionPayload,
+      editCustomer: editCustomerPayload,
+      ftRate: String(currentB2BFtRate || ftRate || ""),
+      printAgain: true,
+      lastBill: route.params,
+    });
   };
 
   const handlePrintQR = async () => {
@@ -3680,9 +3849,48 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
   };
 
   const handleSelectB2BNilMode = async (mode) => {
-    if (customer?.type !== "B2B") return;
+    if (customer?.type !== "B2B" || isBillLocked) return;
     const nextMode = b2bNilMode === mode ? "" : mode;
     applyLocalB2BNilModeState(nextMode);
+  };
+
+  const handleNilSheet = () => {
+    if (customer?.type !== "B2B" || isBillLocked) return;
+    Alert.alert(
+      "Nil Sheet",
+      "This will close the current bill and prevent further edits. Continue?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Yes",
+          onPress: async () => {
+            const savedBill = await handleSaveBill({
+              b2bNilMode: "NIL Sheet",
+              silent: true,
+              lockAfterSave: true,
+              showSuccessAlert: false,
+              force: true,
+            });
+            if (!savedBill) return;
+            setB2bNilMode("NIL Sheet");
+            setSelectedResultType(null);
+            setIsNilBalance(false);
+            setIsNilFt(false);
+            setIsNilIssueSelected(false);
+            Alert.alert("Success", "Bill closed successfully.", [
+              {
+                text: "OK",
+                onPress: () =>
+                  navigation.reset({
+                    index: 0,
+                    routes: [{ name: "Home" }],
+                  }),
+              },
+            ]);
+          },
+        },
+      ]
+    );
   };
 
   const updateB2CBalances = async ({ customerId, oldBalance, advanceBalance, billId = "" }) => {
@@ -3788,18 +3996,22 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	          : 0;
 	        const nilBalanceAmountForSave = isNilBalanceSelected ? resultValueForSave : 0;
         const nilIssueAmountForSave = isNilIssueForSave ? resolvedNilIssueAmount : 0;
-        const nilResultTypeForSave = isNilIssueForSave
-          ? "NIL Issue"
-          : isNilFTSelected
-            ? "NIL FT"
-            : isNilBalanceSelected
-              ? "NIL Balance"
-              : "";
+	        const nilResultTypeForSave = activeB2BNilMode === "NIL Sheet"
+	          ? "NIL Sheet"
+	          : isNilIssueForSave
+	            ? "NIL Issue"
+	            : isNilFTSelected
+	              ? "NIL FT"
+	              : isNilBalanceSelected
+	                ? "NIL Balance"
+	                : "";
 	        const nilResultValueForSave = isNilIssueForSave
 	          ? nilIssueAmountForSave
-		          : isNilFTSelected
-		            ? returnValueForSave
-		            : isNilBalanceSelected
+	          : activeB2BNilMode === "NIL Sheet"
+	            ? 0
+	          : isNilFTSelected
+	            ? returnValueForSave
+	            : isNilBalanceSelected
 		              ? nilBalanceAmountForSave
 		              : 0;
 	        console.log({
@@ -4424,7 +4636,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
         >
           {/* TRANSFER BUTTONS FOR ESTIMATE */}
           {estimate && (
-            <View style={styles.transferContainer}>
+			          <View style={styles.transferContainer}>
               <TouchableOpacity style={styles.transferBtnB2B} onPress={handleTransferToB2B}>
                 <Icon name="swap-horizontal" size={20} color="#fff" style={{ marginRight: 5 }} />
                 <Text style={styles.transferBtnText}>Transfer to B2B</Text>
@@ -4445,8 +4657,6 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		                {order && <Text style={[styles.headerText, estimate && styles.estimateHeaderText]}>Order No : {order.orderNo}</Text>}
 		                <Text style={[styles.headerText, estimate && styles.estimateHeaderText]}>Name : {isAdvanceBill ? (advanceBill?.name || "Advance Customer") : isCashBill ? (cashBill?.name || "Cash Customer") : estimate ? (estimate.itemName || "Estimate Customer") : order ? order.customer : customer.name}</Text>
 		                {!estimate && <Text style={[styles.headerText, estimate && styles.estimateHeaderText]}>Phone : {isAdvanceBill ? (advanceBill?.phone || 'N/A') : isCashBill ? (cashBill?.phone || 'N/A') : order ? order.phone : (customer.phone || customer.phoneNumber || customer.customerNumber || 'N/A')}</Text>}
-		                {!isCashBill && !isAdvanceBill && <Text style={[styles.headerText, estimate && styles.estimateHeaderText]}>Address : {customer?.address || 'N/A'}</Text>}
-		                {!isCashBill && !isAdvanceBill && <Text style={[styles.headerText, estimate && styles.estimateHeaderText]}>GST No : {customer?.gstin || 'N/A'}</Text>}
 		                {billDescription ? (
 		                  <Text style={[styles.headerText, estimate && styles.estimateHeaderText]}>Description : {billDescription}</Text>
 		                ) : null}
@@ -4459,12 +4669,12 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		                  <Text style={[styles.headerText, styles.headerTextRight, styles.estimateHeaderText]}>OD : N/A</Text>
 	                ) : (
 	                  <>
-	                    {(isAdvanceBill ? advanceBill?.presentOldBalance : isCashBill ? cashBill?.oldBalance : customer.oldBalance) && parseFloat(isAdvanceBill ? advanceBill?.presentOldBalance : isCashBill ? cashBill?.oldBalance : customer.oldBalance) !== 0 ? (
-	                      <Text style={[styles.headerText, styles.headerTextRight]}>Old Balance : {isAdvanceBill ? advanceBill?.presentOldBalance : isCashBill ? cashBill?.oldBalance : customer.oldBalance}</Text>
-	                    ) : null}
-	                    {(isAdvanceBill ? advanceBill?.presentAdvanceBalance : isCashBill ? cashBill?.advanceBalance : customer.advanceBalance) && parseFloat(isAdvanceBill ? advanceBill?.presentAdvanceBalance : isCashBill ? cashBill?.advanceBalance : customer.advanceBalance) !== 0 ? (
-	                      <Text style={[styles.headerText, styles.headerTextRight]}>Advance Balance : {isAdvanceBill ? advanceBill?.presentAdvanceBalance : isCashBill ? cashBill?.advanceBalance : customer.advanceBalance}</Text>
-	                    ) : null}
+		                    {headerOldBalanceValue !== 0 ? (
+		                      <Text style={[styles.headerText, styles.headerTextRight]}>Old Balance : {headerOldBalanceValue.toFixed(3)}</Text>
+		                    ) : null}
+		                    {headerAdvanceBalanceValue !== 0 ? (
+		                      <Text style={[styles.headerText, styles.headerTextRight]}>Advance Balance : {headerAdvanceBalanceValue.toFixed(3)}</Text>
+		                    ) : null}
 	                    {!isCashBill && !isAdvanceBill && isB2C && customer.advanceBalance && parseFloat(customer.advanceBalance) !== 0 && toNum(b2cGoldRateAtPurchase, 0) > 0 ? (
 	                      <Text style={[styles.headerText, styles.headerTextRight]}>Gold Rate (Past) : {"\u20B9"}{toNum(b2cGoldRateAtPurchase).toFixed(2)}/g</Text>
 	                    ) : null}
@@ -5406,72 +5616,102 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		          <View style={styles.transferContainer}>
 	            {customer?.type === "B2B" ? (
 	              <>
-	                <TouchableOpacity
-	                  style={[styles.transferBtnB2B, { backgroundColor: '#17a2b8' }]}
-	                  onPress={handlePrint}
-	                >
-	                  <Icon name="printer" size={20} color="#fff" style={{ marginRight: 8 }} />
-	                  <Text style={styles.transferBtnText}>Print Again</Text>
-	                </TouchableOpacity>
-	                {!isDealerPreview ? (
-	                  <>
-			                    <TouchableOpacity
-			                      style={[
-			                        styles.transferBtnB2B,
-			                        { backgroundColor: activeNilMode === "NIL Balance" ? "#C62828" : "#2be916ff" },
-			                        activeNilMode !== "NIL Balance" && { opacity: 0.5 },
-			                      ]}
-			                      onPress={() => handleSelectB2BNilMode("NIL Balance")}
-	                    >
-		                      <Text style={styles.transferBtnText}>{nilBalanceButtonText}</Text>
-	                    </TouchableOpacity>
-			                    <TouchableOpacity
-			                      style={[
-			                        styles.transferBtnB2B,
-			                        { backgroundColor: activeNilMode === "NIL FT" ? "#EF6C00" : "#2be916ff" },
-			                        activeNilMode !== "NIL FT" && { opacity: 0.5 },
-			                      ]}
-			                      onPress={() => handleSelectB2BNilMode("NIL FT")}
-	                    >
-		                      <Text style={styles.transferBtnText}>{nilFtButtonText}</Text>
-	                    </TouchableOpacity>
-			                    <TouchableOpacity
-			                      style={[
-			                        styles.transferBtnB2B,
-			                        { backgroundColor: isNilIssueSelected ? "#1565C0" : "#2be916ff" },
-			                        !isNilIssueSelected && { opacity: 0.5 },
-			                      ]}
-		                      onPress={() =>
-		                        setIsNilIssueSelected((prev) => {
-		                          const next = !prev;
-	                          setSelectedResultType(resolveSelectedResultType(b2bNilMode, next));
-	                          return next;
-	                        })
-	                      }
-	                    >
-	                      <Text style={styles.transferBtnText}>{nilIssueButtonText}</Text>
-	                    </TouchableOpacity>
-	                  </>
-	                ) : null}
-	                <TouchableOpacity
-	                  style={styles.transferBtnB2B}
-	                  onPress={() => navigation.navigate("B2BCalculationPage", { printAgain: true, lastBill: route.params })}
-	                >
-	                  <Icon name="file-document-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-	                  <Text style={styles.transferBtnText}>B2B</Text>
-	                </TouchableOpacity>
-	                {!isDealerPreview ? (
-			                  <TouchableOpacity
-			                    style={[
-			                      styles.transferBtnB2B,
-			                      { backgroundColor: showB2BCashInput ? "#1565C0" : "#2be916ff" },
-			                      !showB2BCashInput && { opacity: 0.5 },
-			                    ]}
-			                    onPress={handleToggleB2BCashInput}
-		                  >
-	                    <Text style={styles.transferBtnText}>Cash</Text>
-	                  </TouchableOpacity>
-	                ) : null}
+		                <TouchableOpacity
+		                  style={[styles.transferBtnB2B, { backgroundColor: '#17a2b8' }]}
+		                  onPress={handlePrintAgain}
+		                >
+		                  <Icon name="printer" size={20} color="#fff" style={{ marginRight: 8 }} />
+		                  <Text style={styles.transferBtnText}>Print Again</Text>
+		                </TouchableOpacity>
+		                <TouchableOpacity
+		                  style={styles.transferBtnB2B}
+		                  onPress={() => navigation.navigate("B2BCalculationPage", { printAgain: true, lastBill: route.params })}
+		                >
+		                  <Icon name="file-document-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+		                  <Text style={styles.transferBtnText}>B2B</Text>
+		                </TouchableOpacity>
+		                <TouchableOpacity
+		                  style={[styles.transferBtnB2B, isBillLocked && styles.disabledAction]}
+		                  onPress={handleEditPreview}
+		                  disabled={isBillLocked}
+		                >
+		                  <Icon name="pencil" size={20} color="#fff" style={{ marginRight: 8 }} />
+		                  <Text style={styles.transferBtnText}>Edit</Text>
+		                </TouchableOpacity>
+		                {!isDealerPreview ? (
+		                  <>
+				                    <TouchableOpacity
+				                      style={[
+				                        styles.transferBtnB2B,
+				                        { backgroundColor: activeNilMode === "NIL Balance" ? "#C62828" : "#2be916ff" },
+				                        activeNilMode !== "NIL Balance" && { opacity: 0.5 },
+                                isBillLocked && styles.disabledAction,
+				                      ]}
+				                      onPress={() => handleSelectB2BNilMode("NIL Balance")}
+                              disabled={isBillLocked}
+		                    >
+			                      <Text style={styles.transferBtnText}>{nilBalanceButtonText}</Text>
+		                    </TouchableOpacity>
+				                    <TouchableOpacity
+				                      style={[
+				                        styles.transferBtnB2B,
+				                        { backgroundColor: activeNilMode === "NIL FT" ? "#EF6C00" : "#2be916ff" },
+				                        activeNilMode !== "NIL FT" && { opacity: 0.5 },
+                                isBillLocked && styles.disabledAction,
+				                      ]}
+				                      onPress={() => handleSelectB2BNilMode("NIL FT")}
+                              disabled={isBillLocked}
+		                    >
+			                      <Text style={styles.transferBtnText}>{nilFtButtonText}</Text>
+		                    </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[
+                                styles.transferBtnB2B,
+                                { backgroundColor: activeNilMode === "NIL Sheet" ? "#6D4C41" : "#2be916ff" },
+                                activeNilMode !== "NIL Sheet" && { opacity: 0.5 },
+                                isBillLocked && styles.disabledAction,
+                              ]}
+                              onPress={handleNilSheet}
+                              disabled={isBillLocked}
+                            >
+                              <Text style={styles.transferBtnText}>Nil Sheet</Text>
+                            </TouchableOpacity>
+		                  </>
+		                ) : null}
+		                {!isDealerPreview ? (
+		                  <>
+				                    {/* <TouchableOpacity
+				                      style={[
+				                        styles.transferBtnB2B,
+				                        { backgroundColor: isNilIssueSelected ? "#1565C0" : "#2be916ff" },
+				                        !isNilIssueSelected && { opacity: 0.5 },
+                                isBillLocked && styles.disabledAction,
+				                      ]}
+                              onPress={() =>
+                                setIsNilIssueSelected((prev) => {
+                                  const next = !prev;
+                                  setSelectedResultType(resolveSelectedResultType(b2bNilMode, next));
+                                  return next;
+                                })
+                              }
+                              disabled={isBillLocked}
+			                    >
+			                      <Text style={styles.transferBtnText}>{nilIssueButtonText}</Text>
+			                    </TouchableOpacity> */}
+				                  {/* <TouchableOpacity
+				                    style={[
+				                      styles.transferBtnB2B,
+				                      { backgroundColor: showB2BCashInput ? "#1565C0" : "#2be916ff" },
+				                      !showB2BCashInput && { opacity: 0.5 },
+                              isBillLocked && styles.disabledAction,
+				                    ]}
+				                    onPress={handleToggleB2BCashInput}
+                            disabled={isBillLocked}
+				                  >
+			                    <Text style={styles.transferBtnText}>Cash</Text>
+			                  </TouchableOpacity> */}
+                          </>
+		                ) : null}
 			              </>
 		            ) : null}
 	            {customer?.type === "B2C" ? (
@@ -5501,18 +5741,48 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
               </>
             ) : null}
 
-	            {customer?.type !== "B2B" ? (
-	              <TouchableOpacity
-	                style={[styles.transferBtnB2B, { backgroundColor: '#17a2b8' }]}
-	                onPress={handlePrint}
+		            {customer?.type !== "B2B" ? (
+		              <TouchableOpacity
+		                style={[styles.transferBtnB2B, { backgroundColor: '#17a2b8' }]}
+		                onPress={handlePrint}
 	              >
 	                <Icon name="printer" size={20} color="#fff" style={{ marginRight: 8 }} />
 	                <Text style={styles.transferBtnText}>Print Again</Text>
 	              </TouchableOpacity>
-	            ) : null}
-	          </View>
+		            ) : null}
+		          </View>
 
-          {customer?.type === "B2B" && !isDealerPreview && showB2BCashInput ? (
+              <View style={styles.manualShareSection}>
+                <TouchableOpacity
+                  style={[styles.transferBtnB2B, styles.sharePdfButton, isSharing && styles.disabledAction]}
+                  onPress={shareBillPdfOnly}
+                  disabled={isSharing}
+                >
+                  <Icon name="share-variant-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.transferBtnText}>Share PDF</Text>
+                </TouchableOpacity>
+                <View style={styles.manualShareRow}>
+                  <Text style={styles.manualShareLabel}>Phone:</Text>
+                  <TextInput
+                    style={[styles.input, styles.manualShareInput]}
+                    value={manualWhatsappPhone}
+                    onChangeText={handleManualWhatsappPhoneChange}
+                    keyboardType="numeric"
+                    placeholder="WhatsApp Number"
+                    placeholderTextColor="#666"
+                    editable={!isSharing}
+                  />
+                  <TouchableOpacity
+                    style={[styles.transferBtnB2B, styles.manualSendButton, isSharing && styles.disabledAction]}
+                    onPress={handleSendPdfToManualWhatsApp}
+                    disabled={isSharing}
+                  >
+                    <Text style={styles.transferBtnText}>Send</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+	          {customer?.type === "B2B" && !isDealerPreview && showB2BCashInput ? (
             <View style={{ paddingHorizontal: 16, marginTop: 6, marginBottom: 6 }}>
               <View style={{ flexDirection: "row", gap: 10, alignItems: "center", justifyContent: "center" }}>
 	                <TextInput
@@ -6065,6 +6335,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     letterSpacing: 0.5,
+    width: 100,
   },
   saveButton: {
     flexDirection: 'row',
@@ -6138,6 +6409,41 @@ const styles = StyleSheet.create({
 	    textAlign: 'center',
 	    flexShrink: 1,
 	  },
+  manualShareSection: {
+    paddingHorizontal: 16,
+    marginTop: 6,
+    marginBottom: 6,
+    gap: 10,
+    alignItems: "center",
+  },
+  sharePdfButton: {
+    width: "100%",
+    maxWidth: 180,
+    minHeight: 54,
+    backgroundColor: "#6A1B9A",
+  },
+  manualShareRow: {
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  manualShareLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#000",
+  },
+  manualShareInput: {
+    flex: 1,
+    maxWidth: 220,
+    paddingVertical: 10,
+  },
+  manualSendButton: {
+    minHeight: 48,
+    maxWidth: 110,
+    backgroundColor: "#1B5E20",
+  },
 
   // ── B2C Professional Styles ──
   b2cProfessionalCard: {
