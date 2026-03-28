@@ -13,7 +13,7 @@ import {
   StatusBar,
   ActivityIndicator,
 } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import * as MailComposer from "expo-mail-composer";
@@ -31,8 +31,8 @@ export default function ReportScreen({ navigation }) {
   const [appliedToDateObj, setAppliedToDateObj] = useState(null);
   const [hasAppliedDateRange, setHasAppliedDateRange] = useState(false);
 
-  const [showFromPicker, setShowFromPicker] = useState(false);
-  const [showToPicker, setShowToPicker] = useState(false);
+  const [activeDateField, setActiveDateField] = useState(null);
+  const [pickerDraftDate, setPickerDraftDate] = useState(new Date());
 
   const [activeTab, setActiveTab] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
@@ -57,6 +57,7 @@ export default function ReportScreen({ navigation }) {
   const [b2bPhones, setB2bPhones] = useState({});
   const [b2cPhones, setB2cPhones] = useState({});
   const [dealerPhones, setDealerPhones] = useState({});
+  const [balanceCustomers, setBalanceCustomers] = useState([]);
 
   // Individual search and filter states for each table
   const [b2bSearch, setB2bSearch] = useState("");
@@ -86,7 +87,7 @@ export default function ReportScreen({ navigation }) {
 
   // ================= HELPER FUNCTION =================
   const reportTabs = useMemo(() => {
-    const tabs = ["B2B", "Dealer", "B2C", "Kadai", "Purchase", "Receipt", "Cash", "Expense", "Stock", "All"];
+    const tabs = ["B2B", "Dealer", "B2C", "Kadai", "Purchase", "Receipt", "Cash", "Expense", "Stock", "All", "OB/AB"];
     const seen = new Set();
     return tabs.filter((t) => {
       const key = String(t || "").trim();
@@ -118,6 +119,11 @@ export default function ReportScreen({ navigation }) {
     const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   };
+  const toPickerSafeDate = (value = new Date()) => {
+    const d = new Date(value);
+    d.setHours(12, 0, 0, 0);
+    return d;
+  };
   const getStartOfDay = (value = new Date()) => {
     const d = new Date(value);
     d.setHours(0, 0, 0, 0);
@@ -143,6 +149,31 @@ export default function ReportScreen({ navigation }) {
       isCustom: false,
     };
   };
+  const normalizeBalanceCustomerRow = (row = {}, category = "B2B") => ({
+    id: String(row?._id || row?.id || row?.customerId || `${category}-${row?.customerName || row?.name || ""}`),
+    category,
+    customerName: String(row?.customerName || row?.name || "Unknown").trim() || "Unknown",
+    oldBalance: parseFloat(row?.oldBalance || 0) || 0,
+    advanceBalance: parseFloat(row?.advanceBalance || 0) || 0,
+    updatedAt:
+      row?.lastTransactionDate ||
+      row?.updatedAt ||
+      row?.createdAt ||
+      row?.date ||
+      null,
+    createdAt:
+      row?.lastTransactionDate ||
+      row?.updatedAt ||
+      row?.createdAt ||
+      row?.date ||
+      null,
+    date:
+      row?.lastTransactionDate ||
+      row?.updatedAt ||
+      row?.createdAt ||
+      row?.date ||
+      null,
+  });
   const displayPhone = (value) => {
     const raw = value === undefined || value === null ? "" : String(value).trim();
     return raw ? raw : "-";
@@ -383,10 +414,10 @@ export default function ReportScreen({ navigation }) {
       }
 
       // Build customer current balance maps
-      if (b2bCustRes.ok) {
-        const b2bCusts = await b2bCustRes.json();
-        const bMap = {};
-        const pMap = {};
+	      if (b2bCustRes.ok) {
+	        const b2bCusts = await b2bCustRes.json();
+	        const bMap = {};
+	        const pMap = {};
         b2bCusts.forEach(c => {
           const bal = { ob: parseFloat(c.oldBalance || 0), ab: parseFloat(c.advanceBalance || 0) };
           const phone = c.phone || c.phoneNumber || c.mobileNumber || c.mobile || "";
@@ -399,11 +430,20 @@ export default function ReportScreen({ navigation }) {
           if (c._id) pMap[c._id] = phone;
           if (c.customerId) pMap[c.customerId] = phone;
         });
-        setB2bBalances(bMap);
-        setB2bPhones(pMap);
-      }
-      if (b2cCustRes.ok) {
-        const b2cCusts = await b2cCustRes.json();
+	        setB2bBalances(bMap);
+	        setB2bPhones(pMap);
+          setBalanceCustomers((prev) => {
+            const dealerRows = prev.filter((row) => row.category === "Dealer");
+            const b2cRows = prev.filter((row) => row.category === "B2C");
+            return [
+              ...b2bCusts.map((c) => normalizeBalanceCustomerRow(c, "B2B")),
+              ...b2cRows,
+              ...dealerRows,
+            ];
+          });
+	      }
+	      if (b2cCustRes.ok) {
+	        const b2cCusts = await b2cCustRes.json();
         const cMap = {};
         const pMap = {};
         b2cCusts.forEach(c => {
@@ -416,11 +456,20 @@ export default function ReportScreen({ navigation }) {
           if (c.phoneNumber) pMap[c.phoneNumber] = phone;
           if (c.mobileNumber) pMap[c.mobileNumber] = phone;
         });
-        setB2cBalances(cMap);
-        setB2cPhones(pMap);
-      }
-      if (dealerCustRes.ok) {
-        const dealerCusts = await dealerCustRes.json();
+	        setB2cBalances(cMap);
+	        setB2cPhones(pMap);
+          setBalanceCustomers((prev) => {
+            const b2bRows = prev.filter((row) => row.category === "B2B");
+            const dealerRows = prev.filter((row) => row.category === "Dealer");
+            return [
+              ...b2bRows,
+              ...b2cCusts.map((c) => normalizeBalanceCustomerRow(c, "B2C")),
+              ...dealerRows,
+            ];
+          });
+	      }
+	      if (dealerCustRes.ok) {
+	        const dealerCusts = await dealerCustRes.json();
         const dMap = {};
         const pMap = {};
         (Array.isArray(dealerCusts) ? dealerCusts : []).forEach((c) => {
@@ -441,9 +490,18 @@ export default function ReportScreen({ navigation }) {
             pMap[String(k)] = phone;
           });
         });
-        setDealerBalances(dMap);
-        setDealerPhones(pMap);
-      }
+	        setDealerBalances(dMap);
+	        setDealerPhones(pMap);
+          setBalanceCustomers((prev) => {
+            const b2bRows = prev.filter((row) => row.category === "B2B");
+            const b2cRows = prev.filter((row) => row.category === "B2C");
+            return [
+              ...b2bRows,
+              ...b2cRows,
+              ...(Array.isArray(dealerCusts) ? dealerCusts : []).map((c) => normalizeBalanceCustomerRow(c, "Dealer")),
+            ];
+          });
+	      }
 
     } catch (error) {
       console.error("Error fetching report data:", error);
@@ -482,39 +540,71 @@ export default function ReportScreen({ navigation }) {
 
   // ================= DATE PICKER (FIXED) =================
 
-  const onFromDateChange = (event, selectedDate) => {
-    if (event?.type === 'dismissed') {
-      setShowFromPicker(false);
-      return;
-    }
-
-    if (selectedDate) {
-      const d = new Date(selectedDate);
-      d.setHours(0, 0, 0, 0);
-      setFromDateObj(d);
-    }
-
-    setShowFromPicker(false);
+  const closeDatePicker = () => {
+    setActiveDateField(null);
   };
 
-  const onToDateChange = (event, selectedDate) => {
-    if (event?.type === 'dismissed') {
-      setShowToPicker(false);
+  const openDatePicker = (field) => {
+    const nextField = field === "to" ? "to" : "from";
+    const initialDate = toPickerSafeDate(
+      nextField === "to"
+        ? (toDateObj || fromDateObj || new Date())
+        : (fromDateObj || new Date())
+    );
+
+    if (Platform.OS === "android") {
+      DateTimePickerAndroid.open({
+        value: initialDate,
+        mode: "date",
+        is24Hour: true,
+        minimumDate: nextField === "to" && fromDateObj ? toPickerSafeDate(fromDateObj) : undefined,
+        onChange: (event, selectedDate) => {
+          if (event?.type === "dismissed" || !selectedDate) return;
+          commitDateSelection(nextField, selectedDate);
+        },
+      });
       return;
     }
 
-    if (selectedDate) {
-      const d = new Date(selectedDate);
-      d.setHours(0, 0, 0, 0);
+    setPickerDraftDate(initialDate);
+    setActiveDateField(nextField);
+  };
 
-      if (fromDateObj && d < fromDateObj) {
+  const commitDateSelection = (field, selectedDate) => {
+    if (!selectedDate) return;
+    const d = toPickerSafeDate(selectedDate);
+    if (field === "to") {
+      if (fromDateObj && getStartOfDay(d) < getStartOfDay(fromDateObj)) {
         Alert.alert("Invalid Selection", "The 'To Date' cannot be earlier than the 'From Date'.");
-      } else {
-        setToDateObj(d);
+        return;
       }
+      setToDateObj(d);
+      return;
+    }
+    setFromDateObj(d);
+  };
+
+  const onDatePickerChange = (event, selectedDate) => {
+    if (event?.type === "dismissed") {
+      closeDatePicker();
+      return;
+    }
+    if (!selectedDate || !activeDateField) return;
+
+    if (Platform.OS === "ios") {
+      setPickerDraftDate(toPickerSafeDate(selectedDate));
+      return;
     }
 
-    setShowToPicker(false);
+    setPickerDraftDate(toPickerSafeDate(selectedDate));
+    commitDateSelection(activeDateField, selectedDate);
+    closeDatePicker();
+  };
+
+  const confirmIosDateSelection = () => {
+    if (!activeDateField) return;
+    commitDateSelection(activeDateField, pickerDraftDate);
+    closeDatePicker();
   };
 
   const validateDateRangeOrAlert = () => {
@@ -525,7 +615,7 @@ export default function ReportScreen({ navigation }) {
       Alert.alert("Validation", "Please select both From Date and To Date to apply date filtering.");
       return false;
     }
-    if (toDateObj < fromDateObj) {
+    if (getStartOfDay(toDateObj) < getStartOfDay(fromDateObj)) {
       Alert.alert("Validation", "To Date cannot be earlier than From Date.");
       return false;
     }
@@ -861,6 +951,15 @@ export default function ReportScreen({ navigation }) {
     return base;
   };
 
+  const getFilteredObAbRows = () =>
+    filterByDate(balanceCustomers)
+      .filter((r) => Number(r.oldBalance || 0) > 0 || Number(r.advanceBalance || 0) > 0)
+      .sort((a, b) => {
+        const aTime = parseRecordDate(a.updatedAt)?.getTime() || 0;
+        const bTime = parseRecordDate(b.updatedAt)?.getTime() || 0;
+        return bTime - aTime;
+      });
+
   useEffect(() => {
     console.log("[ReportScreen] State counts:", {
       activeTab,
@@ -922,15 +1021,18 @@ export default function ReportScreen({ navigation }) {
     const filteredB2c = getFilteredB2C();
     const filteredKadai = getFilteredKadai();
     const filteredPurchase = getFilteredPurchase();
-    const filteredReceipts = getFilteredReceipt();
-    const filteredCash = getFilteredCash();
-    const filteredExpense = getFilteredExpense();
-    const filteredStock = getFilteredStock(includeStockAllCategories);
-    const b2bTotalValue = getB2BTotalValue(filteredB2b);
-    const b2cTotalValue = getB2CTotalValue(filteredB2c);
-    const dealerTotalValue = getDealerTotalValue(filteredDealer);
-    const cashTotalValue = getCashTotalValue(filteredCash);
-    const allTotalValue = b2bTotalValue + b2cTotalValue + dealerTotalValue + cashTotalValue;
+	    const filteredReceipts = getFilteredReceipt();
+	    const filteredCash = getFilteredCash();
+	    const filteredExpense = getFilteredExpense();
+	    const filteredStock = getFilteredStock(includeStockAllCategories);
+	    const filteredObAb = getFilteredObAbRows().filter((r) =>
+	      !searchQuery || String(r.customerName || "").toLowerCase().includes(searchQuery.toLowerCase())
+	    );
+	    const b2bTotalValue = getB2BTotalValue(filteredB2b);
+	    const b2cTotalValue = getB2CTotalValue(filteredB2c);
+	    const dealerTotalValue = getDealerTotalValue(filteredDealer);
+	    const cashTotalValue = getCashTotalValue(filteredCash);
+	    const allTotalValue = b2bTotalValue + b2cTotalValue + dealerTotalValue + cashTotalValue;
 
     const b2bSummary = {
       totalValue: b2bTotalValue.toFixed(3),
@@ -977,9 +1079,10 @@ export default function ReportScreen({ navigation }) {
     let kadaiRows = "";
     let purchaseRows = "";
     let receiptRows = "";
-    let cashRows = "";
-    let expenseRows = "";
-    let stockRows = "";
+	    let cashRows = "";
+	    let expenseRows = "";
+	    let stockRows = "";
+	    let obAbRows = "";
 
     if (showAll || activeTab === "B2B") {
       b2bRows = filteredB2b.map(r => {
@@ -1062,11 +1165,33 @@ export default function ReportScreen({ navigation }) {
       0
     );
 
-    if (showAll || activeTab === "Stock") {
-      stockRows = filteredStock.map(r =>
-        `<tr><td>${getStockItemName(r)}</td><td>${getStockItemWeightValue(r) === null ? "-" : getStockItemWeight(r).toFixed(3)}</td><td>${getStockItemPurity(r)}</td><td>${getStockBuyingTouch(r)}</td><td>${getStockSellingTouch(r)}</td></tr>`
-      ).join("");
-    }
+	    if (showAll || activeTab === "Stock") {
+	      stockRows = filteredStock.map(r =>
+	        `<tr><td>${getStockItemName(r)}</td><td>${getStockItemWeightValue(r) === null ? "-" : getStockItemWeight(r).toFixed(3)}</td><td>${getStockItemPurity(r)}</td><td>${getStockBuyingTouch(r)}</td><td>${getStockSellingTouch(r)}</td></tr>`
+	      ).join("");
+	    }
+
+	    if (activeTab === "OB/AB") {
+	      obAbRows = filteredObAb
+	        .map((r, index) => {
+	          const updatedDate = parseRecordDate(r.updatedAt);
+	          const rowDate = updatedDate ? formatDate(updatedDate) : "-";
+	          const rowTime = updatedDate
+	            ? updatedDate.toLocaleTimeString([], {
+	                hour: "2-digit",
+	                minute: "2-digit",
+	                second: "2-digit",
+	                hour12: false,
+	              })
+	            : "-";
+	          return `<tr><td>${index + 1}</td><td>${r.customerName || "-"}</td><td>${Number(
+	            r.oldBalance || 0
+	          ).toFixed(3)}</td><td>${Number(r.advanceBalance || 0).toFixed(
+	            3
+	          )}</td><td>${rowDate}</td><td>${rowTime}</td></tr>`;
+	        })
+	        .join("");
+	    }
 
     const filterLabel = showAll ? "All Type" : activeTab;
     const stockLabel = showAll
@@ -1155,17 +1280,24 @@ export default function ReportScreen({ navigation }) {
             ${expenseRows}
           </table>` : ""}
 
-        ${stockRows ? `
-          <p class="section-title">Stock Report - ${stockLabel}</p>
-          <table>
-            <tr><th>Item Name</th><th>Item Weight</th><th>Item Purity</th><th>Buying Touch</th><th>Selling Touch</th></tr>
-            ${stockRows}
-            <tr><td><b>Total Stock Weight</b></td><td><b>${Number(stockGrandTotal || 0).toFixed(3)}</b></td><td><b>Total Purity: ${Number(stockPurityGrandTotal || 0).toFixed(3)}</b></td><td>-</td><td>-</td></tr>
-          </table>` : ""}
-      </body>
-      </html>
-    `;
-  };
+	        ${stockRows ? `
+	          <p class="section-title">Stock Report - ${stockLabel}</p>
+	          <table>
+	            <tr><th>Item Name</th><th>Item Weight</th><th>Item Purity</th><th>Buying Touch</th><th>Selling Touch</th></tr>
+	            ${stockRows}
+	            <tr><td><b>Total Stock Weight</b></td><td><b>${Number(stockGrandTotal || 0).toFixed(3)}</b></td><td><b>Total Purity: ${Number(stockPurityGrandTotal || 0).toFixed(3)}</b></td><td>-</td><td>-</td></tr>
+	          </table>` : ""}
+
+	        ${obAbRows ? `
+	          <p class="section-title">OB / AB Report</p>
+	          <table>
+	            <tr><th>S.No</th><th>Customer Name</th><th>Old Balance</th><th>Advance Balance</th><th>Date</th><th>Time</th></tr>
+	            ${obAbRows}
+	          </table>` : ""}
+	      </body>
+	      </html>
+	    `;
+	  };
 
   const createReportPdf = async () => {
     const html = buildSelectedReportHtml();
@@ -1255,6 +1387,9 @@ export default function ReportScreen({ navigation }) {
   const filteredB2cRows = getFilteredB2C();
   const filteredDealerRows = getFilteredDealer();
   const filteredCashRows = getFilteredCash();
+  const filteredObAbRows = getFilteredObAbRows().filter((r) =>
+    !searchQuery || String(r.customerName || "").toLowerCase().includes(searchQuery.toLowerCase())
+  );
   const b2bCategoryTotal = getB2BTotalValue(filteredB2bRows);
   const b2cCategoryTotal = getB2CTotalValue(filteredB2cRows);
   const dealerCategoryTotal = getDealerTotalValue(filteredDealerRows);
@@ -1398,35 +1533,85 @@ export default function ReportScreen({ navigation }) {
         )}
 
         {/* DATE PICKER UI */}
-        <View style={styles.dateCard}>
-          <TouchableOpacity
-            style={styles.dateBox}
-            onPress={() => {
-              setShowToPicker(false);
-              setShowFromPicker(true);
-            }}
-          >
+	        <View style={styles.dateCard}>
+	          <TouchableOpacity
+	            style={styles.dateBox}
+	            onPress={() => {
+                openDatePicker("from");
+	            }}
+	          >
             <Text style={styles.dateTitle}>From Date</Text>
             <Text style={styles.dateValue}>{fromDateObj ? formatDate(fromDateObj) : "Select Date"}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.dateBox}
-            onPress={() => {
-              setShowFromPicker(false);
-              setShowToPicker(true);
-            }}
-          >
+	          <TouchableOpacity
+	            style={styles.dateBox}
+	            onPress={() => {
+                openDatePicker("to");
+	            }}
+	          >
             <Text style={styles.dateTitle}>To Date</Text>
             <Text style={styles.dateValue}>{toDateObj ? formatDate(toDateObj) : "Select Date"}</Text>
           </TouchableOpacity>
-        </View>
+	        </View>
 
-        <TouchableOpacity
-          style={styles.dateSearchBtn}
-          onPress={() => {
-            setShowFromPicker(false);
-            setShowToPicker(false);
+          {Platform.OS === "ios" && activeDateField === "from" && (
+            <View style={styles.iosPickerCard}>
+              <Text style={styles.iosPickerTitle}>Select From Date</Text>
+              <DateTimePicker
+                value={toPickerSafeDate(pickerDraftDate)}
+                mode="date"
+                display="spinner"
+                onChange={onDatePickerChange}
+              />
+              <View style={styles.iosPickerActions}>
+                <TouchableOpacity
+                  style={[styles.iosPickerBtn, styles.iosPickerCancelBtn]}
+                  onPress={closeDatePicker}
+                >
+                  <Text style={styles.iosPickerCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.iosPickerBtn, styles.iosPickerDoneBtn]}
+                  onPress={confirmIosDateSelection}
+                >
+                  <Text style={styles.iosPickerDoneText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {Platform.OS === "ios" && activeDateField === "to" && (
+            <View style={styles.iosPickerCard}>
+              <Text style={styles.iosPickerTitle}>Select To Date</Text>
+              <DateTimePicker
+                value={toPickerSafeDate(pickerDraftDate)}
+                mode="date"
+                display="spinner"
+                onChange={onDatePickerChange}
+                minimumDate={fromDateObj ? toPickerSafeDate(fromDateObj) : undefined}
+              />
+              <View style={styles.iosPickerActions}>
+                <TouchableOpacity
+                  style={[styles.iosPickerBtn, styles.iosPickerCancelBtn]}
+                  onPress={closeDatePicker}
+                >
+                  <Text style={styles.iosPickerCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.iosPickerBtn, styles.iosPickerDoneBtn]}
+                  onPress={confirmIosDateSelection}
+                >
+                  <Text style={styles.iosPickerDoneText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+	        <TouchableOpacity
+	          style={styles.dateSearchBtn}
+	          onPress={() => {
+	            closeDatePicker();
             if (!validateDateRangeOrAlert()) return;
             const hasFrom = Boolean(fromDateObj);
             const hasTo = Boolean(toDateObj);
@@ -2082,7 +2267,7 @@ export default function ReportScreen({ navigation }) {
         )}
 
         {/* ================= EXPENSE TABLE ================= */}
-        {(activeTab === "All" || activeTab === "Expense") && (
+	        {(activeTab === "All" || activeTab === "Expense") && (
           <>
             <View style={styles.tableHeaderRow}>
               <Text style={styles.tableTitle}>Daily Expense Report</Text>
@@ -2127,10 +2312,59 @@ export default function ReportScreen({ navigation }) {
               </View>
             </ScrollView>
           </>
+	        )}
+
+        {activeTab === "OB/AB" && (
+          <>
+            <View style={styles.tableHeaderRow}>
+              <Text style={styles.tableTitle}>OB / AB Report</Text>
+              <Text style={styles.tableTotalText}>Rows: {filteredObAbRows.length}</Text>
+            </View>
+            <ScrollView horizontal>
+              <View>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.tCell, styles.headerCell]}>S.No</Text>
+                  <Text style={[styles.tCell, styles.headerCell]}>Customer Name</Text>
+                  <Text style={[styles.tCell, styles.headerCell]}>Old Balance</Text>
+                  <Text style={[styles.tCell, styles.headerCell]}>Advance Balance</Text>
+                  <Text style={[styles.tCell, styles.headerCell]}>Date</Text>
+                  <Text style={[styles.tCell, styles.headerCell]}>Time</Text>
+                </View>
+
+                {filteredObAbRows.length === 0 ? (
+                  <View style={styles.tableRow}>
+                    {loading ? (
+                      <ActivityIndicator size="small" color="#2E7D32" />
+                    ) : (
+                      <Text style={[styles.tCell, styles.noDataText]}>No Data Found</Text>
+                    )}
+                  </View>
+                ) : (
+                  filteredObAbRows.map((r, i) => {
+                    const updatedDate = parseRecordDate(r.updatedAt);
+                    return (
+                      <View key={`${r.id}-${i}`} style={styles.tableRow}>
+                        <Text style={styles.tCell}>{i + 1}</Text>
+                        <Text style={styles.tCell}>{r.customerName || "-"}</Text>
+                        <Text style={[styles.tCell, { color: '#D32F2F', fontWeight: 'bold' }]}>
+                          {Number(r.oldBalance || 0).toFixed(3)}
+                        </Text>
+                        <Text style={[styles.tCell, { color: '#2E7D32', fontWeight: 'bold' }]}>
+                          {Number(r.advanceBalance || 0).toFixed(3)}
+                        </Text>
+                        <Text style={styles.tCell}>{updatedDate ? formatDate(updatedDate) : "-"}</Text>
+                        <Text style={styles.tCell}>{updatedDate ? updatedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : "-"}</Text>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            </ScrollView>
+          </>
         )}
 
-        {/* ================= STOCK TABLE ================= */}
-        {activeTab === "Stock" && (
+	        {/* ================= STOCK TABLE ================= */}
+	        {activeTab === "Stock" && (
           <>
             <View style={styles.tableHeaderRow}>
               <Text style={styles.tableTitle}>Stock Report</Text>
@@ -2224,23 +2458,23 @@ export default function ReportScreen({ navigation }) {
       </ScrollView>
 
       {/* DATE PICKERS (FIXED - Using Date objects directly) */}
-      {showFromPicker && (
-        <DateTimePicker
-          value={fromDateObj || new Date()}
-          mode="date"
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={onFromDateChange}
-        />
-      )}
-      {showToPicker && (
-        <DateTimePicker
-          value={toDateObj || fromDateObj || new Date()}
-          mode="date"
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={onToDateChange}
-          minimumDate={fromDateObj || undefined}
-        />
-      )}
+	      {Platform.OS !== "ios" && activeDateField === "from" && (
+	        <DateTimePicker
+	          value={toPickerSafeDate(pickerDraftDate)}
+	          mode="date"
+	          display="default"
+	          onChange={onDatePickerChange}
+	        />
+	      )}
+	      {Platform.OS !== "ios" && activeDateField === "to" && (
+	        <DateTimePicker
+	          value={toPickerSafeDate(pickerDraftDate)}
+	          mode="date"
+	          display="default"
+	          onChange={onDatePickerChange}
+	          minimumDate={fromDateObj ? toPickerSafeDate(fromDateObj) : undefined}
+	        />
+	      )}
     </SafeAreaView>
   );
 }
@@ -2395,6 +2629,48 @@ const styles = StyleSheet.create({
   },
   dateTitle: { fontSize: 12, color: "#1b5e20" },
   dateValue: { fontSize: 16, fontWeight: "bold", color: "#000" },
+  iosPickerCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  iosPickerTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1b5e20",
+    marginBottom: 6,
+  },
+  iosPickerActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 8,
+  },
+  iosPickerBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  iosPickerCancelBtn: {
+    backgroundColor: "#E8F5E9",
+  },
+  iosPickerDoneBtn: {
+    backgroundColor: "#1b5e20",
+  },
+  iosPickerCancelText: {
+    color: "#1b5e20",
+    fontWeight: "700",
+  },
+  iosPickerDoneText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
 
   dateSearchBtn: {
     backgroundColor: "#1b5e20",
