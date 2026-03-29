@@ -1864,16 +1864,16 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	    <html>
 	          <head>
 	            <style>
-	              @page { margin: 0; }
-		              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 11px; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-		              h1 { text-align: center; font-size: 17px; margin-bottom: 6px; color: #000; }
-		              h2 { margin-top: 9px; font-size: 12px; margin-bottom: 5px; color: #000; }
-		              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
-		              th, td { b[order: 1px solid #000; padding: 3px 2px; text-align: center; font-size: 9px; color: #000; vertical-align: middle; word-break: break-word; overflow-wrap: anywhere; }
-		              th { background-color: #ececec; font-weight: 700; }
-		              p { margin: 2px 0; font-size: 10px; color: #000; }
-		              .total-row td { font-weight: 700; background-color: #f3f3f3; }
-		              .summary-table td, .summary-table th { font-size: 8.5px; }
+		              @page { margin: 0; }
+			              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 11px; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+			              h1 { text-align: center; font-size: 17px; margin-bottom: 6px; color: #000; }
+			              h2 { margin-top: 9px; font-size: 12px; margin-bottom: 5px; color: #000; }
+			              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
+			              th, td { border: 1px solid #000; padding: 3px 2px; text-align: center; font-size: 9px; color: #000; vertical-align: middle; word-break: break-word; overflow-wrap: anywhere; }
+			              th { background-color: #ececec; font-weight: 700; }
+			              p { margin: 2px 0; font-size: 10px; color: #000; }
+			              .total-row td { font-weight: 700; background-color: #f3f3f3; }
+			              .summary-table td, .summary-table th { font-size: 8.5px; }
 		              .summary-balance { font-weight: 800; }
 			              .summary-expression { text-align: center; font-size: 8px; line-height: 1.25; white-space: normal; }
 			              .balance-footer-section { margin-top: 10px; }
@@ -1889,11 +1889,21 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 			              .b2b-print .b2b-strong-number { font-size: 11px; font-weight: 900; }
 			              .b2b-print .summary-table td, .b2b-print .summary-table th { font-size: 9.6px; }
 			              .b2b-print .summary-expression { font-size: 9px; font-weight: 700; color: #000; }
-			              .b2b-print .summary-balance { font-size: 11.5px; }
-			              .b2b-print .balance-footer-row { font-size: 11px; }
-			              .b2b-print .b2b-meta { margin-bottom: 3px; font-size: 11px; }
-		            </style>
-		          </head>
+				              .b2b-print .summary-balance { font-size: 11.5px; }
+				              .b2b-print .balance-footer-row { font-size: 11px; }
+				              .b2b-print .b2b-meta { margin-bottom: 3px; font-size: 11px; }
+				              .b2b-print .section-table th,
+				              .b2b-print .section-table td,
+				              .b2b-print .summary-table th,
+				              .b2b-print .summary-table td { white-space: normal; }
+				              .b2b-print .col-name { width: 20%; }
+				              .b2b-print .col-num { width: 16%; }
+				              .b2b-print .cash-col-label { width: 40%; }
+				              .b2b-print .cash-col-num { width: 30%; }
+				              .b2b-print .summary-col { width: 20%; }
+				              .b2b-print .summary-expression-row td { line-height: 1.3; }
+			            </style>
+			          </head>
 	          <body class="${isPrintableB2B ? 'b2b-print' : ''}">
             <h1>BILL</h1>
 	            <div>
@@ -1913,10 +1923,17 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             ` : ""}
             ${isDealerPreview ? `
             <h2>RECEIPT:</h2>
-            <table>
-              <tr>
-                <th>Name</th>
-                <th>Weight</th>
+	            <table class="section-table">
+	              <colgroup>
+	                <col class="col-name" />
+	                <col class="col-num" />
+	                <col class="col-num" />
+	                <col class="col-num" />
+	                <col class="col-num" />
+	              </colgroup>
+	              <tr>
+	                <th>Name</th>
+	                <th>Weight</th>
                 <th>Result</th>
                 <th>Calc</th>
                 <th>Pure</th>
@@ -1940,15 +1957,23 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                </tr>` : ''}
 	              </table>
             <h2>ISSUE:</h2>
-            <table>
-              <tr>
-                <h2>Name</h2>
-                <h2>G.Weight</h2>
-                ${showIssueMColumn ? '<h2>M</h2>' : ''}
-                ${showIssueNetWeightColumn ? '<h2>N.Weight</h2>' : ''}
-                <h2>Calc</h2>
-                <h2>Pure</h2>
-              </tr>
+	            <table class="section-table">
+	              <colgroup>
+	                <col class="col-name" />
+	                <col class="col-num" />
+	                ${showIssueMColumn ? '<col class="col-num" />' : ''}
+	                ${showIssueNetWeightColumn ? '<col class="col-num" />' : ''}
+	                <col class="col-num" />
+	                <col class="col-num" />
+	              </colgroup>
+	              <tr>
+	                <th>Name</th>
+	                <th>G.Weight</th>
+	                ${showIssueMColumn ? '<th>M</th>' : ''}
+	                ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
+	                <th>Calc</th>
+	                <th>Pure</th>
+	              </tr>
                 ${issueItems.map(row => `
                   <tr>
                     <td>${row.name}</td>
@@ -1970,9 +1995,17 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
               </table>
             ` : `
 	            <h2>ISSUE:</h2>
-	            <table>
-	              <tr>
-	                <th class="b2b-label-text">Name</th>
+		            <table class="section-table">
+		              <colgroup>
+		                <col class="col-name" />
+		                <col class="col-num" />
+		                ${showIssueMColumn ? '<col class="col-num" />' : ''}
+		                ${showIssueNetWeightColumn ? '<col class="col-num" />' : ''}
+		                <col class="col-num" />
+		                <col class="col-num" />
+		              </colgroup>
+		              <tr>
+		                <th class="b2b-label-text">Name</th>
 	                <th class="b2b-label-text">G.Weight</th>
 	                ${showIssueMColumn ? '<th>M</th>' : ''}
 	                ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
@@ -1999,9 +2032,16 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		                </tr>
 	              </table>
 	            <h2>RECEIPT:</h2>
-	            <table>
-	              <tr>
-	                <th class="b2b-label-text">Name</th>
+		            <table class="section-table">
+		              <colgroup>
+		                <col class="col-name" />
+		                <col class="col-num" />
+		                <col class="col-num" />
+		                <col class="col-num" />
+		                <col class="col-num" />
+		              </colgroup>
+		              <tr>
+		                <th class="b2b-label-text">Name</th>
 	                <th class="b2b-label-text">Weight</th>
 	                <th class="b2b-label-text">Result</th>
 	                <th class="b2b-label-text">Calc</th>
@@ -2028,9 +2068,14 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	            `}
 	            <h2>CASH:</h2>
 	            ${cashTable && cashTable.length > 0 ? `
-	              <table>
-	                <tr>
-	                  <th class="b2b-label-text">Amount</th>
+		              <table class="section-table">
+		                <colgroup>
+		                  <col class="cash-col-label" />
+		                  <col class="cash-col-num" />
+		                  <col class="cash-col-num" />
+		                </colgroup>
+		                <tr>
+		                  <th class="b2b-label-text">Amount</th>
 	                  <th class="b2b-label-text">Rate</th>
 	                  <th class="b2b-label-text" style="text-align:right;">Pure</th>
 	                </tr>
@@ -2084,8 +2129,15 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
               </table>
 	            ` : ''}
 		            <h2>SUMMARY:</h2>
-	            <table class="summary-table">
-		              ${isDealerPreview ? `
+		            <table class="summary-table">
+			              <colgroup>
+			                <col class="summary-col" />
+			                <col class="summary-col" />
+			                <col class="summary-col" />
+			                <col class="summary-col" />
+			                <col class="summary-col" />
+			              </colgroup>
+			              ${isDealerPreview ? `
 		                <tr>
 		                  <th>${dealerSummaryValues.activeLabel}</th>
 	                  <th>RECEIPT</th>
@@ -2100,10 +2152,10 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                  <td>${dealerSummaryValues.cash}</td>
 	                  <td class="summary-balance">${dealerSummaryValues.finalBalance}</td>
 		                </tr>
-		                <tr class="total-row">
-		                  <td colspan="4" class="summary-expression">${dealerSummaryValues.expression}</td>
-		                  <td class="summary-balance">= ${dealerSummaryValues.finalBalance}</td>
-		                </tr>
+			                <tr class="total-row summary-expression-row">
+			                  <td colspan="4" class="summary-expression">${dealerSummaryValues.expression}</td>
+			                  <td class="summary-balance">= ${dealerSummaryValues.finalBalance}</td>
+			                </tr>
 		              ` : summaryOB !== 0 ? `
 		                <!-- OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | Old Balance -->
 		                <tr>
@@ -2120,12 +2172,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 			                  <td class="b2b-number-text"><strong>${displaySummary.cash}</strong></td>
 				                  <td class="summary-balance"><strong>${summaryFinalValue.toFixed(3)}</strong></td>
 			                </tr>
-		                <tr class="total-row">
-		                  <td colspan="4" class="summary-expression">${summaryOB.toFixed(3)} + ${displaySummary.issue} - (${displaySummary.receipt} + ${displaySummary.cash})</td>
-			                  <td class="summary-balance"><strong>${summaryFinalValue.toFixed(3)}</strong></td>
-		                </tr>
-                     bg bbbb 
-		              ` : `
+			                <tr class="total-row summary-expression-row">
+			                  <td colspan="4" class="summary-expression">${summaryOB.toFixed(3)} + ${displaySummary.issue} - (${displaySummary.receipt} + ${displaySummary.cash})</td>
+				                  <td class="summary-balance"><strong>${summaryFinalValue.toFixed(3)}</strong></td>
+			                </tr>
+			              ` : `
 		                <!-- AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | Advance Balance -->
 		                <tr>
 		                  <th class="b2b-label-text">ISSUE</th>
@@ -2141,10 +2192,10 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 			                  <td class="b2b-number-text">${displaySummary.cash}</td>
 			                  <td class="summary-balance">${summaryFinalValue.toFixed(3)}</td>
 			                </tr>
-		                <tr class="total-row">
-		                  <td colspan="4" class="summary-expression">${summaryAB.toFixed(3)} + ${displaySummary.receipt} + ${displaySummary.cash} - ${displaySummary.issue}</td>
-		                  <td class="summary-balance">= ${summaryFinalValue.toFixed(3)}</td>
-		                </tr>
+			                <tr class="total-row summary-expression-row">
+			                  <td colspan="4" class="summary-expression">${summaryAB.toFixed(3)} + ${displaySummary.receipt} + ${displaySummary.cash} - ${displaySummary.issue}</td>
+			                  <td class="summary-balance">= ${summaryFinalValue.toFixed(3)}</td>
+			                </tr>
 		              `}
 		            </table>
             ${showLegacyNilResultSection ? `
