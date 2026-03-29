@@ -1172,6 +1172,14 @@ export default function ReportScreen({ navigation }) {
 	    }
 
 	    if (activeTab === "OB/AB") {
+	      const obAbSummary = filteredObAb.reduce(
+	        (acc, row) => {
+	          acc.oldBalance += Number(row?.oldBalance || 0);
+	          acc.advanceBalance += Number(row?.advanceBalance || 0);
+	          return acc;
+	        },
+	        { oldBalance: 0, advanceBalance: 0 }
+	      );
 	      obAbRows = filteredObAb
 	        .map((r, index) => {
 	          const updatedDate = parseRecordDate(r.updatedAt);
@@ -1290,6 +1298,7 @@ export default function ReportScreen({ navigation }) {
 
 	        ${obAbRows ? `
 	          <p class="section-title">OB / AB Report</p>
+	          <p><b>Totals:</b> Total OB=${obAbSummary.oldBalance.toFixed(3)}, Total AB=${obAbSummary.advanceBalance.toFixed(3)}</p>
 	          <table>
 	            <tr><th>S.No</th><th>Customer Name</th><th>Old Balance</th><th>Advance Balance</th><th>Date</th><th>Time</th></tr>
 	            ${obAbRows}
@@ -1387,10 +1396,18 @@ export default function ReportScreen({ navigation }) {
   const filteredB2cRows = getFilteredB2C();
   const filteredDealerRows = getFilteredDealer();
   const filteredCashRows = getFilteredCash();
-  const filteredObAbRows = getFilteredObAbRows().filter((r) =>
-    !searchQuery || String(r.customerName || "").toLowerCase().includes(searchQuery.toLowerCase())
-  );
-  const b2bCategoryTotal = getB2BTotalValue(filteredB2bRows);
+	  const filteredObAbRows = getFilteredObAbRows().filter((r) =>
+	    !searchQuery || String(r.customerName || "").toLowerCase().includes(searchQuery.toLowerCase())
+	  );
+	  const obAbBalanceSummary = filteredObAbRows.reduce(
+	    (acc, row) => {
+	      acc.ob += parseNum(row?.oldBalance);
+	      acc.ab += parseNum(row?.advanceBalance);
+	      return acc;
+	    },
+	    { ob: 0, ab: 0 }
+	  );
+	  const b2bCategoryTotal = getB2BTotalValue(filteredB2bRows);
   const b2cCategoryTotal = getB2CTotalValue(filteredB2cRows);
   const dealerCategoryTotal = getDealerTotalValue(filteredDealerRows);
   const cashCategoryTotal = getCashTotalValue(filteredCashRows);
@@ -2314,14 +2331,28 @@ export default function ReportScreen({ navigation }) {
           </>
 	        )}
 
-        {activeTab === "OB/AB" && (
-          <>
-            <View style={styles.tableHeaderRow}>
-              <Text style={styles.tableTitle}>OB / AB Report</Text>
-              <Text style={styles.tableTotalText}>Rows: {filteredObAbRows.length}</Text>
-            </View>
-            <ScrollView horizontal>
-              <View>
+	        {activeTab === "OB/AB" && (
+	          <>
+	            <View style={styles.tableHeaderRow}>
+	              <Text style={styles.tableTitle}>OB / AB Report</Text>
+	              <Text style={styles.tableTotalText}>Rows: {filteredObAbRows.length}</Text>
+	            </View>
+	            <View style={styles.summaryRow}>
+	              <View style={[styles.summaryCard, styles.summaryCardRed]}>
+	                <Text style={styles.summaryLabel}>Total OB</Text>
+	                <Text style={[styles.summaryValue, styles.summaryValueRed]}>
+	                  OB: {obAbBalanceSummary.ob.toFixed(3)}
+	                </Text>
+	              </View>
+	              <View style={[styles.summaryCard, styles.summaryCardGreen]}>
+	                <Text style={styles.summaryLabel}>Total AB</Text>
+	                <Text style={[styles.summaryValue, styles.summaryValueGreen]}>
+	                  AB: {obAbBalanceSummary.ab.toFixed(3)}
+	                </Text>
+	              </View>
+	            </View>
+	            <ScrollView horizontal>
+	              <View>
                 <View style={styles.tableHeader}>
                   <Text style={[styles.tCell, styles.headerCell]}>S.No</Text>
                   <Text style={[styles.tCell, styles.headerCell]}>Customer Name</Text>
