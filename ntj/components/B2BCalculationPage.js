@@ -2237,6 +2237,13 @@ export default function CreateTransaction({ navigation }) {
       const billSummaryData = {
         customerId: customerRecordId,
         customerName: customerNameForSave,
+        phoneNumber: String(
+          phone ||
+          selectedCustomer?.phone ||
+          selectedCustomer?.customerNumber ||
+          selectedCustomer?.phoneNumber ||
+          ""
+        ).trim(),
         customerType: customerType,
         billType: customerType === "B2C" ? "B2C" : "B2B",
         date: date,
