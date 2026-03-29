@@ -1592,6 +1592,7 @@ export default function CreateTransaction({ navigation, route }) {
       const billSummaryData = {
         customerId: savedCustomerId,
         customerName: customerName,
+        phoneNumber: String(phone || "").trim(),
         customerType: "B2C",
         billType: "B2C", // Explicitly set for backend
         date: date.split("/").reverse().join("-"),
