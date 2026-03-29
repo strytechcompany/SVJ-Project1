@@ -37,6 +37,7 @@ const billSummaryRoutes = require('./routes/billSummary');
 const documentRoutes = require('./routes/document');
 const dailyExpenseRoutes = require('./routes/dailyExpense');
 const whatsappRoutes = require('./routes/whatsapp');
+const billRoutes = require('./routes/billRoutes');
 
 // Initialize App
 const app = express();
@@ -100,6 +101,7 @@ app.use('/api/billSummary', billSummaryRoutes);
 app.use('/api/documents', documentRoutes);
 app.use('/api/dailyExpenses', dailyExpenseRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/bills', billRoutes);
 
 // Base route
 app.get('/', (req, res) => {
