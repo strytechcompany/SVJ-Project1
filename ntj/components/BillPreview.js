@@ -1864,54 +1864,66 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	    <html>
 	          <head>
 	            <style>
-		              @page { margin: 0; }
-			              body { font-family: Arial, sans-serif; width: 72mm; margin: 0 auto; padding: 2mm; font-size: 11px; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-			              h1 { text-align: center; font-size: 17px; margin-bottom: 6px; color: #000; }
-			              h2 { margin-top: 9px; font-size: 12px; margin-bottom: 5px; color: #000; }
-			              table { width: 100%; border-collapse: collapse; margin-bottom: 10px; table-layout: fixed; }
-			              th, td { border: 1px solid #000; padding: 3px 2px; text-align: center; font-size: 9px; color: #000; vertical-align: middle; word-break: break-word; overflow-wrap: anywhere; }
-			              th { background-color: #ececec; font-weight: 700; }
-			              p { margin: 2px 0; font-size: 10px; color: #000; }
-			              .total-row td { font-weight: 700; background-color: #f3f3f3; }
-			              .summary-table td, .summary-table th { font-size: 8.5px; }
-		              .summary-balance { font-weight: 800; }
-			              .summary-expression { text-align: center; font-size: 8px; line-height: 1.25; white-space: normal; }
-			              .balance-footer-section { margin-top: 10px; }
-			              .balance-footer-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; margin-top: 7px; border: 1px solid #000; border-radius: 999px; font-size: 10px; font-weight: 700; }
-			              .balance-footer-value { font-weight: 800; }
-			              .b2b-print { font-size: 12px; }
-			              .b2b-print h2 { font-size: 13px; font-weight: 600; letter-spacing: 0.2px; }
-			              .b2b-print p, .b2b-print td { font-size: 10.5px; }
-			              .b2b-print th { font-size: 10.5px; font-weight: 600; color: #2a2a2a; }
-			              .b2b-print .b2b-label-text, .b2b-print .b2b-meta-label { font-weight: 600; color: #2a2a2a; }
-			              .b2b-print .b2b-value-text { font-weight: 500; color: #1f1f1f; }
-			              .b2b-print .b2b-number-text, .b2b-print .summary-balance, .b2b-print .balance-footer-value, .b2b-print .total-row td { font-weight: 800; color: #000; }
-			              .b2b-print .b2b-strong-number { font-size: 11px; font-weight: 900; }
-			              .b2b-print .summary-table td, .b2b-print .summary-table th { font-size: 9.6px; }
-			              .b2b-print .summary-expression { font-size: 9px; font-weight: 700; color: #000; }
-				              .b2b-print .summary-balance { font-size: 11.5px; }
-				              .b2b-print .balance-footer-row { font-size: 11px; }
-				              .b2b-print .b2b-meta { margin-bottom: 3px; font-size: 11px; }
-				              .b2b-print .section-table th,
-				              .b2b-print .section-table td,
-				              .b2b-print .summary-table th,
-				              .b2b-print .summary-table td { white-space: normal; }
-				              .b2b-print .col-name { width: 20%; }
-				              .b2b-print .col-num { width: 16%; }
-				              .b2b-print .cash-col-label { width: 40%; }
-				              .b2b-print .cash-col-num { width: 30%; }
-				              .b2b-print .summary-col { width: 20%; }
-				              .b2b-print .summary-expression-row td { line-height: 1.3; }
-			            </style>
+			              @page { margin: 0; }
+				              body { font-family: Arial, sans-serif; width: 68mm; margin: 0 auto; padding: 3mm 2.5mm 4mm; font-size: 11px; line-height: 1.35; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+				              h1 { text-align: center; font-size: 17px; margin: 0 0 8px; color: #000; letter-spacing: 0.4px; }
+				              h2 { margin: 0 0 6px; font-size: 12px; color: #000; }
+				              table { width: 100%; border-collapse: collapse; margin-bottom: 0; table-layout: fixed; }
+				              th, td { border: 1px solid #000; padding: 4px 3px; text-align: center; font-size: 9px; line-height: 1.35; color: #000; vertical-align: middle; word-break: break-word; overflow-wrap: anywhere; }
+				              th { background-color: #ececec; font-weight: 700; }
+				              p { margin: 0 0 4px; font-size: 10px; line-height: 1.4; color: #000; }
+				              .total-row td { font-weight: 700; background-color: #f3f3f3; }
+				              .summary-table td, .summary-table th { font-size: 8.5px; }
+			              .summary-balance { font-weight: 800; }
+				              .summary-expression { text-align: center; font-size: 8px; line-height: 1.25; white-space: normal; }
+				              .balance-footer-section { margin-top: 12px; }
+				              .balance-footer-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; margin-top: 7px; border: 1px solid #000; border-radius: 999px; font-size: 10px; font-weight: 700; }
+				              .balance-footer-value { font-weight: 800; }
+				              .b2b-print { font-size: 12px; }
+				              .b2b-print h2 { font-size: 13px; font-weight: 700; letter-spacing: 0.35px; }
+				              .b2b-print p, .b2b-print td { font-size: 10.5px; }
+				              .b2b-print th { font-size: 10.2px; font-weight: 700; color: #2a2a2a; }
+				              .b2b-print .b2b-label-text, .b2b-print .b2b-meta-label { font-weight: 600; color: #2a2a2a; }
+				              .b2b-print .b2b-value-text { font-weight: 500; color: #1f1f1f; }
+				              .b2b-print .b2b-number-text, .b2b-print .summary-balance, .b2b-print .balance-footer-value, .b2b-print .total-row td { font-weight: 800; color: #000; }
+				              .b2b-print .b2b-strong-number { font-size: 11px; font-weight: 900; }
+				              .b2b-print .summary-table td, .b2b-print .summary-table th { font-size: 9.4px; }
+				              .b2b-print .summary-expression { font-size: 9px; font-weight: 700; color: #000; }
+					              .b2b-print .summary-balance { font-size: 11.5px; }
+					              .b2b-print .balance-footer-row { font-size: 11px; }
+					              .b2b-print .b2b-meta { margin-bottom: 5px; font-size: 11px; }
+					              .b2b-print .b2b-meta-block { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px dashed #000; }
+					              .b2b-print .b2b-section { margin-top: 10px; padding-top: 9px; border-top: 1px dashed #000; }
+					              .b2b-print .b2b-section:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+					              .b2b-print .section-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+					              .b2b-print .section-table th,
+					              .b2b-print .section-table td,
+					              .b2b-print .summary-table th,
+					              .b2b-print .summary-table td { white-space: normal; }
+					              .b2b-print .section-table th,
+					              .b2b-print .summary-table th { padding-top: 5px; padding-bottom: 5px; }
+					              .b2b-print .section-table td,
+					              .b2b-print .summary-table td { padding-top: 5px; padding-bottom: 5px; }
+					              .b2b-print .section-table .col-name { width: 28%; }
+					              .b2b-print .section-table .col-num { width: 18%; }
+					              .b2b-print .cash-col-label { width: 38%; }
+					              .b2b-print .cash-col-num { width: 31%; }
+					              .b2b-print .summary-col { width: 20%; }
+					              .b2b-print .summary-expression-row td { line-height: 1.35; }
+					              .b2b-print .row-label { text-align: left; padding-left: 5px; }
+					              .b2b-print .row-number { text-align: right; padding-right: 5px; }
+					              .b2b-print .balance-footer-row.balance-highlight-box { justify-content: center; gap: 8px; border-radius: 4px; padding: 8px 10px; background: #fff; }
+					              .b2b-print .balance-highlight-box span { display: inline-block; text-align: center; }
+				            </style>
 			          </head>
 	          <body class="${isPrintableB2B ? 'b2b-print' : ''}">
             <h1>BILL</h1>
-	            <div>
-	              <p class="b2b-meta"><span class="b2b-meta-label">Bill No:</span> <span class="b2b-number-text">${currentBillNo || 'N/A'}</span></p>
-	              <p class="b2b-meta"><span class="b2b-meta-label">Name:</span> <span class="b2b-value-text">${customer.name || ''}</span></p>
-	              <p class="b2b-meta"><span class="b2b-meta-label">Phone:</span> <span class="b2b-number-text">${customer.phone || ''}</span></p>
-	              <p class="b2b-meta"><span class="b2b-meta-label">Date:</span> <span class="b2b-number-text">${customer.date || ''}</span></p>
-	              <p class="b2b-meta"><span class="b2b-meta-label">Old Balance:</span> <span class="b2b-number-text">${customer.oldBalance}</span></p>
+	            <div class="${isPrintableB2B ? 'b2b-meta-block' : ''}">
+		              <p class="b2b-meta"><span class="b2b-meta-label">Bill No:</span> <span class="b2b-number-text">${currentBillNo || 'N/A'}</span></p>
+		              <p class="b2b-meta"><span class="b2b-meta-label">Name:</span> <span class="b2b-value-text">${customer.name || ''}</span></p>
+		              <p class="b2b-meta"><span class="b2b-meta-label">Phone:</span> <span class="b2b-number-text">${customer.phone || ''}</span></p>
+		              <p class="b2b-meta"><span class="b2b-meta-label">Date:</span> <span class="b2b-number-text">${customer.date || ''}</span></p>
+		              <p class="b2b-meta"><span class="b2b-meta-label">Old Balance:</span> <span class="b2b-number-text">${customer.oldBalance}</span></p>
 	              <p class="b2b-meta"><span class="b2b-meta-label">Advance Balance:</span> <span class="b2b-number-text">${customer.advanceBalance || 0}</span></p>
 	              ${billDescription ? `<p class="b2b-meta"><span class="b2b-meta-label">Description:</span> <span class="b2b-value-text">${billDescription}</span></p>` : ''}
 	            </div>
@@ -1956,8 +1968,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                  <td><strong>Pure: ${totalReceiptPure}</strong></td>
 	                </tr>` : ''}
 	              </table>
-            <h2>ISSUE:</h2>
-	            <table class="section-table">
+		            <h2>ISSUE:</h2>
+		            <table class="section-table">
 	              <colgroup>
 	                <col class="col-name" />
 	                <col class="col-num" />
@@ -1992,10 +2004,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	                  <td>-</td>
 	                  <td><strong>Pure: ${displayedIssuePureText}</strong></td>
 	                </tr>
-              </table>
-            ` : `
-	            <h2>ISSUE:</h2>
-		            <table class="section-table">
+	              </table>
+	            ` : `
+		            <div class="b2b-section">
+		            <div class="section-title"><h2>ISSUE:</h2></div>
+			            <table class="section-table">
 		              <colgroup>
 		                <col class="col-name" />
 		                <col class="col-num" />
@@ -2005,34 +2018,36 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		                <col class="col-num" />
 		              </colgroup>
 		              <tr>
-		                <th class="b2b-label-text">Name</th>
-	                <th class="b2b-label-text">G.Weight</th>
-	                ${showIssueMColumn ? '<th>M</th>' : ''}
-	                ${showIssueNetWeightColumn ? '<th>N.Weight</th>' : ''}
-	                <th class="b2b-label-text">Calc</th>
-	                <th class="b2b-label-text">Pure</th>
-	              </tr>
-	                ${issueItems.map(row => `
-	                  <tr>
-	                    <td class="b2b-label-text">${row.name}</td>
-	                    <td class="b2b-number-text">${row.gross}</td>
-	                    ${showIssueMColumn ? `<td class="b2b-number-text">${row.m}</td>` : ''}
-	                    ${showIssueNetWeightColumn ? `<td class="b2b-number-text">${row.net}</td>` : ''}
-	                    <td class="b2b-number-text">${parseFloat(row.calc || 0).toFixed(2)}</td>
-	                    <td class="b2b-number-text b2b-strong-number">${row.pure}</td>
-	                  </tr>
-		                `).join('')}
-		                <tr class="total-row">
-		                  <td class="b2b-label-text" style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
-		                  <td class="b2b-number-text"><strong>TW: ${totalIssueTW}</strong></td>
-		                  ${showIssueMColumn ? '<td class="b2b-number-text">-</td>' : ''}
-		                  ${showIssueNetWeightColumn ? `<td class="b2b-number-text"><strong>N.W: ${totalIssueNW}</strong></td>` : ''}
-		                  <td class="b2b-number-text">-</td>
-		                  <td class="b2b-number-text b2b-strong-number"><strong>Pure: ${displayedIssuePureText}</strong></td>
-		                </tr>
-	              </table>
-	            <h2>RECEIPT:</h2>
-		            <table class="section-table">
+			                <th class="b2b-label-text row-label">Name</th>
+		                <th class="b2b-label-text row-number">G.Weight</th>
+		                ${showIssueMColumn ? '<th>M</th>' : ''}
+		                ${showIssueNetWeightColumn ? '<th class="row-number">N.Weight</th>' : ''}
+		                <th class="b2b-label-text row-number">Calc</th>
+		                <th class="b2b-label-text row-number">Pure</th>
+		              </tr>
+		                ${issueItems.map(row => `
+		                  <tr>
+		                    <td class="b2b-label-text row-label">${row.name}</td>
+		                    <td class="b2b-number-text row-number">${row.gross}</td>
+		                    ${showIssueMColumn ? `<td class="b2b-number-text row-number">${row.m}</td>` : ''}
+		                    ${showIssueNetWeightColumn ? `<td class="b2b-number-text row-number">${row.net}</td>` : ''}
+		                    <td class="b2b-number-text row-number">${parseFloat(row.calc || 0).toFixed(2)}</td>
+		                    <td class="b2b-number-text b2b-strong-number row-number">${row.pure}</td>
+		                  </tr>
+			                `).join('')}
+			                <tr class="total-row">
+			                  <td class="b2b-label-text row-label" style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
+			                  <td class="b2b-number-text row-number"><strong>TW: ${totalIssueTW}</strong></td>
+			                  ${showIssueMColumn ? '<td class="b2b-number-text row-number">-</td>' : ''}
+			                  ${showIssueNetWeightColumn ? `<td class="b2b-number-text row-number"><strong>N.W: ${totalIssueNW}</strong></td>` : ''}
+			                  <td class="b2b-number-text row-number">-</td>
+			                  <td class="b2b-number-text b2b-strong-number row-number"><strong>Pure: ${displayedIssuePureText}</strong></td>
+			                </tr>
+		              </table>
+		            </div>
+		            <div class="b2b-section">
+		            <div class="section-title"><h2>RECEIPT:</h2></div>
+			            <table class="section-table">
 		              <colgroup>
 		                <col class="col-name" />
 		                <col class="col-num" />
@@ -2041,60 +2056,63 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		                <col class="col-num" />
 		              </colgroup>
 		              <tr>
-		                <th class="b2b-label-text">Name</th>
-	                <th class="b2b-label-text">Weight</th>
-	                <th class="b2b-label-text">Result</th>
-	                <th class="b2b-label-text">Calc</th>
-	                <th class="b2b-label-text">Pure</th>
-	              </tr>
-	                ${receiptItems && receiptItems.length > 0 ? receiptItems.map(row => `
-	                  <tr>
-	                    <td class="b2b-label-text">${row.name}</td>
-	                    <td class="b2b-number-text">${row.weight}</td>
-	                    <td class="b2b-number-text">${row.result}</td>
-	                    <td class="b2b-number-text">${parseFloat(row.calc || 0).toFixed(2)}</td>
-	                    <td class="b2b-number-text b2b-strong-number">${row.pure}</td>
-	                  </tr>
-	                `).join('') : '<tr><td colspan="5">No receipt items</td></tr>'}
-		                ${receiptItems && receiptItems.length > 0 ? `
-		                <tr class="total-row">
-		                  <td class="b2b-label-text" style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
-		                  <td class="b2b-number-text"><strong>TW: ${totalReceiptTW}</strong></td>
-		                  <td class="b2b-number-text"><strong>N.W: ${totalReceiptNW}</strong></td>
-		                  <td class="b2b-number-text">-</td>
-		                  <td class="b2b-number-text b2b-strong-number"><strong>Pure: ${totalReceiptPure}</strong></td>
-		                </tr>` : ''}
-		              </table>
-	            `}
-	            <h2>CASH:</h2>
-	            ${cashTable && cashTable.length > 0 ? `
-		              <table class="section-table">
+			                <th class="b2b-label-text row-label">Name</th>
+		                <th class="b2b-label-text row-number">Weight</th>
+		                <th class="b2b-label-text row-number">Result</th>
+		                <th class="b2b-label-text row-number">Calc</th>
+		                <th class="b2b-label-text row-number">Pure</th>
+		              </tr>
+		                ${receiptItems && receiptItems.length > 0 ? receiptItems.map(row => `
+		                  <tr>
+		                    <td class="b2b-label-text row-label">${row.name}</td>
+		                    <td class="b2b-number-text row-number">${row.weight}</td>
+		                    <td class="b2b-number-text row-number">${row.result}</td>
+		                    <td class="b2b-number-text row-number">${parseFloat(row.calc || 0).toFixed(2)}</td>
+		                    <td class="b2b-number-text b2b-strong-number row-number">${row.pure}</td>
+		                  </tr>
+		                `).join('') : '<tr><td colspan="5">No receipt items</td></tr>'}
+			                ${receiptItems && receiptItems.length > 0 ? `
+			                <tr class="total-row">
+			                  <td class="b2b-label-text row-label" style="text-align: right; padding-right: 5px;"><strong>Totals:</strong></td>
+			                  <td class="b2b-number-text row-number"><strong>TW: ${totalReceiptTW}</strong></td>
+			                  <td class="b2b-number-text row-number"><strong>N.W: ${totalReceiptNW}</strong></td>
+			                  <td class="b2b-number-text row-number">-</td>
+			                  <td class="b2b-number-text b2b-strong-number row-number"><strong>Pure: ${totalReceiptPure}</strong></td>
+			                </tr>` : ''}
+			              </table>
+			            </div>
+		            `}
+		            <div class="b2b-section">
+		            <div class="section-title"><h2>CASH:</h2></div>
+		            ${cashTable && cashTable.length > 0 ? `
+			              <table class="section-table">
 		                <colgroup>
 		                  <col class="cash-col-label" />
 		                  <col class="cash-col-num" />
 		                  <col class="cash-col-num" />
 		                </colgroup>
 		                <tr>
-		                  <th class="b2b-label-text">Amount</th>
-	                  <th class="b2b-label-text">Rate</th>
-	                  <th class="b2b-label-text" style="text-align:right;">Pure</th>
-	                </tr>
-		                ${cashTable.map(c => `
-		                  <tr>
-		                    <td class="b2b-number-text">${c.rupees}</td>
-		                    <td class="b2b-number-text">${c.goldRate}</td>
-		                    <td class="b2b-number-text b2b-strong-number" style="text-align:right;">${c.pure}</td>
-		                  </tr>
-		                `).join('')}
-		                <tr class="total-row">
-		                  <td colspan="2" class="b2b-label-text" style="text-align: right; padding-right: 5px;"><strong>Total Cash Pure:</strong></td>
-		                  <td class="b2b-number-text b2b-strong-number" style="text-align:right;"><strong>${safeCashTable.reduce((sum, c) => sum + toNum(c?.pure, 0), 0).toFixed(3)}</strong></td>
-	                </tr>
-	              </table>
-	            ` : '<p>N/A</p>'}
-            ${customer?.type === "B2B" && !isDealerPreview && Number.isFinite(b2bSavedCashValue) ? `
-              <p><strong>Cash:</strong> &#8377;${toNum(b2bSavedCashValue, 0).toFixed(2)}</p>
-            ` : ''}
+			                  <th class="b2b-label-text row-label">Amount</th>
+		                  <th class="b2b-label-text row-number">Rate</th>
+		                  <th class="b2b-label-text row-number" style="text-align:right;">Pure</th>
+		                </tr>
+			                ${cashTable.map(c => `
+			                  <tr>
+			                    <td class="b2b-number-text row-label">${c.rupees}</td>
+			                    <td class="b2b-number-text row-number">${c.goldRate}</td>
+			                    <td class="b2b-number-text b2b-strong-number row-number" style="text-align:right;">${c.pure}</td>
+			                  </tr>
+			                `).join('')}
+			                <tr class="total-row">
+			                  <td colspan="2" class="b2b-label-text" style="text-align: right; padding-right: 5px;"><strong>Total Cash Pure:</strong></td>
+			                  <td class="b2b-number-text b2b-strong-number row-number" style="text-align:right;"><strong>${safeCashTable.reduce((sum, c) => sum + toNum(c?.pure, 0), 0).toFixed(3)}</strong></td>
+		                </tr>
+		              </table>
+		            ` : '<p>N/A</p>'}
+	            ${customer?.type === "B2B" && !isDealerPreview && Number.isFinite(b2bSavedCashValue) ? `
+	              <p><strong>Cash:</strong> &#8377;${toNum(b2bSavedCashValue, 0).toFixed(2)}</p>
+	            ` : ''}
+	            </div>
             ${false && gst && (gst.enabled || (parseFloat(gst.amount) > 0)) ? `
               <h2 style="margin-bottom: 5px;">GST BREAKDOWN:</h2>
               <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
@@ -2128,8 +2146,9 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                 </tr>
               </table>
 	            ` : ''}
-		            <h2>SUMMARY:</h2>
-		            <table class="summary-table">
+			            <div class="b2b-section">
+			            <div class="section-title"><h2>SUMMARY:</h2></div>
+			            <table class="summary-table">
 			              <colgroup>
 			                <col class="summary-col" />
 			                <col class="summary-col" />
@@ -2159,19 +2178,19 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		              ` : summaryOB !== 0 ? `
 		                <!-- OB exists: Show Old Balance | ISSUE | RECEIPT | CASH | Old Balance -->
 		                <tr>
-		                  <th class="b2b-label-text">Old Balance</th>
-		                  <th class="b2b-label-text">ISSUE</th>
-		                  <th class="b2b-label-text">RECEIPT</th>
-		                  <th class="b2b-label-text">CASH</th>
-		                  <th class="b2b-label-text">Old Balance</th>
-		                </tr>
-			                <tr>
-			                  <td class="b2b-number-text"><strong>${summaryOB.toFixed(3)}</strong></td>
-			                  <td class="b2b-number-text"><strong>${displaySummary.issue}</strong></td>
-			                  <td class="b2b-number-text"><strong>${displaySummary.receipt}</strong></td>
-			                  <td class="b2b-number-text"><strong>${displaySummary.cash}</strong></td>
-				                  <td class="summary-balance"><strong>${summaryFinalValue.toFixed(3)}</strong></td>
+			                  <th class="b2b-label-text row-number">Old Balance</th>
+			                  <th class="b2b-label-text row-number">ISSUE</th>
+			                  <th class="b2b-label-text row-number">RECEIPT</th>
+			                  <th class="b2b-label-text row-number">CASH</th>
+			                  <th class="b2b-label-text row-number">Old Balance</th>
 			                </tr>
+				                <tr>
+				                  <td class="b2b-number-text row-number"><strong>${summaryOB.toFixed(3)}</strong></td>
+				                  <td class="b2b-number-text row-number"><strong>${displaySummary.issue}</strong></td>
+				                  <td class="b2b-number-text row-number"><strong>${displaySummary.receipt}</strong></td>
+				                  <td class="b2b-number-text row-number"><strong>${displaySummary.cash}</strong></td>
+					                  <td class="summary-balance"><strong>${summaryFinalValue.toFixed(3)}</strong></td>
+				                </tr>
 			                <tr class="total-row summary-expression-row">
 			                  <td colspan="4" class="summary-expression">${summaryOB.toFixed(3)} + ${displaySummary.issue} - (${displaySummary.receipt} + ${displaySummary.cash})</td>
 				                  <td class="summary-balance"><strong>${summaryFinalValue.toFixed(3)}</strong></td>
@@ -2179,25 +2198,26 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 			              ` : `
 		                <!-- AB exists: Show ISSUE | Advance Balance | RECEIPT | CASH | Advance Balance -->
 		                <tr>
-		                  <th class="b2b-label-text">ISSUE</th>
-		                  <th class="b2b-label-text">Advance Balance</th>
-		                  <th class="b2b-label-text">RECEIPT</th>
-		                  <th class="b2b-label-text">CASH</th>
-		                  <th class="b2b-label-text">${b2bAdvanceSummaryValues.finalLabel}</th>
-		                </tr>
-			                <tr>
-			                  <td class="b2b-number-text">${displaySummary.issue}</td>
-			                  <td class="b2b-number-text">${summaryAB.toFixed(3)}</td>
-			                  <td class="b2b-number-text">${displaySummary.receipt}</td>
-			                  <td class="b2b-number-text">${displaySummary.cash}</td>
-			                  <td class="summary-balance">${summaryFinalValue.toFixed(3)}</td>
+			                  <th class="b2b-label-text row-number">ISSUE</th>
+			                  <th class="b2b-label-text row-number">Advance Balance</th>
+			                  <th class="b2b-label-text row-number">RECEIPT</th>
+			                  <th class="b2b-label-text row-number">CASH</th>
+			                  <th class="b2b-label-text row-number">${b2bAdvanceSummaryValues.finalLabel}</th>
 			                </tr>
+				                <tr>
+				                  <td class="b2b-number-text row-number">${displaySummary.issue}</td>
+				                  <td class="b2b-number-text row-number">${summaryAB.toFixed(3)}</td>
+				                  <td class="b2b-number-text row-number">${displaySummary.receipt}</td>
+				                  <td class="b2b-number-text row-number">${displaySummary.cash}</td>
+				                  <td class="summary-balance">${summaryFinalValue.toFixed(3)}</td>
+				                </tr>
 			                <tr class="total-row summary-expression-row">
 			                  <td colspan="4" class="summary-expression">${summaryAB.toFixed(3)} + ${displaySummary.receipt} + ${displaySummary.cash} - ${displaySummary.issue}</td>
 			                  <td class="summary-balance">= ${summaryFinalValue.toFixed(3)}</td>
 			                </tr>
 		              `}
-		            </table>
+			            </table>
+			            </div>
             ${showLegacyNilResultSection ? `
               <h2>RESULT VALUE:</h2>
               <table>
@@ -2213,11 +2233,11 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
             ${buildResultValueTableHtml()}
             ${showB2BBalanceFooter ? `
               <div class="balance-footer-section">
-                ${b2bFooterBalanceRows.map((row) => `
-                  <div class="balance-footer-row">
-                    <span>${row.label}</span>
-                    <span class="balance-footer-value">${row.value}</span>
-                  </div>
+	                ${b2bFooterBalanceRows.map((row) => `
+	                  <div class="balance-footer-row balance-highlight-box">
+	                    <span>${row.label}</span>
+	                    <span class="balance-footer-value">${row.value}</span>
+	                  </div>
                 `).join("")}
               </div>
             ` : ''}
