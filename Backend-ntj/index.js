@@ -103,7 +103,7 @@ app.use('/api/whatsapp', whatsappRoutes);
 
 // Base route
 app.get('/', (req, res) => {
-  res.send('NTJ Backend API is running...');
+  res.send('SVJ Backend API is running...');
 });
 
 // DB health / capacity snapshot

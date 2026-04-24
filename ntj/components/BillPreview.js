@@ -1849,7 +1849,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                   <p>Amount: â‚¹${upiAmount}</p>
                   <p>Please scan the QR code for payment.</p>
                 </div>
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent("NTJ Jewellery")}&am=${upiAmount}&cu=INR`)}" style="width:200px;height:200px;" />
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent("SVJ Jewellery")}&am=${upiAmount}&cu=INR`)}" style="width:200px;height:200px;" />
               </div>
             ` : ''
         }
@@ -2452,7 +2452,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 
   // ─── A4 HTML Generator ─────────────────────────────────────────────────────
   const generateA4HTML = () => {
-    const shopName = 'NTJ JEWELLERY';
+    const shopName = 'SVJ JEWELLERY';
     const shopAddress = 'Salem, Tamil Nadu';
     const shopPhone = '';
     const billDate = estimate
@@ -3265,8 +3265,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	      resolveBillNoForDisplay(estimate?.estimateNo, "B2B") ||
 	      resolveBillNoForDisplay(suspense?.suspenseNo, "B2B") ||
 	      "";
-	    const filename = `NTJ_Bill_${billNoHint || Date.now()}.pdf`;
-	    const caption = billNoHint ? `Bill No: ${billNoHint}` : "NTJ Bill";
+	    const filename = `SVJ_Bill_${billNoHint || Date.now()}.pdf`;
+	    const caption = billNoHint ? `Bill No: ${billNoHint}` : "SVJ Bill";
 
 	    const form = new FormData();
 	    form.append("phone", waPhone);
@@ -3542,7 +3542,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	      // Give the file a meaningful name
 	      const billNoHint = currentBillNo || order?.orderNo || Date.now();
 	      const cleanBillNo = String(billNoHint).replace(/[^a-zA-Z0-9]/g, '_');
-	      const namedUri = `${FileSystem.cacheDirectory}NTJ_Bill_${cleanBillNo}_A4.pdf`;
+	      const namedUri = `${FileSystem.cacheDirectory}SVJ_Bill_${cleanBillNo}_A4.pdf`;
 	      try { await FileSystem.copyAsync({ from: pdfUri, to: namedUri }); } catch (_) {}
 	      const fileInfo = await FileSystem.getInfoAsync(namedUri);
 	      const sharableUri = fileInfo.exists ? namedUri : pdfUri;
@@ -3590,8 +3590,8 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 		        social: RNShare.Social.WHATSAPP,
 		        url: dataUri,
 		        type: 'application/pdf',
-		        filename: `NTJ_Bill.pdf`,
-		        title: 'NTJ Bill PDF',
+		        filename: `SVJ_Bill.pdf`,
+		        title: 'SVJ Bill PDF',
             whatsAppNumber: waPhone || undefined,
 		        message: waPhone ? `Bill for ${waPhone}` : 'Please find your bill attached.',
 		      });
@@ -3624,7 +3624,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
 	      // Give it a clean filename
 	      const billNoHint = currentBillNo || order?.orderNo || Date.now();
 	      const cleanBillNo = String(billNoHint).replace(/[^a-zA-Z0-9]/g, '_');
-	      const namedUri = `${FileSystem.cacheDirectory}NTJ_Bill_${cleanBillNo}_A4.pdf`;
+	      const namedUri = `${FileSystem.cacheDirectory}SVJ_Bill_${cleanBillNo}_A4.pdf`;
 	      try { await FileSystem.copyAsync({ from: pdfUri, to: namedUri }); } catch (_) {}
 	      const fileInfo = await FileSystem.getInfoAsync(namedUri);
 	      const sharableUri = fileInfo.exists ? namedUri : pdfUri;
@@ -5341,7 +5341,7 @@ const normalizeImageUri = (rawValue, baseUrl = "") => {
                     <Text style={styles.changeUpiText}>Change UPI ID</Text>
                   </TouchableOpacity>
                   <Image
-                    source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent("NTJ Jewellery")}&am=${upiAmount}&cu=INR`)}` }}
+                    source={{ uri: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`upi://pay?pa=${upiId}&pn=${encodeURIComponent("SVJ Jewellery")}&am=${upiAmount}&cu=INR`)}` }}
                     style={{ width: 200, height: 200 }}
                   />
                   <TouchableOpacity style={styles.printQrBtn} onPress={handlePrintQR}>

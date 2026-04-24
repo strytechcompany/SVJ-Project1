@@ -14,8 +14,8 @@ import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import * as Print from "expo-print";
 
 const FIRM = {
-  leftMark: "NTJ",
-  rightMark: "NTJ",
+  leftMark: "SVJ",
+  rightMark: "SVJ",
   name: "SRI NAKSHATRAA JEWELLERS",
   address1: "NO: 2/9 SUNNAMBUKAARA STREET,",
   address2: "BIG BAZAAR ROAD,",

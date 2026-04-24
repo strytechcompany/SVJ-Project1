@@ -1347,8 +1347,8 @@ export default function ReportScreen({ navigation }) {
       const label = activeTab === "All" ? "All Type" : activeTab;
       const effectiveRange = getEffectiveAppliedRange();
       const msg = effectiveRange.isCustom
-        ? `NTJ Report (${label}) From ${formatDate(effectiveRange.from)} To ${formatDate(effectiveRange.to)}`
-        : `NTJ Report (${label}) - Today ${formatDate(effectiveRange.from)}`;
+        ? `SVJ Report (${label}) From ${formatDate(effectiveRange.from)} To ${formatDate(effectiveRange.to)}`
+        : `SVJ Report (${label}) - Today ${formatDate(effectiveRange.from)}`;
       await Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}`).catch(async () => {
         await Linking.openURL(`https://wa.me/?text=${encodeURIComponent(msg)}`);
       });

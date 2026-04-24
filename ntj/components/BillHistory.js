@@ -1292,7 +1292,7 @@ export default function BillHistory({ navigation, route }) {
             : "Balance      : 0.000 g";
 
       const message = [
-        "NTJ Jewellery Bill Summary",
+        "SVJ Jewellery Bill Summary",
         `Customer     : ${custName}` ,
         `Bill No      : ${billNo}` ,
         `Date         : ${date}` ,
@@ -1303,7 +1303,7 @@ export default function BillHistory({ navigation, route }) {
       ].join("\n");
 
       const html = `<html><body style="font-family:Arial;padding:20px;font-size:14px;">
-        <h2 style="text-align:center;">NTJ Jewellery Bill Summary</h2>
+        <h2 style="text-align:center;">SVJ Jewellery Bill Summary</h2>
         <hr/>
         <p><b>Customer:</b> ${custName}</p>
         <p><b>Bill No:</b> ${billNo}</p>

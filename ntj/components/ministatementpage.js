@@ -556,7 +556,7 @@ body{font-family:'Courier New',monospace;font-size:10px;color:#000;background:#f
 .sr.fin{font-weight:bold;font-size:12px}
 .foot{text-align:center;font-size:9px;margin-top:6px}
 </style></head><body>
-<div class="shop">NTJ JEWELLERY</div>
+<div class="shop">SVJ JEWELLERY</div>
 <div class="c" style="font-size:11px">Mini Statement</div>
 <div class="div"></div>
 <div class="meta"><span>Name:</span><span>${esc(selectedCustomer?.name || "-")}</span></div>

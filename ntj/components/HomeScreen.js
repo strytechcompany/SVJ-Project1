@@ -537,7 +537,7 @@ export default function HomeScreen({ route }) {
     }
 
     const msg = [
-      "NTJ Jewellery Payment Reminder",
+      "SVJ Jewellery Payment Reminder",
       `Customer: ${alertItem.customerName || "-"}`,
       `Old Balance: ${Number(alertItem.pendingBalance || 0).toFixed(3)} g`,
       `Pending Days: ${Number(alertItem.overdueDays || 0)}`,

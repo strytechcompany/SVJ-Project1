@@ -8,7 +8,7 @@ const StockMasterSchema = new mongoose.Schema({
     calculation: { type: String, required: true },
     pure: { type: Number, required: true },
     workerName: { type: String, default: "" },
-    description: { type: String, default: "" }
+    barcode: { type: String, unique: true, sparse: true }
 }, { timestamps: true });
 
 module.exports = mongoose.model('StockMaster', StockMasterSchema);

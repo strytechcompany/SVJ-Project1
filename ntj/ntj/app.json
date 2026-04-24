@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "ntj",
-    "slug": "ntj",
+    "name": "svj",
+    "slug": "svj",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "ntj",
+    "scheme": "svj",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {

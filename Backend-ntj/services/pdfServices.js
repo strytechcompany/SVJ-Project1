@@ -116,7 +116,7 @@ const generateBillPdf = async (bill) =>
         .font('Helvetica-Bold')
         .fontSize(22)
         .fillColor('#111827')
-        .text('NTJ Billing Invoice', 50, 50);
+        .text('SVJ Billing Invoice', 50, 50);
 
       doc
         .font('Helvetica')

@@ -46,7 +46,7 @@ export default function DealerBill({ navigation, route }) {
 
     const handleShare = async () => {
         try {
-            let message = `*NTJ Jewellers - Transfer Statement*\n\n`;
+            let message = `*SVJ Jewellers - Transfer Statement*\n\n`;
             message += `*Dealer:* ${dealer.customerName}\n`;
             message += `*Phone:* ${dealer.phoneNumber}\n`;
             message += `*Date:* ${new Date().toLocaleDateString()}\n\n`;
@@ -80,7 +80,7 @@ export default function DealerBill({ navigation, route }) {
 
     const handleShareReceipt = async (t) => {
         try {
-            let message = `*NTJ Jewellers - Transaction Receipt*\n\n`;
+            let message = `*SVJ Jewellers - Transaction Receipt*\n\n`;
             message += `*Dealer:* ${dealer.customerName}\n`;
             message += `*Date:* ${new Date(t.date).toLocaleDateString()}\n`;
             message += `*Items:* ${t.selectedItems?.join(', ') || 'N/A'}\n\n`;
@@ -116,7 +116,7 @@ export default function DealerBill({ navigation, route }) {
                 <View style={styles.billContainer}>
                     {/* Company Header */}
                     <View style={styles.companyHeader}>
-                        <Text style={styles.companyName}>NTJ Jewellers</Text>
+                        <Text style={styles.companyName}>SVJ Jewellers</Text>
                         <Text style={styles.billTitle}>TRANSFER STATEMENT</Text>
                     </View>
 
@@ -225,7 +225,7 @@ export default function DealerBill({ navigation, route }) {
                                     {/* Receipt Content */}
                                     <View style={styles.receiptPaper}>
                                         <View style={styles.receiptHeader}>
-                                            <Text style={styles.receiptStoreName}>NTJ Jewellers</Text>
+                                            <Text style={styles.receiptStoreName}>SVJ Jewellers</Text>
                                             <Text style={styles.receiptTagline}>Purveyors of Fine Gold & Silver</Text>
                                             <View style={styles.divider} />
                                             <Text style={styles.receiptType}>TRANSACTION RECEIPT</Text>

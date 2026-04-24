@@ -17,6 +17,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import { base_url } from "./config";
 import CommonHeader from "./CommonHeader";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import BarcodeDisplay from "./BarcodeDisplay";
 
 export default function StockMaster({ navigation }) {
   const [search, setSearch] = useState("");
@@ -29,7 +31,9 @@ export default function StockMaster({ navigation }) {
   const [calculation, setCalculation] = useState("");
   const [pure, setPure] = useState("");
   const [workerName, setWorkerName] = useState("");
-  const [description, setDescription] = useState("");
+  const [barcode, setBarcode] = useState("");
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   const [addedItems, setAddedItems] = useState([]);
 
@@ -83,7 +87,7 @@ export default function StockMaster({ navigation }) {
           pure: item.pure.toString(),
           calculation: item.calculation,
           workerName: item.workerName || "", // ADD THIS LINE
-          description: item.description || "", // ADD THIS LINE
+          barcode: item.barcode || "", // ADD THIS LINE
         }));
         setStocks(transformedStocks);
       }
@@ -237,7 +241,7 @@ export default function StockMaster({ navigation }) {
         sellTouch: (parseFloat(existing.sellTouch) + parseFloat(sellTouch)).toFixed(3),
         pure: (parseFloat(existing.pure || 0) + parseFloat(pure || 0)).toFixed(3),
         workerName: workerName || existing.workerName,
-        description: description || existing.description,
+        barcode: barcode || existing.barcode,
       };
       setAddedItems(updatedAdded);
     } else {
@@ -251,7 +255,7 @@ export default function StockMaster({ navigation }) {
         calculation,
         pure,
         workerName,
-        description,
+        barcode,
       };
       setAddedItems((prev) => [...prev, newItem]);
     }
@@ -264,8 +268,26 @@ export default function StockMaster({ navigation }) {
     setCalculation("");
     setPure("");
     setWorkerName("");
-    setDescription("");
+    setBarcode("");
   };
+
+  const generateBarcode = () => {
+    const ts = Date.now().toString();
+    const rand = Math.floor(10 + Math.random() * 90).toString();
+    return (ts + rand).slice(0, 13);
+  };
+
+  const openScanner = async () => {
+    if (!cameraPermission?.granted) {
+      const { granted } = await requestCameraPermission();
+      if (!granted) {
+        Alert.alert("Permission required", "Camera permission is needed to scan barcodes.");
+        return;
+      }
+    }
+    setScannerVisible(true);
+  };
+
 
   const isCurrentFormValid = () =>
     Boolean(stockName && weight && buyTouch && sellTouch && calculation);
@@ -307,7 +329,7 @@ export default function StockMaster({ navigation }) {
         calculation: String(item.calculation),
         pure: pureValue,
         workerName: item.workerName || "",
-        description: item.description || "",
+        barcode: item.barcode || "",
       },
     };
   };
@@ -324,7 +346,7 @@ export default function StockMaster({ navigation }) {
         calculation,
         pure,
         workerName,
-        description,
+        barcode,
       });
     }
     return fromList;
@@ -416,7 +438,7 @@ export default function StockMaster({ navigation }) {
     setBuyTouch(item.buy);
     setSellTouch(item.sell);
     setWorkerName(item.workerName || "");
-    setDescription(item.description || ""); // Load description
+    setBarcode(item.barcode || ""); // Load barcode
 
     // Fixed: Use stockName to find the item
     const selectedItem = allItems.find((i) => i.stockName === item.name);
@@ -480,7 +502,7 @@ export default function StockMaster({ navigation }) {
         calculation: calculation,
         pure: parseFloat(pure) || 0,
         workerName: workerName,
-        description: description,
+        barcode: barcode,
       };
 
       console.log("Updating stock data:", stockData);
@@ -536,7 +558,7 @@ export default function StockMaster({ navigation }) {
               pure: updatedStock.pure.toString(),
               calculation: updatedStock.calculation,
               workerName: updatedStock.workerName || "",
-              description: updatedStock.description || "",
+              barcode: updatedStock.barcode || "",
             }
             : stock
         );
@@ -559,7 +581,7 @@ export default function StockMaster({ navigation }) {
         setCalculation("");
         setPure("");
         setWorkerName("");
-        setDescription("");
+        setBarcode("");
         setModalVisible(false);
       } else {
         Alert.alert("Error", "Failed to update item on server");
@@ -612,10 +634,10 @@ export default function StockMaster({ navigation }) {
           buyTouch: existing.buyTouch + item.buyTouch,
           sellTouch: existing.sellTouch + item.sellTouch,
           pure: existing.pure + item.pure,
-          // keep latest calculation/worker/description if provided
+          // keep latest calculation/worker/barcode if provided
           calculation: item.calculation || existing.calculation,
           workerName: item.workerName || existing.workerName,
-          description: item.description || existing.description,
+          barcode: item.barcode || existing.barcode,
         });
       }
       const itemsToSubmit = Array.from(mergedByName.values());
@@ -636,7 +658,7 @@ export default function StockMaster({ navigation }) {
           calculation: item.calculation,
           pure: item.pure || 0,
           workerName: item.workerName,
-          description: item.description,
+          barcode: item.barcode,
         };
 
         if (existingStock) {
@@ -649,7 +671,7 @@ export default function StockMaster({ navigation }) {
             calculation: stockData.calculation, // Keep newest calculation
             pure: parseFloat(existingStock.pure) + stockData.pure,
             workerName: stockData.workerName || existingStock.workerName,
-            description: stockData.description || existingStock.description,
+            barcode: stockData.barcode || existingStock.barcode,
           };
 
           const response = await fetch(`${base_url}/stockMaster/${existingStock.id}`, {
@@ -669,7 +691,7 @@ export default function StockMaster({ navigation }) {
               pure: savedItem.pure.toString(),
               calculation: savedItem.calculation,
               workerName: savedItem.workerName || "",
-              description: savedItem.description || "",
+              barcode: savedItem.barcode || "",
             });
           } else {
             const errText = await response.text();
@@ -694,7 +716,7 @@ export default function StockMaster({ navigation }) {
               pure: savedItem.pure.toString(),
               calculation: savedItem.calculation,
               workerName: savedItem.workerName || "",
-              description: savedItem.description || "",
+              barcode: savedItem.barcode || "",
             });
           } else {
             const errText = await response.text();
@@ -724,7 +746,7 @@ export default function StockMaster({ navigation }) {
       setCalculation("");
       setPure("");
       setWorkerName("");
-      setDescription("");
+      setBarcode("");
       setModalVisible(false);
     } catch (error) {
       console.error("Error saving stocks:", error);
@@ -745,7 +767,7 @@ export default function StockMaster({ navigation }) {
     setCalculation("");
     setPure("");
     setWorkerName("");
-    setDescription("");
+    setBarcode(generateBarcode());
     setAddedItems([]);
     setModalVisible(true);
   };
@@ -870,6 +892,7 @@ export default function StockMaster({ navigation }) {
 
             {/* ADD THIS BLOCK */}
             <Text style={styles.weight}>Worker : {item.workerName || "N/A"}</Text>
+            <Text style={styles.weight}>Barcode : {item.barcode || "N/A"}</Text>
 
             <View style={styles.touchRow}>
               <View style={styles.touchBox}>
@@ -1019,14 +1042,26 @@ export default function StockMaster({ navigation }) {
                 editable={false}
               />
 
-              <Text style={styles.label}>Description</Text>
-              <TextInput
-                style={[styles.input, { height: 60 }]}
-                placeholder="Enter Description"
-                value={description}
-                onChangeText={setDescription}
-                multiline={true}
-              />
+              <Text style={styles.label}>Barcode</Text>
+              {barcode ? (
+                <View style={styles.qrContainer}>
+                  <BarcodeDisplay value={barcode} width={270} height={90} />
+                </View>
+              ) : null}
+              <View style={styles.barcodeRow}>
+                <TextInput
+                  style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                  placeholder="Scan or enter barcode"
+                  value={barcode}
+                  onChangeText={setBarcode}
+                />
+                <TouchableOpacity style={styles.scanBtn} onPress={openScanner}>
+                  <Icon name="barcode-scan" size={24} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.generateQrBtn} onPress={() => setBarcode(generateBarcode())}>
+                  <Icon name="refresh" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
 
               {!isEdit && (
                 <TouchableOpacity style={styles.addBtn} onPress={addItem}>
@@ -1088,6 +1123,34 @@ export default function StockMaster({ navigation }) {
                 </Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Barcode Scanner Modal */}
+      <Modal
+        visible={scannerVisible}
+        animationType="slide"
+        onRequestClose={() => setScannerVisible(false)}
+      >
+        <View style={styles.scannerContainer}>
+          <CameraView
+            style={StyleSheet.absoluteFillObject}
+            facing="back"
+            barcodeScannerSettings={{
+              barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "upc_a", "upc_e", "pdf417", "datamatrix", "itf14"],
+            }}
+            onBarcodeScanned={({ data }) => {
+              setBarcode(data);
+              setScannerVisible(false);
+            }}
+          />
+          <View style={styles.scannerOverlay}>
+            <View style={styles.scannerFrame} />
+            <Text style={styles.scannerHint}>Point camera at barcode</Text>
+            <TouchableOpacity style={styles.scannerClose} onPress={() => setScannerVisible(false)}>
+              <Text style={styles.scannerCloseText}>Cancel</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1423,6 +1486,77 @@ const styles = StyleSheet.create({
   },
   totalPureValue: {
     color: "gray",
+  },
+
+  barcodeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    gap: 8,
+  },
+  scanBtn: {
+    backgroundColor: "#2E5B17",
+    padding: 12,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  scannerContainer: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  scannerOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  scannerFrame: {
+    width: 260,
+    height: 160,
+    borderWidth: 2,
+    borderColor: "#fff",
+    borderRadius: 10,
+    backgroundColor: "transparent",
+  },
+  scannerHint: {
+    color: "#fff",
+    marginTop: 20,
+    fontSize: 16,
+  },
+  scannerClose: {
+    marginTop: 30,
+    backgroundColor: "#d9534f",
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  scannerCloseText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  qrContainer: {
+    alignItems: "center",
+    paddingVertical: 12,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+  },
+  qrValueText: {
+    marginTop: 8,
+    fontSize: 13,
+    color: "#444",
+    letterSpacing: 1.5,
+    fontWeight: "600",
+  },
+  generateQrBtn: {
+    backgroundColor: "#1565C0",
+    padding: 12,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
   },
 
 });
