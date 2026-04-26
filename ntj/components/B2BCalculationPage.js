@@ -17,6 +17,7 @@ import { useRoute, useFocusEffect } from "@react-navigation/native";
 import { base_url } from "./config";
 import * as Print from "expo-print";
 import * as FileSystem from "expo-file-system";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { styles } from "./B2BCalculationPageStyles";
 import CommonHeader from "./CommonHeader";
 import {
@@ -158,6 +159,10 @@ export default function CreateTransaction({ navigation }) {
   const [othersName, setOthersName] = useState("");
   const [heldTransactions, setHeldTransactions] = useState([]);
   const [activeHoldId, setActiveHoldId] = useState("");
+
+  const [issueBarcode, setIssueBarcode] = useState("");
+  const [issueScannerVisible, setIssueScannerVisible] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   const normalizeCustomerType = (value, fallback = "B2B") => {
     const raw = String(value || fallback || "").toUpperCase();
@@ -1419,6 +1424,38 @@ export default function CreateTransaction({ navigation }) {
   const fmt = (n) => Number(n || 0).toFixed(3);
   const fmt2 = (n) => Number(n || 0).toFixed(2);
 
+  const fetchStockByBarcode = async (barcodeValue) => {
+    const code = String(barcodeValue || "").trim();
+    if (!code) return;
+    try {
+      const response = await fetch(`${base_url}/stockMaster/barcode/${encodeURIComponent(code)}`);
+      if (response.ok) {
+        const stock = await response.json();
+        setSelectedIssueItem(stock.itemName);
+        setIssueItemSearch(stock.itemName);
+        setWeight(stock.weight?.toString() || "");
+        setStone(stock.less?.toString() || "0");
+        if (stock.calculation) setTouch(stock.calculation.toString());
+        setIssueBarcode(code);
+      } else {
+        Alert.alert("Not Found", "No stock item found for this barcode.");
+      }
+    } catch {
+      Alert.alert("Error", "Failed to fetch item by barcode.");
+    }
+  };
+
+  const openIssueScanner = async () => {
+    if (!cameraPermission?.granted) {
+      const { granted } = await requestCameraPermission();
+      if (!granted) {
+        Alert.alert("Permission Required", "Camera permission is needed to scan barcodes.");
+        return;
+      }
+    }
+    setIssueScannerVisible(true);
+  };
+
   const clearIssueEntryInputs = () => {
     setWeight("");
     setStone("0");
@@ -1426,6 +1463,7 @@ export default function CreateTransaction({ navigation }) {
     setIssueDetails("");
     setSelectedIssueItem(null);
     setIssueItemSearch("");
+    setIssueBarcode("");
     setEditingIssueId(null);
   };
 
@@ -2673,6 +2711,23 @@ export default function CreateTransaction({ navigation }) {
               }
             />
 
+            {/* BARCODE INPUT ROW */}
+            <View style={localStyles.issueBarcodeRow}>
+              <TextInput
+                style={[styles.searchBox, localStyles.issueBarcodeInput]}
+                placeholder="Enter barcode number..."
+                placeholderTextColor="#9E9E9E"
+                value={issueBarcode}
+                onChangeText={setIssueBarcode}
+                onSubmitEditing={() => fetchStockByBarcode(issueBarcode)}
+                returnKeyType="search"
+                keyboardType="number-pad"
+              />
+              <TouchableOpacity style={localStyles.issueScanBtn} onPress={openIssueScanner}>
+                <Icon name="barcode-scan" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
             {issueItemDropdownOpen && !loadingItems && (
               <View style={styles.dropdownFloating}>
                 {itemsList.length > 0 ? (
@@ -3371,6 +3426,92 @@ export default function CreateTransaction({ navigation }) {
           </View>
         )}
       </ScrollView>
+
+      {/* BARCODE SCANNER MODAL – Issue Entry */}
+      <Modal
+        visible={issueScannerVisible}
+        animationType="slide"
+        onRequestClose={() => setIssueScannerVisible(false)}
+      >
+        <View style={localStyles.issueScannerContainer}>
+          <CameraView
+            style={StyleSheet.absoluteFillObject}
+            facing="back"
+            barcodeScannerSettings={{
+              barcodeTypes: ["qr", "ean13", "ean8", "code128", "code39", "upc_a", "upc_e", "pdf417", "datamatrix", "itf14"],
+            }}
+            onBarcodeScanned={({ data }) => {
+              setIssueScannerVisible(false);
+              fetchStockByBarcode(data);
+            }}
+          />
+          <View style={localStyles.issueScannerOverlay}>
+            <View style={localStyles.issueScannerFrame} />
+            <Text style={localStyles.issueScannerHint}>Point camera at barcode</Text>
+            <TouchableOpacity
+              style={localStyles.issueScannerClose}
+              onPress={() => setIssueScannerVisible(false)}
+            >
+              <Text style={localStyles.issueScannerCloseText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
+
+const localStyles = StyleSheet.create({
+  issueBarcodeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+    marginTop: 6,
+  },
+  issueBarcodeInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  issueScanBtn: {
+    backgroundColor: "#2E5B17",
+    padding: 10,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  issueScannerContainer: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  issueScannerOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  issueScannerFrame: {
+    width: 260,
+    height: 160,
+    borderWidth: 2,
+    borderColor: "#fff",
+    borderRadius: 10,
+    backgroundColor: "transparent",
+  },
+  issueScannerHint: {
+    color: "#fff",
+    marginTop: 20,
+    fontSize: 16,
+  },
+  issueScannerClose: {
+    marginTop: 30,
+    backgroundColor: "#d9534f",
+    paddingHorizontal: 30,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  issueScannerCloseText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+});

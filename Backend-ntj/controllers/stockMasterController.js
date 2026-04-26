@@ -21,8 +21,9 @@ const createStock = async (req, res) => {
 
 const updateStock = async (req, res) => {
     try {
+        const { barcode, ...updateData } = req.body;
         const updatedStock = await StockMaster.findByIdAndUpdate(
-            req.params.id, req.body, { new: true, runValidators: true }
+            req.params.id, updateData, { new: true, runValidators: true }
         );
         if (!updatedStock) return res.status(404).json({ message: 'Stock not found' });
         res.json(updatedStock);
@@ -41,9 +42,20 @@ const deleteStock = async (req, res) => {
     }
 };
 
+const getStockByBarcode = async (req, res) => {
+    try {
+        const stock = await StockMaster.findOne({ barcode: req.params.barcode });
+        if (!stock) return res.status(404).json({ message: 'No item found with this barcode' });
+        res.json(stock);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+};
+
 module.exports = {
     getStocks,
     createStock,
     updateStock,
     deleteStock,
+    getStockByBarcode,
 };
