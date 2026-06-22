@@ -123,3 +123,6 @@ dist
 
 # Windows
 Thumbs.db
+
+# Local network config (IP changes per machine)
+ntj/components/config.js
