@@ -599,6 +599,7 @@ export default function CreateTransaction({ navigation }) {
   const fetchLatestB2BGstSettings = useCallback(async ({ applyEnabled = false } = {}) => {
     try {
       const response = await fetch(`${base_url}/gst`);
+      if (!response.ok) return false;
       const data = await response.json();
       const latestB2B = Array.isArray(data)
         ? data.find((item) => item.type === "B2B")
@@ -2138,9 +2139,7 @@ export default function CreateTransaction({ navigation }) {
 
     try {
       const listResponse = await fetch(`${base_url}/gstCustomers`);
-      if (!listResponse.ok) {
-        throw new Error("Failed to load GST customers");
-      }
+      if (!listResponse.ok) return;
 
       const existingCustomers = await listResponse.json();
       const matchedCustomer = Array.isArray(existingCustomers)

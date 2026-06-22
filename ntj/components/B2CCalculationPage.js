@@ -261,6 +261,7 @@ export default function CreateTransaction({ navigation, route }) {
       const fetchLatestGstSettings = async () => {
         try {
           const response = await fetch(`${base_url}/gst`);
+          if (!response.ok) return;
           const data = await response.json();
           const latestB2C = data.find((item) => item.type === "B2C");
 
