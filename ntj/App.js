@@ -32,7 +32,6 @@ import StockMaster from "./components/StockMaster";
 import CustomerDataList from "./components/CustomerDataList";
 
 import SD from "./components/SD";
-import Cashpage from "./components/Cashpage";
 
 import ReportScreen from "./components/ReportScreen";
 import EstimateScreen from "./components/Estimate.js";
@@ -142,7 +141,6 @@ export default function App() {
         <Stack.Screen name="ViewSuspenseDetails" component={ViewSuspenseDetails} />
 
         <Stack.Screen name="SD" component={SD} />
-        <Stack.Screen name="CashPage" component={Cashpage} />
 
         {/* Customer Master */}
         <Stack.Screen name="CreateCustomerMaster" component={CreateCustomerMaster} />

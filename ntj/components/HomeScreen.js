@@ -1169,7 +1169,6 @@ export default function HomeScreen({ route }) {
             { label: "B2D", icon: "account-tie-outline", color: "#4E342E", bg: "#EFEBE9", nav: () => navigation.navigate("SD"), badge: 0 },
             { label: "SD", icon: "safe-square-outline", color: "#37474F", bg: "#ECEFF1", nav: () => navigation.navigate("SD"), badge: 0 },
             { label: "Chit Fund", icon: "piggy-bank-outline", color: "#6A1B00", bg: "#FFCCBC", nav: () => navigation.navigate("Chit"), badge: 0 },
-            { label: "Cash", icon: "cash-multiple", color: "#1B5E20", bg: "#E8F5E9", nav: () => navigation.navigate("CashPage"), badge: quickAccessCounts.cash },
             { label: "Estimate", icon: "calculator-variant-outline", color: "#1A237E", bg: "#E8EAF6", nav: () => navigation.navigate("Estimate", { goldRate }), badge: quickAccessCounts.estimate },
             { label: "Customers", icon: "account-group-outline", color: "#880E4F", bg: "#FCE4EC", nav: () => navigation.navigate("CustomerDataList"), badge: quickAccessCounts.customer },
           ].map(({ label, icon, color, bg, nav, badge }) => (
